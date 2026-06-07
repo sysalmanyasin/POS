@@ -261,6 +261,30 @@ function _rptRenderDeviceBreakdown(invoices) {
 // =========================================================================
 // SECTION C — Stock Overview
 // =========================================================================
+// ── Paginated inventory fetch ─────────────────────────────────────────────
+// PostgREST defaults to 1000 rows per request. With 5000+ SKUs the plain
+// _dbSelect() call was silently capped at 1000, leaving 4000+ rows missing.
+// This helper loops through every page until a partial (< PAGE_SIZE) response
+// signals the last page, then returns the full merged array.
+async function _fetchAllInventoryPaged() {
+    const PAGE = 1000;
+    let all    = [];
+    let offset = 0;
+    while (true) {
+        const r = await fetch(
+            _SUPA_URL + '/rest/v1/inventory?order=name.asc&limit=' + PAGE + '&offset=' + offset,
+            { headers: _SUPA_HEADERS }
+        );
+        if (!r.ok) throw new Error('inventory fetch failed: ' + r.status);
+        const page = await r.json();
+        if (!Array.isArray(page)) throw new Error('unexpected inventory response');
+        all = all.concat(page);
+        if (page.length < PAGE) break;   // last page reached
+        offset += PAGE;
+    }
+    return all;
+}
+
 async function _rptLoadStock() {
     // Show loading state on source badge while fetching
     _rptSetSourceBadge('rptStockSource', 'loading');
@@ -269,9 +293,10 @@ async function _rptLoadStock() {
     let dataSource  = 'cloud';
 
     try {
-        const { data, error } = await _dbSelect('inventory', 'order=name.asc', '*');
-        if (!error) inventory = data || [];
-    } catch (_e) { /* fall through to local */ }
+        // FIX (Bug 3): use paginated fetch instead of _dbSelect which was
+        // capped at PostgREST's default 1000-row limit, hiding 4000+ SKUs.
+        inventory = await _fetchAllInventoryPaged();
+    } catch (_e) { inventory = null; /* fall through to local */ }
 
     // FIX: If Supabase inventory table is empty (CSV not yet cloud-pushed, or sync off),
     // fall back to the in-memory masterInventoryDB so stock overview always shows data.
