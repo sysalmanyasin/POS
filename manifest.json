@@ -1,0 +1,60 @@
+{
+  "short_name": "DuaPharma",
+  "name": "DuaPharmaPos Terminal",
+  "description": "Advanced Offline-First Pharmacy Point of Sale and Inventory Management Terminal.",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "start_url": "./index.html",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "display": "standalone",
+  "orientation": "landscape",
+  "categories": ["business", "productivity"],
+  "shortcuts": [
+    {
+      "name": "New Billing Terminal",
+      "short_name": "Billing",
+      "description": "Open a fresh billing counter transaction layout",
+      "url": "./index.html?view=billing",
+      "icons": [{ "src": "icons/shortcut-billing.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Held Transactions",
+      "short_name": "Held Bills",
+      "description": "View and recall parked orders",
+      "url": "./index.html?view=held",
+      "icons": [{ "src": "icons/shortcut-held.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Cloud Synchronization Hub",
+      "short_name": "Sync Hub",
+      "description": "Manage database local-to-cloud telemetry updates",
+      "url": "./index.html?view=sync",
+      "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }]
+    }
+  ]
+}
