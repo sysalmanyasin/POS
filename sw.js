@@ -1,5 +1,5 @@
 // Increment this version number whenever you deploy major changes to your app files
-const CACHE_NAME = 'pharmapos-cache-v5.1';
+const CACHE_NAME = 'pharmapos-cache-v5.2';
 
 // 1. INSTALL: Let the worker install, but stay in the 'waiting' room
 self.addEventListener('install', (event) => {
