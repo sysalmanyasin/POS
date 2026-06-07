@@ -1,5 +1,5 @@
 // Increment this version number whenever you deploy major changes to your app files
-const CACHE_NAME = 'pharmapos-cache-v6';
+const CACHE_NAME = 'pharmapos-cache-v7';
 
 // 1. INSTALL: Let the worker install, but stay in the 'waiting' room
 self.addEventListener('install', (event) => {
@@ -23,20 +23,40 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// 4. FETCH: Stale-While-Revalidate (Instant serving, background updating)
+// 4. FETCH: Network-first for JS/CSS (always get latest code),
+//           Stale-while-revalidate for everything else (images, fonts, html)
 self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
-    
-    event.respondWith(
-        caches.open(CACHE_NAME).then(async (cache) => {
-            const cachedResponse = await cache.match(event.request);
-            const fetchPromise = fetch(event.request).then((networkResponse) => {
+
+    const url = new URL(event.request.url);
+    const isAppCode = url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+
+    if (isAppCode) {
+        // Network-first: always fetch fresh JS/CSS from server.
+        // Fall back to cache only if network fails (offline).
+        event.respondWith(
+            fetch(event.request).then((networkResponse) => {
                 if (networkResponse.ok) {
-                    cache.put(event.request, networkResponse.clone());
+                    caches.open(CACHE_NAME).then(cache => {
+                        cache.put(event.request, networkResponse.clone());
+                    });
                 }
                 return networkResponse;
-            });
-            return cachedResponse || fetchPromise;
-        })
-    );
+            }).catch(() => caches.match(event.request))
+        );
+    } else {
+        // Stale-while-revalidate for everything else (HTML, images, icons)
+        event.respondWith(
+            caches.open(CACHE_NAME).then(async (cache) => {
+                const cachedResponse = await cache.match(event.request);
+                const fetchPromise = fetch(event.request).then((networkResponse) => {
+                    if (networkResponse.ok) {
+                        cache.put(event.request, networkResponse.clone());
+                    }
+                    return networkResponse;
+                });
+                return cachedResponse || fetchPromise;
+            })
+        );
+    }
 });
