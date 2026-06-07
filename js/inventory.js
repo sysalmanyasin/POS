@@ -1081,6 +1081,23 @@ function deleteProductFromCatalogue(productCode) {
         console.log('[CSV Import] Detected headers:', rawHeaders);
         console.log('[CSV Import] Column index:', JSON.stringify(colIndex));
 
+        // ── VISIBLE HEADER DIAGNOSTIC TOAST (always shown so mobile users can debug) ──
+        // Shows the first 6 raw header strings as detected after normalization.
+        // This reveals BOM/encoding/spacing issues that cause column mismatches.
+        const _hdrPreview = rawHeaders.slice(0, 8).map((h, i) => i + ':"' + h + '"').join(' | ');
+        const _detectedMap = [
+            ('code'        in colIndex ? '✓code'    : '✗code'),
+            ('name'        in colIndex ? '✓name'    : '✗name'),
+            ('generic'     in colIndex ? '✓generic' : '✗generic'),
+            ('company'     in colIndex ? '✓company' : '✗company'),
+            ('supplier'    in colIndex ? '✓supplier': '✗supplier'),
+            ('packDetails' in colIndex ? '✓pack'    : '✗pack'),
+            ('unitPrice'   in colIndex ? '✓price'   : '✗price'),
+            ('stock'       in colIndex ? '✓stock'   : '✗stock'),
+        ].join(' ');
+        showToast('🔍 CSV Headers: ' + _hdrPreview, false);
+        setTimeout(function() { showToast('🔍 Detected cols: ' + _detectedMap, false); }, 2500);
+
         if (!('code' in colIndex) || !('name' in colIndex)) {
             // Show which headers WERE found to help diagnose the mismatch
             const found = rawHeaders.map((h, i) => i + ':' + JSON.stringify(h)).join(', ');
