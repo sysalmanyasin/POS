@@ -1,0 +1,59 @@
+/* ================================================================
+   DESIGN TOKENS — CANDELA ERP PALETTE
+================================================================ */
+:root{
+  /* Typography */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Segoe UI Mono", "Liberation Mono", monospace;
+
+  /* Layout */
+  --r:10px;
+  --r-sm:8px;
+  --r-xs:6px;
+  --r-pill:999px;
+  --focus:0 0 0 3px rgba(21,101,192,.16);
+
+  --blu:#1565C0;--blu-dk:#0D47A1;--blu-lt:#E3F2FD;--blu-mid:#1976D2;
+  --grn:#2E7D32;--grn-lt:#E8F5E9;--grn-mid:#388E3C;
+  --amb:#BF360C;--amb-lt:#FBE9E7;--amb-mid:#E64A19;
+  --red:#B71C1C;--red-lt:#FFEBEE;--red-mid:#C62828;
+  --pur:#6A1B9A;--pur-lt:#F3E5F5;
+  --teal:#00695C;--teal-lt:#E0F2F1;
+  --g50:#FAFAFA;--g100:#F5F5F5;--g150:#EFEFEF;--g200:#EEEEEE;
+  --g300:#E0E0E0;--g400:#BDBDBD;--g500:#9E9E9E;--g600:#757575;
+  --g700:#616161;--g800:#424242;--g900:#212121;--white:#FFFFFF;
+  --hdr-bg:#0F1923;--hdr-h:44px;--tab-h:30px;--sbar-h:24px;
+  --rp-w:360px;
+  --sh1:0 1px 2px rgba(0,0,0,.08),0 1px 3px rgba(0,0,0,.06);
+  --sh2:0 6px 16px rgba(0,0,0,.12);
+  --sh3:0 18px 48px rgba(0,0,0,.18);
+}
+[data-theme="dark"]{
+  --blu:#42A5F5;--blu-dk:#1E88E5;--blu-lt:#0D2A4A;--blu-mid:#2196F3;
+  --grn:#66BB6A;--grn-lt:#0A2A0C;--grn-mid:#4CAF50;
+  --amb:#FFA726;--amb-lt:#3E1A00;--amb-mid:#FF9800;
+  --red:#EF5350;--red-lt:#3B0F0F;--red-mid:#F44336;
+  --g50:#1A1A2E;--g100:#16213E;--g150:#1A2744;--g200:#233050;
+  --g300:#2C3A5A;--g400:#455A88;--g500:#6B84B8;--g600:#8FA4D0;
+  --g700:#B0C4E8;--g800:#C8D8F0;--g900:#E2ECF8;--white:#1A2744;
+  --hdr-bg:#060D16;
+  --focus:0 0 0 3px rgba(66,165,245,.22);
+}
+[data-theme="dark"] body{background:#0F1923;color:var(--g800);}
+[data-theme="dark"] #appHeader{background:var(--hdr-bg);}
+[data-theme="dark"] #tabStrip{background:#0F1923;border-color:#1A2744;}
+[data-theme="dark"] .view,.inv-panel{background:#0F1923;}
+[data-theme="dark"] .top-panel{background:#111B27;border-color:#1A2744;}
+[data-theme="dark"] #rightPanel{background:#111B27;border-color:#1A2744;}
+[data-theme="dark"] .inv-table-wrap{background:#0F1923;}
+[data-theme="dark"] .inv-th{background:#0A1420;color:var(--g500);}
+[data-theme="dark"] .inv-tr:hover td{background:#1A2744;}
+[data-theme="dark"] .rp-section{border-color:#1A2744;}
+[data-theme="dark"] input,
+[data-theme="dark"] .sett-inp{background:#1A2744;color:var(--g800);border-color:#2C3A5A;}
+[data-theme="dark"] .inv-search{background:#1A2744;border-color:#2C3A5A;}
+[data-theme="dark"] #statusBar{background:#060D16;border-color:#1A2744;}
+[data-theme="dark"] .sr-row{background:#111B27;border-color:#1A2744;}
+[data-theme="dark"] .sr-row:hover{background:#1A2744;}
+[data-theme="dark"] .sr-row.selected{background:#0057b8!important;color:#fff!important;}
+[data-theme="dark"] .sr-hdr{background:#0A1420;}
