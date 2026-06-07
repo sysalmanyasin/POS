@@ -965,16 +965,19 @@ function _handleCSVImport(file) {
                 return -1;
             };
 
-            const iCode     = col(['code','itemcode','productcode','sku','barcode','id']);
-            const iName     = col(['name','productname','itemname','medicinename','description','product']);
-            const iStock    = col(['stock','qty','quantity','qtyinhand','balance','currentstock','units']);
-            const iPrice    = col(['price','unitprice','salesprice','mrp','rate','retailprice','sp']);
+            const iCode     = col(['productcode','code','itemcode','sku','barcode','id']);
+            const iName     = col(['productname','name','itemname','medicinename','description','product']);
+            const iStock    = col(['quantity','stock','qty','qtyinhand','balance','currentstock','units']);
+            const iPrice    = col(['retailprice','price','unitprice','salesprice','mrp','rate','sp']);
             const iCostPrice= col(['costprice','purchaseprice','cp','cost','buyprice']);
-            const iCompany  = col(['company','brand','manufacturer','mfr','mfg']);
-            const iGeneric  = col(['generic','genericname','molecule','composition','salt','ingredient']);
+            const iCompany  = col(['manufacture','manufacturer','company','brand','mfr','mfg']);
+            const iGeneric  = col(['genericdetail','generic','genericname','molecule','composition','salt','ingredient']);
             const iSupplier = col(['supplier','vendor','distributor','dist']);
-            const iPack     = col(['pack','packdetails','packsize','packing','packaging']);
+            const iPack     = col(['conversionfactor','pack','packdetails','packsize','packing','packaging']);
 
+            // Diagnostic: show detected columns as toast
+            const _diag = ['generic:'+(iGeneric>=0?'✓':'✗'),'company:'+(iCompany>=0?'✓':'✗'),'pack:'+(iPack>=0?'✓':'✗'),'price:'+(iPrice>=0?'✓':'✗')].join(' ');
+            showToast('🔍 settings.js cols: ' + _diag, false);
             if (iName < 0) { showToast('❌ CSV must have a "name" column.', true); return; }
 
             const imported = [];
