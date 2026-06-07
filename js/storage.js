@@ -538,6 +538,28 @@ const StorageModule = (() => {
         });
     }
 
+    /**
+     * Clear all pending sync queues and dead-letter logs from PharmaDataDB.
+     * Call this during any purge to prevent stale queued writes from
+     * repopulating the cloud after the purge completes.
+     * Clears: sync_queue, offline_sync_queue, failed_sync_logs.
+     * Also drains the in-memory _syncQueue array so _drainSyncQueue is a no-op.
+     */
+    function clearAllQueues() {
+        // Clear in-memory queue first so _drainSyncQueue won't fire pending writes
+        _syncQueue.length = 0;
+        _whenReady(idb => {
+            if (!idb) return;
+            ['sync_queue', 'offline_sync_queue', 'failed_sync_logs'].forEach(store => {
+                try {
+                    if (idb.objectStoreNames.contains(store)) {
+                        idb.transaction([store], 'readwrite').objectStore(store).clear();
+                    }
+                } catch(e) {}
+            });
+        });
+    }
+
     function estimateUsage() {
         if (navigator.storage && navigator.storage.estimate) return navigator.storage.estimate();
         return Promise.resolve({ usage: 0, quota: 500 * 1024 * 1024 });
@@ -862,7 +884,7 @@ const StorageModule = (() => {
         saveInvoices, loadInvoices,
         saveHeldBills, loadHeldBills,
         saveCart, loadCart, clearCart,
-        clearAllPrimaryStores, estimateUsage,
+        clearAllPrimaryStores, clearAllQueues, estimateUsage,
         syncFromCloudEngine, syncLightweightFromCloud,
         purgeCloudStorageOnly, pushLocalToCloudEngine,
         setSyncEnabled,

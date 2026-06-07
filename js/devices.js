@@ -186,9 +186,14 @@ const DevicesModule = (() => {
                 return;
             }
 
-            // Auto-assign role
+            // Auto-assign role — honour post-purge master flag as tiebreaker.
+            // If the EmailJS PIN flow completed on this device, sys_is_master_device
+            // is set to 'true'. Use it to force master even if a stale row survived
+            // the purge and _masterExists() incorrectly returns true.
             const hasMaster = await _masterExists();
-            const role = hasMaster ? 'client' : 'master';
+            const forceMaster = StorageModule.get('sys_is_master_device') === 'true';
+            const role = (!hasMaster || forceMaster) ? 'master' : 'client';
+            if (forceMaster) StorageModule.remove('sys_is_master_device');
 
             const now = new Date().toISOString();
             const row = {
@@ -401,6 +406,37 @@ const DevicesModule = (() => {
             }
         } catch(_e) {}
 
+        // Cloud-wipe broadcast (DATA_WIPE) — wipes data only, keeps device identity + auth
+        try {
+            const cwRaw = await _supaGet('pharma_cloud_wipe_cmd');
+            if (cwRaw) {
+                const cwCmd       = JSON.parse(cwRaw);
+                const now         = Date.now();
+                const exp         = Number(cwCmd && cwCmd.expiresAt) || 0;
+                const issuedBy    = cwCmd && cwCmd.issuedBy;
+                const lastApplied = localStorage.getItem('pharma_cloud_wipe_applied_at');
+                const issuedAt    = String(Number(cwCmd && cwCmd.issuedAt) || 0);
+
+                let issuerOk = (issuedBy === _DEVICE_UUID);
+                if (!issuerOk && issuedBy) {
+                    try {
+                        const { data } = await _dbSelect(
+                            'devices',
+                            'uuid=eq.' + encodeURIComponent(issuedBy) + '&role=eq.master',
+                            'uuid'
+                        );
+                        issuerOk = !!(data && data.length > 0);
+                    } catch(_e) { issuerOk = false; }
+                }
+
+                if (issuerOk && exp >= now && lastApplied !== issuedAt) {
+                    try { localStorage.setItem('pharma_cloud_wipe_applied_at', issuedAt); } catch(_e) {}
+                    await _executeCommand({ type: 'DATA_WIPE', sentBy: issuedBy });
+                    return;
+                }
+            }
+        } catch(_e) {}
+
         // Targeted commands — F1.29: read per-device keys (pharma_cmd_{myUUID}_{ts})
         // written by the updated sendCommand(). Also checks the legacy shared
         // pharma_commands key so commands sent before the update still execute.
@@ -505,8 +541,14 @@ const DevicesModule = (() => {
             }
             case 'GLOBAL_PURGE': {
                 console.warn('[DevicesModule] GLOBAL_PURGE received — wiping local data.');
+                if (typeof StorageModule !== 'undefined' && typeof StorageModule.setSyncEnabled === 'function') {
+                    try { StorageModule.setSyncEnabled(false); } catch(_e) {}
+                }
                 if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllPrimaryStores === 'function') {
                     try { StorageModule.clearAllPrimaryStores(); } catch(_e) {}
+                }
+                if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllQueues === 'function') {
+                    try { StorageModule.clearAllQueues(); } catch(_e) {}
                 }
                 try {
                     const keep = new Set(['pharma_device_id', 'pharma_global_purge_applied_at']);
@@ -524,6 +566,54 @@ const DevicesModule = (() => {
                 } catch(_e) {}
                 stop();
                 setTimeout(() => { try { window.location.reload(); } catch(_e) {} }, 2000);
+                break;
+            }
+            case 'DATA_WIPE': {
+                // Cloud Purge broadcast: wipe local data + queues.
+                // Keeps: device identity, auth keys, device role.
+                // No lock screen — device stays registered and usable after reload.
+                console.warn('[DevicesModule] DATA_WIPE received — clearing local data.');
+
+                // 1. Clear primary IDB stores (invoices, heldBills, cart)
+                if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllPrimaryStores === 'function') {
+                    try { StorageModule.clearAllPrimaryStores(); } catch(_e) {}
+                }
+                // 2. Clear sync queues so no stale writes repopulate cloud
+                if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllQueues === 'function') {
+                    try { StorageModule.clearAllQueues(); } catch(_e) {}
+                }
+                // 3. Clear PharmaInventoryDB (inventory + movements)
+                try {
+                    if (typeof db !== 'undefined' && db) {
+                        try { db.transaction(['inventory'], 'readwrite').objectStore('inventory').clear(); } catch(_e) {}
+                        try { db.transaction(['inventory_movements'], 'readwrite').objectStore('inventory_movements').clear(); } catch(_e) {}
+                    }
+                } catch(_e) {}
+                // 4. Wipe localStorage — keep device identity + auth
+                try {
+                    const keepWipe = new Set([
+                        'pharma_device_id', 'pharma_device_name',
+                        'pharma_device_role', 'pharma_device_counter_id',
+                        'sys_admin_pass_hash', 'sys_has_password',
+                        '_supabase_sync_on', 'pharma_cloud_wipe_applied_at'
+                    ]);
+                    Object.keys(localStorage).forEach(k => {
+                        if (!keepWipe.has(k) && (k.startsWith('pharma_') || k.startsWith('sys_') ||
+                            k === '_pharma_inv_fingerprint' || k === '_supabase_settings_ts')) {
+                            try { localStorage.removeItem(k); } catch(_e) {}
+                        }
+                    });
+                } catch(_e) {}
+                // 5. Reset in-memory globals
+                try {
+                    if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = [];
+                    if (typeof temporaryHeldBills  !== 'undefined') temporaryHeldBills  = [];
+                    if (typeof masterInventoryDB   !== 'undefined') masterInventoryDB   = [];
+                    if (typeof activeCartItems     !== 'undefined') activeCartItems     = [];
+                } catch(_e) {}
+
+                stop();
+                setTimeout(() => { try { window.location.reload(); } catch(_e) {} }, 1500);
                 break;
             }
             default:

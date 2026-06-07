@@ -708,6 +708,11 @@ async function renderSyncHubView() {
               title="Wipe all data on every connected device. Requires email OTP + master PIN.">
         ☢️ Global Purge
       </button>
+      <button class="sh-btn" id="shCloudPurgeBtn" onclick="openCloudPurgeModal()"
+              style="background:#7c3aed;color:#fff;border:1px solid #a78bfa;box-shadow:0 0 0 1px rgba(167,139,250,.25);"
+              title="Delete all invoices, inventory and settings from the cloud. Devices stay registered. Requires email OTP + master PIN.">
+        🌩️ Cloud Purge
+      </button>
     </div>
   </div>
 
@@ -1889,36 +1894,47 @@ async function _gpExecuteNetworkPurge() {
         'invoice_items', 'invoices', 'inventory_movements',
         'inventory', 'sync_log', 'settings', 'devices'
     ];
-    // Try each likely PK column. PostgREST requires a filter on DELETE.
-    const filterCandidates = [
-        'uuid=not.is.null',
-        'id=not.is.null',
-        'created_at=not.is.null',
-        'key=not.is.null',
-        'code=not.is.null'
-    ];
+    // Use confirmed PK column names per table (avoids 42703 "column does not exist" errors).
+    const tableFilterMap = {
+        'invoice_items':       'uuid=not.is.null',
+        'invoices':            'uuid=not.is.null',
+        'inventory_movements': 'movement_id=not.is.null',
+        'inventory':           'code=not.is.null',
+        'sync_log':            'device_uuid=not.is.null',
+        'settings':            'key=not.is.null',
+        'devices':             'uuid=not.is.null'
+    };
     for (const t of relationalTables) {
-        let ok = false, lastErr = '';
-        for (const f of filterCandidates) {
-            try {
-                const r = await fetch(_SUPA_URL + '/rest/v1/' + t + '?' + f, {
-                    method: 'DELETE', headers: _SUPA_HEADERS
-                });
-                if (r.ok) { ok = true; break; }
-                lastErr = r.status + ' ' + (await r.text().catch(() => ''));
-                // Stop early on permission denied — different filter won't help
-                if (r.status === 401 || r.status === 403) break;
-            } catch (e) { lastErr = e.message || String(e); }
-        }
-        if (ok) log('🗑  cleared relational table: ' + t);
-        else    log('⚠️ could not clear ' + t + ' — ' + lastErr.slice(0, 120));
+        const f = tableFilterMap[t] || 'id=not.is.null';
+        try {
+            const r = await fetch(_SUPA_URL + '/rest/v1/' + t + '?' + f, {
+                method: 'DELETE', headers: _SUPA_HEADERS
+            });
+            if (r.ok) log('🗑  cleared relational table: ' + t);
+            else log('⚠️ could not clear ' + t + ' — ' + r.status + ' ' + (await r.text().catch(() => '')).slice(0, 120));
+        } catch (e) { log('⚠️ ' + t + ': ' + (e.message || e)); }
     }
+
+    // 2c. Pause sync engine to prevent any in-flight writes during wipe
+    try {
+        if (typeof StorageModule !== 'undefined' && typeof StorageModule.setSyncEnabled === 'function') {
+            StorageModule.setSyncEnabled(false);
+            log('⏸  sync engine paused.');
+        }
+    } catch (_e) {}
 
     // 3. Wipe local IndexedDB stores via StorageModule.
     try {
         if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllPrimaryStores === 'function') {
             StorageModule.clearAllPrimaryStores();
             log('🗄  cleared local IDB (invoices, heldBills, cart).');
+        }
+    } catch (_e) {}
+    // 3b. Clear sync queues — prevents stale queued writes from repopulating cloud
+    try {
+        if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllQueues === 'function') {
+            StorageModule.clearAllQueues();
+            log('🗄  cleared sync queues (sync_queue, offline_sync_queue, failed_sync_logs).');
         }
     } catch (_e) {}
 
@@ -1966,5 +1982,377 @@ async function _gpExecuteNetworkPurge() {
     } catch (_e) {}
 
     log('✅ Purge complete. Reloading in 2 s…');
+    setTimeout(() => { try { window.location.reload(); } catch (_e) {} }, 2000);
+}
+
+// =========================================================================
+// 🌩️ CLOUD PURGE — wipes cloud data + local data (keeps device identity).
+// Does NOT broadcast to other devices. Does NOT delete auth keys or devices table.
+// Same double-verification as Global Purge: Email OTP + Master Auth PIN.
+// Deletes:
+//   KV  : invoices, inventory, settings, staff, held bills
+//   SQL : invoices, invoice_items, inventory, inventory_movements, sync_log
+//   Local: localStorage + IndexedDB (keeps pharma_device_id/name/role/counter_id)
+// =========================================================================
+
+const _CP_OTP_KEY = 'pharma_cloud_purge_otp';
+const _CP_OTP_TTL = 10 * 60 * 1000; // 10 min
+
+let _cpOtpEntered = '';
+let _cpPinEntered = '';
+
+async function openCloudPurgeModal() {
+    const _deviceRole = (typeof StorageModule !== 'undefined' && typeof StorageModule.get === 'function')
+        ? StorageModule.get('pharma_device_role') : localStorage.getItem('pharma_device_role');
+    if (_deviceRole !== 'master') {
+        if (typeof showToast === 'function') showToast('⛔ Cloud Purge can only be initiated from the Master device.', true);
+        return;
+    }
+    _cpOtpEntered = '';
+    _cpPinEntered = '';
+    let modal = document.getElementById('cpModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'cpModal';
+        modal.innerHTML = `
+<style>
+.cp-overlay{position:fixed;inset:0;background:rgba(15,23,42,.78);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;}
+.cp-card{background:#fff;width:100%;max-width:560px;max-height:92vh;overflow-y:auto;border-radius:14px;border:2px solid #7c3aed;box-shadow:0 30px 80px rgba(0,0,0,.45);}
+.cp-hdr{padding:16px 20px;background:linear-gradient(135deg,#6d28d9,#7c3aed);color:#fff;border-radius:12px 12px 0 0;display:flex;align-items:center;justify-content:space-between;}
+.cp-hdr-title{font-size:16px;font-weight:900;letter-spacing:.4px;}
+.cp-hdr-sub{font-size:11px;opacity:.85;margin-top:2px;}
+.cp-x{background:rgba(255,255,255,.15);color:#fff;border:none;width:30px;height:30px;border-radius:50%;font-size:18px;cursor:pointer;font-weight:800;}
+.cp-body{padding:20px;}
+.cp-step-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#7c3aed;margin-bottom:10px;}
+.cp-warn{background:#f5f3ff;border:1px solid #c4b5fd;color:#5b21b6;padding:10px 14px;border-radius:8px;font-size:12px;line-height:1.55;margin-bottom:14px;}
+.cp-safe{background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:10px 14px;border-radius:8px;font-size:12px;line-height:1.55;margin-bottom:14px;}
+.cp-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;}
+.cp-btn{padding:9px 16px;border:none;border-radius:6px;font-size:12px;font-weight:800;cursor:pointer;}
+.cp-btn-ghost{background:#f1f5f9;color:#475569;}
+.cp-btn-primary{background:#7c3aed;color:#fff;}
+.cp-btn-primary:disabled{opacity:.5;cursor:not-allowed;}
+.cp-status{font-size:12px;color:#64748b;margin-top:8px;min-height:18px;}
+.cp-dots{display:flex;gap:8px;justify-content:center;margin:14px 0;}
+.cp-dot{width:18px;height:18px;border-radius:50%;border:2px solid #cbd5e1;background:#fff;transition:all .15s;}
+.cp-dot.filled{background:#7c3aed;border-color:#7c3aed;}
+.cp-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:280px;margin:0 auto;}
+.cp-key{padding:14px 0;font-size:18px;font-weight:800;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;color:#334155;}
+.cp-key:hover{background:#e2e8f0;}
+.cp-key-back{background:#f5f3ff;color:#7c3aed;}
+.cp-progress{font-family:monospace;font-size:11px;background:#0f172a;color:#c4b5fd;padding:12px;border-radius:8px;white-space:pre-wrap;max-height:240px;overflow-y:auto;}
+</style>
+<div class="cp-overlay" onclick="if(event.target===this)closeCloudPurgeModal()">
+  <div class="cp-card">
+    <div class="cp-hdr">
+      <div>
+        <div class="cp-hdr-title">🌩️ Cloud Purge</div>
+        <div class="cp-hdr-sub">Delete cloud + local data. Devices stay registered.</div>
+      </div>
+      <button class="cp-x" onclick="closeCloudPurgeModal()">×</button>
+    </div>
+    <div class="cp-body" id="cpBody"></div>
+  </div>
+</div>`;
+        document.body.appendChild(modal);
+    }
+    modal.style.display = '';
+    _cpRenderStep1();
+}
+
+function closeCloudPurgeModal() {
+    const m = document.getElementById('cpModal');
+    if (m) m.style.display = 'none';
+    _cpOtpEntered = '';
+    _cpPinEntered = '';
+}
+
+// ── STEP 1: Warning + Send OTP ───────────────────────────────────────────
+function _cpRenderStep1() {
+    const body = document.getElementById('cpBody');
+    if (!body) return;
+    body.innerHTML = `
+<div class="cp-step-title">Step 1 / 3 — Confirm Scope</div>
+<div class="cp-warn">
+  <b>⚠️ This will permanently delete:</b><br>
+  • All invoices, invoice items, inventory, movements &amp; sync logs from the cloud<br>
+  • All KV data (settings, staff, held bills) from the cloud<br>
+  • Local IndexedDB + localStorage on <b>this device</b> (data only)
+</div>
+<div class="cp-safe">
+  <b>✅ These are preserved:</b><br>
+  • Device registrations — no re-registration needed<br>
+  • Master password &amp; auth keys — you stay logged in<br>
+  • Other devices are <b>not</b> affected remotely
+</div>
+<div class="cp-actions">
+  <button class="cp-btn cp-btn-ghost" onclick="closeCloudPurgeModal()">Cancel</button>
+  <button class="cp-btn cp-btn-primary" id="cpSendOtpBtn" onclick="_cpSendOtp()">
+    📧 Send Purge OTP to Email
+  </button>
+</div>
+<div class="cp-status" id="cpStatus"></div>`;
+}
+
+async function _cpSendOtp() {
+    const btn = document.getElementById('cpSendOtpBtn');
+    const status = document.getElementById('cpStatus');
+    if (!RESET_EMAIL_ADDRESS || RESET_EMAIL_ADDRESS.includes('YOUR_')) {
+        status.textContent = '❌ Reset email not configured in config.js.'; status.style.color = '#dc2626'; return;
+    }
+    if (typeof emailjs === 'undefined') {
+        status.textContent = '❌ EmailJS library not loaded.'; status.style.color = '#dc2626'; return;
+    }
+    btn.disabled = true; btn.textContent = 'Sending…';
+    status.style.color = '#64748b'; status.textContent = 'Generating OTP…';
+
+    const otp = String(Math.floor(10000000 + Math.random() * 90000000));
+    const expiresAt = Date.now() + _CP_OTP_TTL;
+
+    try {
+        const ok = await _supaSet(_CP_OTP_KEY, JSON.stringify({ pin: otp, expiresAt }));
+        if (!ok) throw new Error('Cloud write failed');
+    } catch (e) {
+        status.textContent = '❌ Could not save OTP to cloud.'; status.style.color = '#dc2626';
+        btn.disabled = false; btn.textContent = '📧 Send Purge OTP to Email'; return;
+    }
+
+    const bi = (typeof _getBranchIdentity === 'function') ? _getBranchIdentity() : {};
+    try {
+        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+            to_email:   RESET_EMAIL_ADDRESS,
+            reset_pin:  otp,
+            shop_name:  (bi.businessName || bi.branchName || 'Pharma POS') + ' — 🌩️ CLOUD PURGE',
+            counter_id: bi.counterId || '',
+            expires_in: '10 minutes'
+        }, EMAILJS_PUBLIC_KEY);
+        status.textContent = '✅ OTP sent. Check your inbox.'; status.style.color = '#059669';
+        setTimeout(_cpRenderStep2, 800);
+    } catch (err) {
+        try { await _supaDel(_CP_OTP_KEY); } catch (_e) {}
+        status.textContent = '❌ Email failed: ' + (err.text || err.message || 'Unknown error');
+        status.style.color = '#dc2626';
+        btn.disabled = false; btn.textContent = '📧 Send Purge OTP to Email';
+    }
+}
+
+// ── STEP 2: OTP entry ────────────────────────────────────────────────────
+function _cpRenderStep2() {
+    _cpOtpEntered = '';
+    const body = document.getElementById('cpBody');
+    if (!body) return;
+    body.innerHTML = `
+<div class="cp-step-title">Step 2 / 3 — Enter Purge OTP</div>
+<div class="cp-warn">Enter the 8-digit code emailed to <b>${_escHtml(RESET_EMAIL_ADDRESS)}</b>.</div>
+<div class="cp-dots" id="cpOtpDots">
+  ${[0,1,2,3,4,5,6,7].map(i => `<div class="cp-dot" id="cpOtpDot${i}"></div>`).join('')}
+</div>
+<div class="cp-pad">
+  ${[1,2,3,4,5,6,7,8,9].map(n => `<button class="cp-key" onclick="_cpOtpKey('${n}')">${n}</button>`).join('')}
+  <button class="cp-key cp-key-back" onclick="_cpOtpBack()">⌫</button>
+  <button class="cp-key" onclick="_cpOtpKey('0')">0</button>
+  <button class="cp-key cp-key-back" onclick="_cpOtpClear()">C</button>
+</div>
+<div class="cp-actions">
+  <button class="cp-btn cp-btn-ghost" onclick="closeCloudPurgeModal()">Cancel</button>
+</div>
+<div class="cp-status" id="cpStatus"></div>`;
+}
+function _cpOtpKey(d) {
+    if (_cpOtpEntered.length >= 8) return;
+    _cpOtpEntered += d;
+    _cpUpdateDots('cpOtpDot', _cpOtpEntered.length);
+    if (_cpOtpEntered.length === 8) setTimeout(_cpVerifyOtp, 180);
+}
+function _cpOtpBack()  { _cpOtpEntered = _cpOtpEntered.slice(0, -1); _cpUpdateDots('cpOtpDot', _cpOtpEntered.length); }
+function _cpOtpClear() { _cpOtpEntered = ''; _cpUpdateDots('cpOtpDot', 0); }
+
+async function _cpVerifyOtp() {
+    const status = document.getElementById('cpStatus');
+    status.textContent = 'Verifying…'; status.style.color = '#64748b';
+    try {
+        const raw = await _supaGet(_CP_OTP_KEY);
+        if (!raw) throw new Error('No OTP found. Please request a new one.');
+        const stored = JSON.parse(raw);
+        if (!stored || !stored.pin) throw new Error('Invalid OTP record.');
+        if (Date.now() > Number(stored.expiresAt || 0)) throw new Error('OTP expired. Request a new one.');
+        if (String(stored.pin) !== String(_cpOtpEntered)) throw new Error('Incorrect OTP.');
+        try { await _supaDel(_CP_OTP_KEY); } catch (_e) {}
+        status.textContent = '✅ OTP verified.'; status.style.color = '#059669';
+        setTimeout(_cpRenderStep3, 500);
+    } catch (e) {
+        status.textContent = '❌ ' + (e.message || 'Verification failed.');
+        status.style.color = '#dc2626';
+        _cpOtpClear();
+    }
+}
+
+// ── STEP 3: Master Auth PIN ──────────────────────────────────────────────
+function _cpRenderStep3() {
+    _cpPinEntered = '';
+    const body = document.getElementById('cpBody');
+    if (!body) return;
+    body.innerHTML = `
+<div class="cp-step-title">Step 3 / 3 — Master Auth PIN</div>
+<div class="cp-warn">Enter your 8-digit Master Auth PIN to execute the cloud purge.</div>
+<div class="cp-dots" id="cpPinDots">
+  ${[0,1,2,3,4,5,6,7].map(i => `<div class="cp-dot" id="cpPinDot${i}"></div>`).join('')}
+</div>
+<div class="cp-pad">
+  ${[1,2,3,4,5,6,7,8,9].map(n => `<button class="cp-key" onclick="_cpPinKey('${n}')">${n}</button>`).join('')}
+  <button class="cp-key cp-key-back" onclick="_cpPinBack()">⌫</button>
+  <button class="cp-key" onclick="_cpPinKey('0')">0</button>
+  <button class="cp-key cp-key-back" onclick="_cpPinClear()">C</button>
+</div>
+<div class="cp-actions">
+  <button class="cp-btn cp-btn-ghost" onclick="closeCloudPurgeModal()">Cancel</button>
+</div>
+<div class="cp-status" id="cpStatus"></div>`;
+}
+function _cpPinKey(d) {
+    if (_cpPinEntered.length >= 8) return;
+    _cpPinEntered += d;
+    _cpUpdateDots('cpPinDot', _cpPinEntered.length);
+    if (_cpPinEntered.length === 8) setTimeout(_cpVerifyPinAndExecute, 180);
+}
+function _cpPinBack()  { _cpPinEntered = _cpPinEntered.slice(0, -1); _cpUpdateDots('cpPinDot', _cpPinEntered.length); }
+function _cpPinClear() { _cpPinEntered = ''; _cpUpdateDots('cpPinDot', 0); }
+
+async function _cpVerifyPinAndExecute() {
+    const status = document.getElementById('cpStatus');
+    status.textContent = 'Verifying master PIN…'; status.style.color = '#64748b';
+    try {
+        const ok = (typeof _verifyPassword === 'function') ? await _verifyPassword(_cpPinEntered) : false;
+        if (!ok) throw new Error('Incorrect Master Auth PIN.');
+        status.textContent = '✅ Authenticated. Beginning cloud purge…'; status.style.color = '#059669';
+        setTimeout(_cpExecute, 400);
+    } catch (e) {
+        status.textContent = '❌ ' + (e.message || 'PIN verification failed.');
+        status.style.color = '#dc2626';
+        _cpPinClear();
+    }
+}
+
+function _cpUpdateDots(prefix, len) {
+    for (let i = 0; i < 8; i++) {
+        const el = document.getElementById(prefix + i);
+        if (el) el.classList.toggle('filled', i < len);
+    }
+}
+
+// ── EXECUTE ──────────────────────────────────────────────────────────────
+async function _cpExecute() {
+    const body = document.getElementById('cpBody');
+    if (body) {
+        body.innerHTML = `
+<div class="cp-step-title">🌩️ Executing Cloud Purge…</div>
+<div class="cp-progress" id="cpProgress">Starting…\n</div>`;
+    }
+    const log = (msg) => {
+        const el = document.getElementById('cpProgress');
+        if (el) { el.textContent += msg + '\n'; el.scrollTop = el.scrollHeight; }
+        try { console.log('[CloudPurge]', msg); } catch (_e) {}
+    };
+
+
+    // 0. Pause sync engine so no in-flight writes repopulate cloud during purge
+    try {
+        if (typeof StorageModule !== 'undefined' && typeof StorageModule.setSyncEnabled === 'function') {
+            StorageModule.setSyncEnabled(false);
+            log('⏸  sync engine paused.');
+        }
+    } catch (_e) {}
+
+    // 0b. Broadcast DATA_WIPE to all other devices (5-min window).
+    //     Other devices wipe local data + queues and reload. Stay registered.
+    try {
+        const issuedAt = Date.now();
+        await _supaSet('pharma_cloud_wipe_cmd', JSON.stringify({
+            issuedAt,
+            expiresAt: issuedAt + 5 * 60 * 1000,
+            issuedBy:  _DEVICE_UUID
+        }));
+        log('📡 DATA_WIPE broadcast sent to all devices (5-min window).');
+    } catch (e) { log('⚠️  Could not broadcast DATA_WIPE: ' + (e.message || e)); }
+
+    // 1. Delete KV keys from Supabase pharma_sync table
+    const kvKeys = [
+        'pharma_cloud_invoices', 'pharma_cloud_inventory', 'pharma_cloud_settings',
+        'pharma_cloud_staff', 'pharma_cloud_held_bills',
+        'pharma_branch_identity', 'pharma_currency', 'pharma_max_disc',
+        'pharma_discount_presets', 'pharma_thermal_settings', 'pharma_paper_mode',
+        'pharma_receipt_info', 'pharma_allow_overstock', 'pharma_staff_list',
+        'pharma_commands', 'pharma_cloud_device_registry'
+    ];
+    for (const k of kvKeys) {
+        try { await _supaDel(k); log('☁️  deleted KV key: ' + k); }
+        catch (e) { log('⚠️  could not delete KV key: ' + k); }
+    }
+
+    // 2. Delete relational table rows (keep: devices, settings auth)
+    const relTableMap = {
+        'invoice_items':       'uuid=not.is.null',
+        'invoices':            'uuid=not.is.null',
+        'inventory_movements': 'movement_id=not.is.null',
+        'inventory':           'code=not.is.null',
+        'sync_log':            'device_uuid=not.is.null'
+    };
+    for (const [t, f] of Object.entries(relTableMap)) {
+        try {
+            const r = await fetch(_SUPA_URL + '/rest/v1/' + t + '?' + f, {
+                method: 'DELETE', headers: _SUPA_HEADERS
+            });
+            if (r.ok) log('🗑  cleared relational table: ' + t);
+            else log('⚠️  could not clear ' + t + ' — ' + r.status + ' ' + (await r.text().catch(() => '')).slice(0, 80));
+        } catch (e) { log('⚠️  ' + t + ': ' + (e.message || e)); }
+    }
+
+    // 3. Wipe local IndexedDB (keep device identity keys)
+    try {
+        if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllPrimaryStores === 'function') {
+            StorageModule.clearAllPrimaryStores();
+            log('🗄  cleared local IDB (invoices, heldBills, cart).');
+        }
+    } catch (_e) {}
+    // 3b. Clear sync queues — prevents stale queued writes from repopulating cloud after reload
+    try {
+        if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllQueues === 'function') {
+            StorageModule.clearAllQueues();
+            log('🗄  cleared sync queues (sync_queue, offline_sync_queue, failed_sync_logs).');
+        }
+    } catch (_e) {}
+    try {
+        if (typeof db !== 'undefined' && db) {
+            try { db.transaction(['inventory'], 'readwrite').objectStore('inventory').clear(); } catch (_e) {}
+            try { db.transaction(['inventory_movements'], 'readwrite').objectStore('inventory_movements').clear(); } catch (_e) {}
+            log('🗄  cleared PharmaInventoryDB (inventory + movements).');
+        }
+    } catch (_e) {}
+
+    // 4. Wipe localStorage — keep device identity + auth keys
+    try {
+        const keepKeys = new Set([
+            'pharma_device_id', 'pharma_device_name',
+            'pharma_device_role', 'pharma_device_counter_id',
+            'sys_admin_pass_hash', 'sys_has_password', '_supabase_sync_on'
+        ]);
+        Object.keys(localStorage).forEach(k => {
+            if (keepKeys.has(k)) return;
+            if (k.startsWith('pharma_') || k.startsWith('sys_') ||
+                k === '_pharma_inv_fingerprint' || k === '_supabase_settings_ts') {
+                try { localStorage.removeItem(k); } catch (_e) {}
+            }
+        });
+        log('💾  cleared localStorage (device identity + auth preserved).');
+    } catch (_e) {}
+
+    // 5. Reset in-memory globals
+    try {
+        if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = [];
+        if (typeof temporaryHeldBills    !== 'undefined') temporaryHeldBills = [];
+        if (typeof masterInventoryDB     !== 'undefined') masterInventoryDB = [];
+        if (typeof activeCartItems       !== 'undefined') activeCartItems = [];
+    } catch (_e) {}
+
+    log('✅ Cloud purge complete. Reloading in 2 s…');
     setTimeout(() => { try { window.location.reload(); } catch (_e) {} }, 2000);
 }
