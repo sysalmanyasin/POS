@@ -63,7 +63,7 @@ function _loadSettingsForm() {
     const presets = _getDiscountPresets();
     presets.forEach((v, i) => { document.getElementById('discPreset' + i).value = v; });
     _syncOverstockSettingBtn(); _syncDarkModeBtn(); _syncPaperModeBtn(); _syncThermalSettingsForm(); _syncRequireStaffPinBtn();
-    renderStaffListSettings(); _attachReceiptPreviewListeners();
+    renderStaffListSettings(); _attachReceiptPreviewListeners(); _renderReceiptPreview();
     // Check local flags first; sys_has_password is set by _persistPassword even after
     // sys_admin_pass_hash is wiped to Supabase during startup migration
     const hasPass = !!(
@@ -430,6 +430,13 @@ function addNewStaffMember() {
     requestAdminAccess('ADD_STAFF_MEMBER', null, { name, pin });
 }
 function _doAddStaffMember() {
+    // FIX: capture extraData into locals BEFORE any async call.
+    // closeAuthModal() sets pendingAction = null synchronously after
+    // executeProtectedAction() returns, so by the time _hashPin resolves
+    // pendingAction is already null — destructuring it throws.
+    if (!pendingAction || !pendingAction.extraData) {
+        showToast('❌ Staff data lost — please try again.', true); return;
+    }
     const { name, pin } = pendingAction.extraData;
     const nameEl = document.getElementById('newStaffNameInput');
     const pinEl  = document.getElementById('newStaffPinInput');
@@ -455,7 +462,7 @@ function _openStaffPinChangeModal() {
     const nameEl = document.getElementById('staffPinChangeName');
     const newEl  = document.getElementById('staffNewPinInput');
     const cfmEl  = document.getElementById('staffConfirmPinInput');
-    if (nameEl) nameEl.textContent = pendingAction.extraData.name;
+    if (nameEl) nameEl.textContent = (pendingAction && pendingAction.extraData) ? pendingAction.extraData.name : '';
     if (newEl)  newEl.value = ''; if (cfmEl) cfmEl.value = '';
     document.getElementById('staffPinChangeModal').style.display = 'flex';
     setTimeout(() => { if (newEl) newEl.focus(); }, 80);
@@ -1178,7 +1185,20 @@ function _attachReceiptPreviewListeners() {
         }
     });
 }
-function _renderReceiptPreview() { _applyReceiptInfo(); _applyPrintMode(); }
+function _renderReceiptPreview() {
+    _applyReceiptInfo();
+    _applyPrintMode();
+    _applyThermalPrintCSS();
+    // Clone the live thermal wrapper into the settings preview panel
+    const src     = document.getElementById('thermalReceiptPrintWrapper');
+    const target  = document.getElementById('receiptPreviewPaper');
+    if (!src || !target) return;
+    const clone = src.cloneNode(true);
+    clone.removeAttribute('id');
+    clone.style.cssText = 'pointer-events:none;transform-origin:top center;';
+    target.innerHTML = '';
+    target.appendChild(clone);
+}
 function _printReceiptIsolated() {
     const rp = document.getElementById('thermalReceiptPrintWrapper'); if (!rp) return;
     const printCopy = rp.cloneNode(true);

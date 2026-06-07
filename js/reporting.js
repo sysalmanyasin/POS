@@ -287,9 +287,11 @@ async function _rptLoadStock() {
                 stock:      Number(item.stock) || 0,
                 unit_price: item.unit_price !== undefined ? Number(item.unit_price) : (Number(item.unitPrice) || 0),
                 pack_size:  item.pack_size  !== undefined ? item.pack_size           : (item.packDetails || ''),
-                // F1.31: map company/supplier so Manufacturer/Supplier grouping works for local data
+                // F1.31: map company/supplier/generic so grouping works for local data.
+                // Local IDB uses camelCase; Supabase uses snake_case — handle both.
                 company:    item.company    || '',
                 supplier:   item.supplier   || '',
+                generic:    item.generic    || item.generic_name || '',
             };
         }).sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
     }
@@ -341,10 +343,21 @@ function _rptRenderStockOverview(inventory) {
         { value: 'status',   label: 'Stock Status' },
     ].map(o => `<option value="${o.value}"${_rptStockGroupBy === o.value ? ' selected' : ''}>${o.label}</option>`).join('');
 
-    const toolbar = `<div class="rpt-stock-toolbar" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+    const collapseExpandBtns = _rptStockGroupBy !== 'none' ? `
+  <button onclick="window._rptCollapseAll(true)"
+    style="padding:4px 10px;font-size:11px;font-weight:600;border-radius:5px;border:1px solid var(--g200);background:var(--g100);color:var(--g600);cursor:pointer;">
+    &#9658; Collapse All
+  </button>
+  <button onclick="window._rptCollapseAll(false)"
+    style="padding:4px 10px;font-size:11px;font-weight:600;border-radius:5px;border:1px solid var(--g200);background:var(--g100);color:var(--g600);cursor:pointer;">
+    &#9660; Expand All
+  </button>` : '';
+
+    const toolbar = `<div class="rpt-stock-toolbar" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
   <label style="font-size:12px;color:var(--g500);font-weight:600;">Group by:</label>
   <select id="rptStockGroupSel" class="rpt-date-inp" style="padding:4px 8px;font-size:12px;"
     onchange="window._rptOnStockGroupChange(this.value)">${groupOpts}</select>
+  ${collapseExpandBtns}
 </div>`;
 
     // ── Sort items: negative → low → normal, then alpha ──────────────────
@@ -411,8 +424,8 @@ function _rptRenderStockOverview(inventory) {
             return `
 <div class="rpt-stock-group" style="margin-bottom:4px;">
   <div class="rpt-stock-group-hdr" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--g100);border-radius:6px;cursor:pointer;user-select:none;font-size:13px;font-weight:700;color:var(--g700);"
-       onclick="var t=document.getElementById('${groupId}');if(t){t.style.display=t.style.display==='none'?'':'none';}">
-    <span style="flex:1;">▾ ${_escHtml(key)}</span>
+       onclick="var t=document.getElementById('${groupId}');var arr=this.querySelector('.rpt-grp-arrow');if(t){var collapsed=t.style.display==='none';t.style.display=collapsed?'':'none';if(arr)arr.textContent=collapsed?'▾':'▸';}">
+    <span style="flex:1;"><span class="rpt-grp-arrow">▾</span> ${_escHtml(key)}</span>
     <span style="font-size:11px;font-weight:500;color:var(--g500);">${items.length} SKU${items.length !== 1 ? 's' : ''} · Total stock: ${totalStock}</span>
   </div>
   <div id="${groupId}">
@@ -436,6 +449,18 @@ window._rptOnStockGroupChange = function(val) {
     if (typeof _rptInventory !== 'undefined' && _rptInventory) {
         _rptRenderStockOverview(_rptInventory);
     }
+};
+
+// Collapse All (collapse=true) or Expand All (collapse=false)
+window._rptCollapseAll = function(collapse) {
+    const tableEl = document.getElementById('rptStockTable');
+    if (!tableEl) return;
+    tableEl.querySelectorAll('.rpt-stock-group').forEach(function(grp) {
+        const body  = grp.querySelector('[id^="rptsg_"]');
+        const arrow = grp.querySelector('.rpt-grp-arrow');
+        if (body)  body.style.display  = collapse ? 'none' : '';
+        if (arrow) arrow.textContent   = collapse ? '▸' : '▾';
+    });
 };
 
 // =========================================================================

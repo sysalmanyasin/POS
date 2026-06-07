@@ -130,15 +130,38 @@ async function _pushUnsyncedMovements() {
                 const all      = e.target.result || [];
                 const unsynced = all.filter(m => !m.synced);
                 if (unsynced.length === 0) { resolve(); return; }
-                const supaKey  = 'pharma_cloud_inv_movements_' + _getDeviceCode() + '_' + _DEVICE_UUID.slice(0, 8);
+
+                // FIX: Push to the relational inventory_movements table (not legacy KV blob).
+                // Maps IDB camelCase → Supabase snake_case column names.
+                const rows = unsynced.map(m => ({
+                    movement_id:     m.movementId,
+                    product_code:    m.productCode,
+                    quantity_change: typeof m.quantityChange === 'number' ? m.quantityChange : 0,
+                    movement_type:   m.movementType   || 'ADJUSTMENT',
+                    invoice_id:      m.invoiceId      || null,
+                    description:     m.description    || null,
+                    moved_at:        new Date(m.timestamp || Date.now()).toISOString(),
+                    device_code:     m.deviceCode     || _getDeviceCode(),
+                    device_uuid:     m.deviceUUID     || _DEVICE_UUID
+                }));
+
                 try {
-                    await _supaSet(supaKey, JSON.stringify(all));
+                    const { error } = await _dbUpsert('inventory_movements', rows, 'movement_id');
+                    if (error) {
+                        console.warn('[Movements] Relational push failed:', error);
+                        resolve();
+                        return;
+                    }
+                    // Mark all flushed rows as synced in IDB
                     const tx2 = db.transaction(['inventory_movements'], 'readwrite');
-                    const st2  = tx2.objectStore('inventory_movements');
+                    const st2 = tx2.objectStore('inventory_movements');
                     unsynced.forEach(m => st2.put(Object.assign({}, m, { synced: true })));
                     tx2.oncomplete = () => resolve();
                     tx2.onerror    = () => resolve();
-                } catch(err) { resolve(); }
+                } catch(err) {
+                    console.warn('[Movements] Push threw:', err);
+                    resolve();
+                }
             };
             tx.onerror = () => resolve();
         } catch(e) { resolve(); }
@@ -1405,18 +1428,20 @@ async function _checkInventoryColumnsExist() {
     if (_invColumnsChecked) return;
     _invColumnsChecked = true;
     try {
-        // Probe: SELECT company,supplier,generic_name on 1 row.
+        // Probe: SELECT company,supplier,generic_name,pack_size,unit_price on 1 row.
         // If columns are missing, PostgREST returns a 400 with
         // "column … does not exist" in the error body.
         const r = await fetch(
-            _SUPA_URL + '/rest/v1/inventory?select=company,supplier,generic_name&limit=1',
+            _SUPA_URL + '/rest/v1/inventory?select=company,supplier,generic_name,pack_size,unit_price&limit=1',
             { headers: _SUPA_HEADERS }
         );
         if (r.ok) return; // columns exist — nothing to do
 
         const errText = await r.text().catch(() => '');
         const isMissingCol = r.status === 400 &&
-            (errText.includes('company') || errText.includes('supplier') || errText.includes('generic_name'));
+            (errText.includes('company') || errText.includes('supplier') ||
+             errText.includes('generic_name') || errText.includes('pack_size') ||
+             errText.includes('unit_price'));
 
         if (isMissingCol || r.status === 400) {
             _showMissingColumnsBanner();
@@ -1444,7 +1469,9 @@ function _showMissingColumnsBanner() {
         'ALTER TABLE inventory\n' +
         '  ADD COLUMN IF NOT EXISTS generic_name text NOT NULL DEFAULT \'\',\n' +
         '  ADD COLUMN IF NOT EXISTS company      text NOT NULL DEFAULT \'\',\n' +
-        '  ADD COLUMN IF NOT EXISTS supplier     text NOT NULL DEFAULT \'\';' +
+        '  ADD COLUMN IF NOT EXISTS supplier     text NOT NULL DEFAULT \'\',\n' +
+        '  ADD COLUMN IF NOT EXISTS pack_size    text NOT NULL DEFAULT \'\',\n' +
+        '  ADD COLUMN IF NOT EXISTS unit_price   numeric(12,2) NOT NULL DEFAULT 0;' +
         '</code>' +
         '</div>' +
         '<button onclick="document.getElementById(\'invColMigrationBanner\').remove();_invColumnsChecked=false;" ' +
@@ -1660,6 +1687,14 @@ async function _checkAndPullInventoryIfUpdated() {
  */
 async function _pullInventoryFromSupabase(force = false) {
     // ── Step 1: resolve master UUID ───────────────────────────────────────
+    // Probe for missing Supabase columns (Generic/Company/Supplier blank fix).
+    // Reset the guard so every pull re-probes — ensures the migration banner
+    // appears even on clients that haven't visited the Inventory tab yet.
+    if (navigator.onLine) {
+        _invColumnsChecked = false;
+        _checkInventoryColumnsExist().catch(() => {});
+    }
+
     const { data: masterRows, error: masterErr } = await _dbSelect(
         'devices',
         'role=eq.master&is_active=eq.true',

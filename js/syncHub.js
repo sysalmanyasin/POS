@@ -1011,7 +1011,22 @@ async function forceSyncNow() {
             showToast('✅ ' + totalFlushed + ' inventory movement' + (totalFlushed !== 1 ? 's' : '') + ' pushed to Supabase.');
         }
 
-        // ── STEP 3: Drain general Supabase outbound queue ─────────────────
+        // ── STEP 2b: Push inventory catalogue (Master only) ───────────────
+        // forceSyncNow previously never called _pushInventoryBootstrapToCloud(), so
+        // the relational `inventory` table was only populated by the Push button or
+        // CSV import — never by Force Sync. Clients would therefore never receive
+        // catalogue updates on demand. This step closes that gap.
+        const _fsRole = (typeof StorageModule !== 'undefined')
+            ? StorageModule.get('pharma_device_role') : null;
+        if (_fsRole === 'master' && typeof _pushInventoryBootstrapToCloud === 'function') {
+            _setProgress(45, 'Step 2b — Pushing inventory catalogue…');
+            if (typeof showToast === 'function') showToast('⬆️ Pushing inventory catalogue to cloud…');
+            try {
+                await _pushInventoryBootstrapToCloud();
+            } catch(_invPushErr) {
+                console.warn('[ForceSyncNow] Inventory push failed (non-fatal):', _invPushErr);
+            }
+        }
         _setProgress(50, 'Step 3/4 — Draining outbound queue…');
         if (typeof showToast === 'function') showToast('⬆️ Draining outbound sync queue…');
 
@@ -2356,3 +2371,134 @@ async function _cpExecute() {
     log('✅ Cloud purge complete. Reloading in 2 s…');
     setTimeout(() => { try { window.location.reload(); } catch (_e) {} }, 2000);
 }
+
+// =========================================================================
+// OCC SIMULATION — window.PharmaOCCTest
+// =========================================================================
+// Fires two overlapping deduct_inventory_atomic RPC calls against the same
+// capturedVersion on the same product to prove the OCC conflict path works.
+// Safe: uses the first product in masterInventoryDB with stock > 0.
+// Shows results in a floating panel over the Sync Hub.
+// =========================================================================
+window.PharmaOCCTest = (() => {
+    function _pickProduct() {
+        const inv = (typeof masterInventoryDB !== 'undefined' && Array.isArray(masterInventoryDB))
+            ? masterInventoryDB : [];
+        return inv.find(p => (Number(p.stock) || 0) > 1) || null;
+    }
+
+    function _showPanel(html) {
+        let panel = document.getElementById('occSimPanel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'occSimPanel';
+            panel.style.cssText = [
+                'position:fixed', 'top:50%', 'left:50%',
+                'transform:translate(-50%,-50%)',
+                'z-index:99999', 'background:#0f172a',
+                'border:2px solid #38bdf8', 'border-radius:12px',
+                'padding:20px 24px', 'min-width:340px', 'max-width:480px',
+                'font-family:monospace', 'font-size:12px', 'color:#e2e8f0',
+                'box-shadow:0 8px 32px rgba(0,0,0,.7)'
+            ].join(';');
+            document.body.appendChild(panel);
+        }
+        panel.innerHTML = html;
+        panel.style.display = 'block';
+    }
+
+    function _log(msg, color) {
+        const el = document.getElementById('occSimLog');
+        if (!el) return;
+        const line = document.createElement('div');
+        line.style.color = color || '#e2e8f0';
+        line.style.marginBottom = '3px';
+        line.textContent = msg;
+        el.appendChild(line);
+        el.scrollTop = el.scrollHeight;
+    }
+
+    async function runSimulation() {
+        const prod = _pickProduct();
+        if (!prod) {
+            if (typeof showToast === 'function') showToast('⚠️ OCC Sim: no product with stock > 1 found. Import inventory first.', true);
+            return;
+        }
+
+        _showPanel(`
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                <span style="color:#38bdf8;font-size:14px;font-weight:700;">🧪 OCC Simulation</span>
+                <button onclick="document.getElementById('occSimPanel').style.display='none'"
+                        style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:16px;">✕</button>
+            </div>
+            <div style="color:#94a3b8;margin-bottom:10px;font-size:11px;">
+                Product: <span style="color:#fbbf24">${prod.code}</span> — ${prod.name || ''}
+                &nbsp;|&nbsp; Stock: <span style="color:#34d399">${prod.stock}</span>
+                &nbsp;|&nbsp; Version: <span style="color:#a78bfa">${prod.version || 1}</span>
+            </div>
+            <div id="occSimLog" style="background:#020617;border-radius:6px;padding:10px;min-height:160px;max-height:260px;overflow-y:auto;"></div>
+            <div style="margin-top:10px;color:#64748b;font-size:10px;">Two calls fire simultaneously with the same capturedVersion. Only one should succeed; the other should OCC-conflict and auto-rebase.</div>
+        `);
+
+        const staleVersion = prod.version || 1;
+        const deviceUuid   = (typeof _DEVICE_UUID !== 'undefined') ? _DEVICE_UUID : 'SIM_DEVICE';
+        const simInvoice   = 'SIM_' + Date.now();
+
+        _log('▶ Firing 2 concurrent RPC calls with capturedVersion=' + staleVersion + '…', '#38bdf8');
+        _log('  Call A: deduct 1 unit (capturedVersion=' + staleVersion + ')');
+        _log('  Call B: deduct 1 unit (capturedVersion=' + staleVersion + ')');
+
+        const callA = _callDeductInventoryAtomic(prod.code, 1, deviceUuid, simInvoice + '_A', staleVersion);
+        const callB = _callDeductInventoryAtomic(prod.code, 1, deviceUuid, simInvoice + '_B', staleVersion);
+
+        let resA, resB, errA, errB;
+        [
+            [resA, errA],
+            [resB, errB]
+        ] = await Promise.all([
+            callA.then(r => [r, null]).catch(e => [null, e]),
+            callB.then(r => [r, null]).catch(e => [null, e])
+        ]);
+
+        _log('');
+        _log('── Results ──────────────────────────────', '#64748b');
+
+        const _fmt = (res, err, label) => {
+            if (err) {
+                _log(label + ': ❌ threw — ' + (err.message || String(err)), '#f87171');
+                return;
+            }
+            if (!res) { _log(label + ': ❌ no response', '#f87171'); return; }
+            if (res.success) {
+                _log(label + ': ✅ SUCCESS — new_qty=' + res.new_quantity + ', new_ver=' + res.new_version, '#34d399');
+            } else if (res.message && res.message.includes('OCC')) {
+                _log(label + ': ⚡ OCC CONFLICT detected — rebase triggered', '#fbbf24');
+                _log('   message: ' + res.message, '#94a3b8');
+            } else {
+                _log(label + ': ⚠️ ' + (res.message || JSON.stringify(res)), '#f97316');
+            }
+        };
+        _fmt(resA, errA, 'Call A');
+        _fmt(resB, errB, 'Call B');
+
+        const bothSucceeded = resA && resA.success && resB && resB.success;
+        const oneOcc = (resA && !resA.success && resA.message && resA.message.includes('OCC')) ||
+                       (resB && !resB.success && resB.message && resB.message.includes('OCC'));
+
+        _log('');
+        if (bothSucceeded) {
+            _log('⚠️  BOTH calls succeeded — OCC not triggered. Check stored procedure.', '#f97316');
+        } else if (oneOcc) {
+            _log('✅  OCC working correctly — exactly one call conflicted.', '#34d399');
+            _log('    Rebase would retry with the fresh server version.', '#94a3b8');
+        } else {
+            _log('ℹ️  Unexpected result. Check Supabase logs.', '#94a3b8');
+        }
+
+        _log('');
+        _log('⚠️  Note: simulation debits were sent to Supabase. Run a manual', '#64748b');
+        _log('    stock adjustment to restore the deducted unit if needed.', '#64748b');
+    }
+
+    return { runSimulation };
+})();

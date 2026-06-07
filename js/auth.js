@@ -979,13 +979,26 @@ function _updatePinDisplay() {
         if (dot) dot.classList.toggle('filled', i < len);
     });
 }
+function cancelAuthModal() {
+    // Called when the user explicitly dismisses the modal (X button / Escape).
+    // Safe to clear the queue here because no action was executed.
+    _pendingActionQueue.length = 0;
+    pendingAction = null;
+    closeAuthModal();
+}
+
 function closeAuthModal() {
     document.getElementById('authModal').classList.remove('visible');
     _authPin = '';
     document.getElementById('masterPasswordInput').value = '';
     _updatePinDisplay();
-    _pendingActionQueue.length = 0;
-    pendingAction = null;
+    // NOTE: do NOT clear _pendingActionQueue or pendingAction here.
+    // executeProtectedAction() may have dispatched an async action (e.g.
+    // _doAddStaffMember → _hashPin) that still holds a reference to
+    // pendingAction.extraData. Clearing it here races with the async
+    // callback and causes "Cannot destructure property of null".
+    // _pendingActionQueue is cleared by executeProtectedAction() via shift(),
+    // and pendingAction is reset to null there too after the action runs.
     ['pinDot0','pinDot1','pinDot2','pinDot3','pinDot4','pinDot5','pinDot6','pinDot7'].forEach(id => {
         const d = document.getElementById(id); if (d) d.classList.remove('filled');
     });
@@ -1018,7 +1031,7 @@ document.addEventListener('keydown', e => {
     if (e.key >= '0' && e.key <= '9')                { e.preventDefault(); authPinKey(e.key); }
     else if (e.key === 'Backspace')                  { e.preventDefault(); authPinBack(); }
     else if (e.key === 'Enter')                      { e.preventDefault(); submitAuth(); }
-    else if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); closeAuthModal(); }
+    else if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); cancelAuthModal(); }
 }, true);
 
 function executeProtectedAction() {
@@ -1182,7 +1195,7 @@ function processPasswordModification() {
 }
 
 document.getElementById('authModal').addEventListener('click', e => {
-    if (e.target === document.getElementById('authModal')) closeAuthModal();
+    if (e.target === document.getElementById('authModal')) cancelAuthModal();
 });
 
 // =========================================================================
