@@ -954,7 +954,7 @@ function _handleCSVImport(file) {
 
             // Parse header row — normalise to lowercase, strip BOM/quotes/spaces
             const rawHeader = lines[0].replace(/^\uFEFF/, '');
-            const headers = rawHeader.split(',').map(h => h.replace(/["\s]/g, '').toLowerCase());
+            const headers = rawHeader.split(',').map(h => h.trim().replace(/"/g, '').replace(/\s+/g, '').toLowerCase());
 
             // Column index resolver — flexible mapping
             const col = (candidates) => {
