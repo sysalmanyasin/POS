@@ -1,8 +1,7 @@
 // =========================================================================
-// config.js — Supabase config, device identity, shared REST helpers
-// Phase 2: added relational table helpers (_dbInsert, _dbUpsert, _dbSelect,
-//          _dbUpdate, _dbDelete) alongside the legacy pharma_sync KV helpers
-//          (_supaGet/_supaSet/_supaDel) which remain for auth.js compatibility.
+// config.js — Supabase config, device identity, Lamport clock, REST helpers
+// FIX Bug 9: Lamport timestamp engine added — every mutation uses a logical
+//            sequence counter instead of Date.now() to survive clock skew.
 // =========================================================================
 
 // ── Supabase connection ───────────────────────────────────────────────────
@@ -15,11 +14,56 @@ const _SUPA_HEADERS = {
     'Content-Type':  'application/json'
 };
 
-// ── Legacy KV helpers (pharma_sync table) — kept for auth.js / synchub.js ──
-// These are used by: auth.js (password hash, master setup PIN, device key),
-// devices.js (commands), synchub.js (cloud KV sync).
-// Do NOT remove until those modules are fully migrated in later phases.
+// ── Device identity ───────────────────────────────────────────────────────
+function _getOrCreateDeviceId() {
+    const KEY = 'pharma_device_id';
+    let id;
+    try { id = localStorage.getItem(KEY); } catch(e) {}
+    if (!id) {
+        try {
+            id = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+               ? crypto.randomUUID()
+               : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                     const r = Math.random() * 16 | 0;
+                     return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                 });
+        } catch(e) { id = 'dev-' + Date.now(); }
+        try { localStorage.setItem(KEY, id); } catch(e) {}
+    }
+    return id;
+}
 
+const _DEVICE_UUID = _getOrCreateDeviceId();
+
+// =========================================================================
+// BUG 9 FIX — Lamport Logical Clock
+// Monotonically increasing sequence counter, per device, survives clock skew.
+// Every mutation must call _lamportNext() to get its sequence number.
+// On pull from cloud, call _lamportMerge(serverSeq) to advance local clock.
+// =========================================================================
+const _LAMPORT_KEY = 'pharma_lamport_' + _DEVICE_UUID.slice(0, 8);
+
+function _lamportRead() {
+    try { return parseInt(localStorage.getItem(_LAMPORT_KEY) || '0', 10) || 0; } catch(e) { return 0; }
+}
+
+function _lamportNext() {
+    const seq = _lamportRead() + 1;
+    try { localStorage.setItem(_LAMPORT_KEY, String(seq)); } catch(e) {}
+    return seq;
+}
+
+/** Advance local clock past a server sequence value (on sync pull). */
+function _lamportMerge(serverSeq) {
+    const local = _lamportRead();
+    const next  = Math.max(local, Number(serverSeq) || 0) + 1;
+    try { localStorage.setItem(_LAMPORT_KEY, String(next)); } catch(e) {}
+    return next;
+}
+
+// =========================================================================
+// Legacy KV helpers (pharma_sync table) — kept for auth.js / devices.js
+// =========================================================================
 async function _supaGet(key) {
     if (!key) return null;
     try {
@@ -62,18 +106,6 @@ async function _supaProbe() {
 }
 
 // ── Relational table helpers ──────────────────────────────────────────────
-// These target the new Phase 1 relational tables (devices, invoices,
-// inventory, inventory_movements, settings, sync_log, invoice_items).
-//
-// All functions return { data, error } so callers can handle failures
-// without try/catch boilerplate.
-
-/**
- * SELECT rows from a table.
- * @param {string} table  — table name
- * @param {string} query  — PostgREST query string, e.g. "role=eq.master&is_active=eq.true"
- * @param {string} select — columns to return, default "*"
- */
 async function _dbSelect(table, query = '', select = '*') {
     try {
         const qs = [select ? 'select=' + select : '', query].filter(Boolean).join('&');
@@ -90,11 +122,6 @@ async function _dbSelect(table, query = '', select = '*') {
     }
 }
 
-/**
- * INSERT one or more rows.
- * @param {string} table   — table name
- * @param {object|Array} rows — row object or array of row objects
- */
 async function _dbInsert(table, rows) {
     try {
         const r = await fetch(_SUPA_URL + '/rest/v1/' + table, {
@@ -112,12 +139,6 @@ async function _dbInsert(table, rows) {
     }
 }
 
-/**
- * UPSERT one or more rows (insert or update on conflict).
- * @param {string} table   — table name
- * @param {object|Array} rows — row object or array of row objects
- * @param {string} onConflict — conflict column(s), default "uuid"
- */
 async function _dbUpsert(table, rows, onConflict = 'uuid') {
     try {
         const r = await fetch(_SUPA_URL + '/rest/v1/' + table, {
@@ -138,12 +159,6 @@ async function _dbUpsert(table, rows, onConflict = 'uuid') {
     }
 }
 
-/**
- * UPDATE rows matching a PostgREST filter.
- * @param {string} table   — table name
- * @param {string} query   — PostgREST filter, e.g. "uuid=eq.abc-123"
- * @param {object} updates — fields to update
- */
 async function _dbUpdate(table, query, updates) {
     try {
         const r = await fetch(_SUPA_URL + '/rest/v1/' + table + '?' + query, {
@@ -161,11 +176,6 @@ async function _dbUpdate(table, query, updates) {
     }
 }
 
-/**
- * DELETE rows matching a PostgREST filter.
- * @param {string} table — table name
- * @param {string} query — PostgREST filter, e.g. "uuid=eq.abc-123"
- */
 async function _dbDelete(table, query) {
     try {
         const r = await fetch(_SUPA_URL + '/rest/v1/' + table + '?' + query, {
@@ -182,35 +192,33 @@ async function _dbDelete(table, query) {
     }
 }
 
+// ── Supabase RPC helper ───────────────────────────────────────────────────
+// BUG 7 FIX: Used to call atomic server-side functions like
+// deduct_inventory_atomic so concurrent deltas merge instead of overwriting.
+async function _dbRpc(fnName, params = {}) {
+    try {
+        const r = await fetch(_SUPA_URL + '/rest/v1/rpc/' + fnName, {
+            method:  'POST',
+            headers: { ..._SUPA_HEADERS, 'Prefer': 'return=representation' },
+            body:    JSON.stringify(params)
+        });
+        if (!r.ok) {
+            const err = await r.text().catch(() => r.statusText);
+            return { data: null, error: err };
+        }
+        const text = await r.text();
+        const data = text ? JSON.parse(text) : null;
+        return { data, error: null };
+    } catch(e) {
+        return { data: null, error: e.message || String(e) };
+    }
+}
+
 // ── EmailJS config ────────────────────────────────────────────────────────
 const EMAILJS_SERVICE_ID  = 'service_c46u9tr';
 const EMAILJS_TEMPLATE_ID = 'template_nr8juhn';
 const EMAILJS_PUBLIC_KEY  = 'JmP847vJN1MXxKRva';
 const RESET_EMAIL_ADDRESS = 'sy.salmanmughal@gmail.com';
-
-// ── Device identity ───────────────────────────────────────────────────────
-// Immutable per-browser UUID, created once and persisted in localStorage.
-// This is the primary key used in the devices table.
-
-function _getOrCreateDeviceId() {
-    const KEY = 'pharma_device_id';
-    let id;
-    try { id = localStorage.getItem(KEY); } catch(e) {}
-    if (!id) {
-        try {
-            id = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-               ? crypto.randomUUID()
-               : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-                     const r = Math.random() * 16 | 0;
-                     return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-                 });
-        } catch(e) { id = 'dev-' + Date.now(); }
-        try { localStorage.setItem(KEY, id); } catch(e) {}
-    }
-    return id;
-}
-
-const _DEVICE_UUID = _getOrCreateDeviceId();
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 function _getCurrency() {
@@ -218,3 +226,21 @@ function _getCurrency() {
         ? StorageModule.get('pharma_currency', 'Rs.')
         : localStorage.getItem('pharma_currency') || 'Rs.') || 'Rs.';
 }
+
+function _getDeviceCode() {
+    try {
+        const bi = JSON.parse(localStorage.getItem('pharma_branch_identity') || '{}');
+        const raw = (bi.counterId || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        if (raw) return raw.slice(0, 20);
+    } catch(e) {}
+    try {
+        const stored = localStorage.getItem('pharma_device_counter_id') || '';
+        if (stored) return stored.replace(/[^A-Z0-9]/gi, '').toUpperCase().slice(0, 20);
+    } catch(e) {}
+    return 'DEV';
+}
+
+// ── requestIdleCallback polyfill (Bug 11) ─────────────────────────────────
+window._ric = (typeof requestIdleCallback === 'function')
+    ? requestIdleCallback
+    : function(cb, opts) { return setTimeout(() => cb({ timeRemaining: () => 16, didTimeout: false }), opts && opts.timeout ? Math.min(opts.timeout, 16) : 16); };
