@@ -87,8 +87,12 @@ const DevicesModule = (() => {
         const myDevice = await _fetchMyDevice();
 
         if (!myDevice) {
-            // Brand new device on this browser
-            _showRegistrationModal();
+            // Brand new device — go through the registration gate (Admin PIN + EmailJS OTP)
+            if (typeof _startDeviceRegistrationGate === 'function') {
+                _startDeviceRegistrationGate();
+            } else {
+                _showRegistrationModal(); // fallback
+            }
             return;
         }
 
@@ -231,11 +235,6 @@ const DevicesModule = (() => {
             const roleLabel = role === 'master' ? '👑 Master' : '💻 Client';
             if (typeof showToast === 'function') {
                 showToast(`✅ Device "${name}" registered as ${roleLabel}.`);
-            }
-
-            // If this is the first master device, trigger master setup flow
-            if (role === 'master' && typeof _checkAndInitMasterSetup === 'function') {
-                setTimeout(() => _checkAndInitMasterSetup(), 800);
             }
 
         } catch(e) {

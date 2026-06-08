@@ -1676,18 +1676,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(function() {
         renderStaffListSettings();
         _updateStaffBadge();
-
-        // Fix 10: Staff login gate — show login modal on startup if enabled
-        // and no staff member is currently active.
-        if (_getRequireStaffPin() && !activeStaff) {
-            const staffList = _getStaffList();
-            if (staffList && staffList.length > 0) {
-                // Defer slightly to let the rest of the app finish rendering
-                setTimeout(function() {
-                    if (!activeStaff) { openStaffLogin(); }
-                }, 400);
-            }
-        }
+        // Staff login gate removed — staff login is manual only via the badge button
     }, 0);
 });
 

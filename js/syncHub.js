@@ -781,11 +781,11 @@ async function renderSyncHubView() {
     </div>
 
     <!-- PUSH INVENTORY TO CLOUD CARD — Master only -->
-    <div class="sh-card" id="shPushInvCard" style="display:none;">
+    <div class="sh-card" id="shPushInvCard">
       <div class="sh-card-lbl">⬆️ Push Inventory to Cloud</div>
       <div class="sh-card-hint" style="margin-bottom:6px;">
-        Master device only. Pushes the full local inventory catalogue to Supabase so all
-        client devices can pull the latest stock and product list.
+        Pushes the full local inventory catalogue to Supabase so all
+        devices can pull the latest stock and product list.
       </div>
       <button class="sh-btn sh-btn-teal" id="forcePushInvBtn"
               onclick="forcePushInventoryToCloud()" style="margin-top:6px;width:100%;justify-content:center;">
@@ -883,9 +883,9 @@ function _renderMyDeviceCard() {
     uuidEl.textContent = myUUID;
     roleEl.textContent = myRole.charAt(0).toUpperCase() + myRole.slice(1);
 
-    // Show the Push Inventory card only on master device
+    // Push Inventory card visible to all registered devices
     const pushCard = document.getElementById('shPushInvCard');
-    if (pushCard) pushCard.style.display = (myRole === 'master') ? '' : 'none';
+    if (pushCard) pushCard.style.display = '';
 }
 
 // =========================================================================
@@ -1264,12 +1264,6 @@ async function forceInventoryPull() {
 // the inventory_last_updated signal so clients auto-pull within 60 seconds.
 // =========================================================================
 async function forcePushInventoryToCloud() {
-    const myRole = (typeof StorageModule !== 'undefined')
-        ? StorageModule.get('pharma_device_role') : null;
-    if (myRole !== 'master') {
-        if (typeof showToast === 'function') showToast('ℹ️ Only the master device can push inventory.', false);
-        return;
-    }
     if (_forceSyncRunning) {
         if (typeof showToast === 'function') showToast('⚠️ A sync is already running — please wait.', true);
         return;
@@ -1543,7 +1537,8 @@ function _stampRefreshTime() {
 // ☢️ GLOBAL PURGE — wipes all data from every active device + cloud.
 // Double verification:
 //   1. 8-digit OTP emailed via EmailJS to RESET_EMAIL_ADDRESS
-//   2. 8-digit Master Auth PIN (existing _verifyPassword)
+//   2. 8-digit Admin PIN (existing _verifyPassword)
+// Any registered device can initiate. Both factors required.
 // Spec keys:
 //   - pharma_global_purge_otp  : { pin, expiresAt }  (consumed on use)
 //   - pharma_global_purge_cmd  : { issuedAt, expiresAt, issuedBy }
@@ -1558,13 +1553,6 @@ let _gpOtpEntered = '';
 let _gpPinEntered = '';
 
 async function openGlobalPurgeModal() {
-    // F16: Only the master device may trigger a network-wide purge
-    const _deviceRole = (typeof StorageModule !== 'undefined' && typeof StorageModule.get === 'function')
-        ? StorageModule.get('pharma_device_role') : localStorage.getItem('pharma_device_role');
-    if (_deviceRole !== 'master') {
-        if (typeof showToast === 'function') showToast('⛔ Global Purge can only be initiated from the Master device.', true);
-        return;
-    }
     _gpOtpEntered = '';
     _gpPinEntered = '';
     let modal = document.getElementById('gpModal');
@@ -1796,8 +1784,8 @@ function _gpRenderStep3() {
     const body = document.getElementById('gpBody');
     if (!body) return;
     body.innerHTML = `
-<div class="gp-step-title">Step 3 / 3 — Master Auth PIN</div>
-<div class="gp-warn">Enter your 8-digit Master Auth PIN to confirm and execute the global purge.</div>
+<div class="gp-step-title">Step 3 / 3 — Admin PIN</div>
+<div class="gp-warn">Enter your 8-digit Admin PIN to confirm and execute the global purge.</div>
 <div class="gp-dots" id="gpPinDots">
   ${[0,1,2,3,4,5,6,7].map(i => `<div class="gp-dot" id="gpPinDot${i}"></div>`).join('')}
 </div>
@@ -1823,12 +1811,12 @@ function _gpPinClear() { _gpPinEntered = ''; _gpUpdateDots('gpPinDot', 0); }
 
 async function _gpVerifyPinAndExecute() {
     const status = document.getElementById('gpStatus');
-    status.textContent = 'Verifying master PIN…'; status.style.color = '#64748b';
+    status.textContent = 'Verifying Admin PIN…'; status.style.color = '#64748b';
     try {
         const ok = (typeof _verifyPassword === 'function')
             ? await _verifyPassword(_gpPinEntered)
             : false;
-        if (!ok) throw new Error('Incorrect Master Auth PIN.');
+        if (!ok) throw new Error('Incorrect Admin PIN.');
         status.textContent = '✅ Authenticated. Beginning purge…'; status.style.color = '#059669';
         setTimeout(_gpExecuteNetworkPurge, 400);
     } catch (e) {
@@ -1966,14 +1954,10 @@ async function _gpExecuteNetworkPurge() {
     try {
         const keep = new Set(['pharma_device_id']);
         const keys = Object.keys(localStorage);
-        // FIX 7b: Write the purge timestamp NOW (before wipe) so auth.js detects it
-        // on the post-reload first run and fires _checkAndInitMasterSetup() correctly.
-        // The previous flow wrote this key and then deleted it in the same step.
-        try { localStorage.setItem('sys_last_purge_time', String(Date.now())); } catch (_e) {}
+        // Clear purge timestamp — no longer needed (no master setup flow)
+        // Remove pharma_device_registered so every device re-registers after purge
         keys.forEach(k => {
             if (keep.has(k)) return;
-            // Keep sys_last_purge_time — auth.js needs it on the next page load
-            if (k === 'sys_last_purge_time') return;
             if (k.startsWith('pharma_') || k.startsWith('sys_') || k === '_pharma_inv_fingerprint' || k === '_supabase_sync_on' || k === '_supabase_settings_ts') {
                 try { localStorage.removeItem(k); } catch (_e) {}
             }
@@ -2003,7 +1987,8 @@ async function _gpExecuteNetworkPurge() {
 // =========================================================================
 // 🌩️ CLOUD PURGE — wipes cloud data + local data (keeps device identity).
 // Does NOT broadcast to other devices. Does NOT delete auth keys or devices table.
-// Same double-verification as Global Purge: Email OTP + Master Auth PIN.
+// Same double-verification as Global Purge: Email OTP + Admin PIN.
+// Any registered device can initiate.
 // Deletes:
 //   KV  : invoices, inventory, settings, staff, held bills
 //   SQL : invoices, invoice_items, inventory, inventory_movements, sync_log
@@ -2017,12 +2002,6 @@ let _cpOtpEntered = '';
 let _cpPinEntered = '';
 
 async function openCloudPurgeModal() {
-    const _deviceRole = (typeof StorageModule !== 'undefined' && typeof StorageModule.get === 'function')
-        ? StorageModule.get('pharma_device_role') : localStorage.getItem('pharma_device_role');
-    if (_deviceRole !== 'master') {
-        if (typeof showToast === 'function') showToast('⛔ Cloud Purge can only be initiated from the Master device.', true);
-        return;
-    }
     _cpOtpEntered = '';
     _cpPinEntered = '';
     let modal = document.getElementById('cpModal');
@@ -2207,8 +2186,8 @@ function _cpRenderStep3() {
     const body = document.getElementById('cpBody');
     if (!body) return;
     body.innerHTML = `
-<div class="cp-step-title">Step 3 / 3 — Master Auth PIN</div>
-<div class="cp-warn">Enter your 8-digit Master Auth PIN to execute the cloud purge.</div>
+<div class="cp-step-title">Step 3 / 3 — Admin PIN</div>
+<div class="cp-warn">Enter your 8-digit Admin PIN to execute the cloud purge.</div>
 <div class="cp-dots" id="cpPinDots">
   ${[0,1,2,3,4,5,6,7].map(i => `<div class="cp-dot" id="cpPinDot${i}"></div>`).join('')}
 </div>
@@ -2234,10 +2213,10 @@ function _cpPinClear() { _cpPinEntered = ''; _cpUpdateDots('cpPinDot', 0); }
 
 async function _cpVerifyPinAndExecute() {
     const status = document.getElementById('cpStatus');
-    status.textContent = 'Verifying master PIN…'; status.style.color = '#64748b';
+    status.textContent = 'Verifying Admin PIN…'; status.style.color = '#64748b';
     try {
         const ok = (typeof _verifyPassword === 'function') ? await _verifyPassword(_cpPinEntered) : false;
-        if (!ok) throw new Error('Incorrect Master Auth PIN.');
+        if (!ok) throw new Error('Incorrect Admin PIN.');
         status.textContent = '✅ Authenticated. Beginning cloud purge…'; status.style.color = '#059669';
         setTimeout(_cpExecute, 400);
     } catch (e) {
@@ -2348,6 +2327,7 @@ async function _cpExecute() {
         const keepKeys = new Set([
             'pharma_device_id', 'pharma_device_name',
             'pharma_device_role', 'pharma_device_counter_id',
+            'pharma_device_registered',
             'sys_admin_pass_hash', 'sys_has_password', '_supabase_sync_on'
         ]);
         Object.keys(localStorage).forEach(k => {

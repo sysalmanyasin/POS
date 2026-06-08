@@ -36,884 +36,588 @@ async function _persistPassword(hash) {
 }
 
 // =========================================================================
-// POST-PURGE MASTER DEVICE SETUP — EmailJS PIN Distribution
+// DEVICE REGISTRATION GATE — New unified flow (replaces master/client setup)
+// Any unregistered device must:
+//   First launch (no admin PIN set): EmailJS OTP → Set Admin PIN → Device setup
+//   Subsequent device (admin PIN exists): Enter Admin PIN → EmailJS OTP → Device setup
 // =========================================================================
+const _MASTER_SETUP_SUPABASE_KEY = 'pharma_master_setup_pin'; // kept for compat
+const _MASTER_DEVICE_KEY = 'pharma_master_device_id';         // kept for compat
 let _masterSetupPin = '';
 let _generatedMasterPin = '';
-const _MASTER_SETUP_SUPABASE_KEY = 'pharma_master_setup_pin';
-const _MASTER_DEVICE_KEY = 'pharma_master_device_id';
 
 /**
  * Called after global purge to check if this should be the master device
  * Sets up the EmailJS PIN distribution flow
  */
-async function _checkAndInitMasterSetup() {
-    // Phase 2+: master identity is determined by the `devices` table, not the
-    // legacy pharma_master_device_id KV key.  We check the table first; if
-    // offline we fall back to the old KV key so the flow degrades gracefully.
+// =========================================================================
+// UNIFIED DEVICE REGISTRATION GATE
+//
+// Flow A — First launch (no admin PIN in Supabase):
+//   Send EmailJS OTP → Verify OTP → Set 8-digit Admin PIN → Device setup
+//
+// Flow B — New device (admin PIN already exists):
+//   Enter Admin PIN → Send EmailJS OTP → Verify OTP → Device setup
+//
+// After both flows the device lands on the Device Setup page (name + counter)
+// which calls DevicesModule._confirmRegistration() to write to Supabase.
+// =========================================================================
+
+// OTP state shared across both flows
+const _REG_OTP_KEY = 'pharma_reg_otp';
+let _regOtpValue   = '';
+let _regPinEntered = ''; // used in Flow B admin-PIN entry step
+let _regOtpVerifyFn = null; // set by each OTP step to route auto-submit
+
+/**
+ * Entry point — called by devices.js instead of showing the bare
+ * registration modal directly.  Decides which flow to use.
+ */
+async function _startDeviceRegistrationGate() {
+    // Must be online
+    const online = navigator.onLine;
+    if (!online) {
+        _showOfflineRegistrationBlock();
+        return;
+    }
+    // Check if an admin PIN already exists in Supabase
+    let adminPinExists = false;
     try {
-        // Check devices table for an active master row that is NOT this device.
-        // If one exists the password is already set and we just need the client
-        // to sync it; show the client setup modal instead.
-        const { data } = await _dbSelect(
-            'devices',
-            'role=eq.master&is_active=eq.true',
-            'uuid'
-        );
-        const masterIsOtherDevice = data && data.length > 0 && !data.find(r => r.uuid === _DEVICE_UUID);
-        if (masterIsOtherDevice) {
-            _showClientDeviceSetupModal();
-            return;
-        }
-        // No other master exists — this device is the master; start PIN email flow.
-        _showMasterDeviceSetupModal();
+        const h = await _supaGet('pharma_master_password_hash');
+        adminPinExists = !!h;
+    } catch(e) {}
+
+    if (!adminPinExists) {
+        // Flow A — very first launch
+        _showRegFlowA_SendOtp();
+    } else {
+        // Flow B — existing system, need admin PIN first
+        _showRegFlowB_AdminPin();
+    }
+}
+
+// ── Offline block ─────────────────────────────────────────────────────────
+function _showOfflineRegistrationBlock() {
+    _regRemoveAll();
+    const d = document.createElement('div');
+    d.id = 'regGateModal';
+    d.innerHTML = `
+<div style="position:fixed;inset:0;z-index:30000;background:rgba(15,23,42,.9);display:flex;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:#fff;border-radius:14px;padding:32px 24px;width:100%;max-width:380px;text-align:center;box-shadow:0 24px 64px rgba(0,0,0,.4);">
+    <div style="font-size:48px;margin-bottom:12px;">📡</div>
+    <div style="font-size:16px;font-weight:800;color:#1f2937;margin-bottom:8px;">No Internet Connection</div>
+    <div style="font-size:13px;color:#6b7280;line-height:1.6;margin-bottom:24px;">
+      An internet connection is required to register this device.<br>Please connect and refresh.
+    </div>
+    <button onclick="location.reload()" style="padding:10px 24px;background:#0f766e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">🔄 Retry</button>
+  </div>
+</div>`;
+    document.body.appendChild(d);
+}
+
+function _regRemoveAll() {
+    ['regGateModal'].forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+}
+
+// =========================================================================
+// FLOW A — First launch: OTP → Set Admin PIN → Device setup
+// =========================================================================
+function _showRegFlowA_SendOtp() {
+    _regRemoveAll();
+    const d = document.createElement('div');
+    d.id = 'regGateModal';
+    d.innerHTML = `
+<style>
+.rg-overlay{position:fixed;inset:0;z-index:30000;background:rgba(15,23,42,.9);display:flex;align-items:center;justify-content:center;padding:16px;}
+.rg-card{background:#fff;border-radius:14px;width:100%;max-width:420px;box-shadow:0 24px 64px rgba(0,0,0,.45);overflow:hidden;}
+.rg-hdr{padding:18px 20px;background:linear-gradient(135deg,#0f766e,#0d9488);color:#fff;}
+.rg-hdr-title{font-size:16px;font-weight:900;}
+.rg-hdr-sub{font-size:11px;opacity:.85;margin-top:2px;}
+.rg-body{padding:24px;}
+.rg-info{font-size:13px;color:#374151;line-height:1.6;margin-bottom:16px;}
+.rg-email-chip{display:inline-block;background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:20px;}
+.rg-btn{width:100%;padding:11px;background:#0f766e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;margin-top:8px;}
+.rg-btn:disabled{opacity:.5;cursor:not-allowed;}
+.rg-status{font-size:12px;margin-top:10px;min-height:18px;text-align:center;}
+</style>
+<div class="rg-overlay">
+  <div class="rg-card">
+    <div class="rg-hdr">
+      <div class="rg-hdr-title">🏥 First Time Setup</div>
+      <div class="rg-hdr-sub">Verify your email to set the Admin PIN</div>
+    </div>
+    <div class="rg-body">
+      <div class="rg-info">Welcome! No admin PIN has been set yet. An OTP will be sent to the owner email to verify identity before setup.</div>
+      <div><span class="rg-email-chip">📧 ${RESET_EMAIL_ADDRESS}</span></div>
+      <button class="rg-btn" id="rgFlowASendBtn" onclick="_regFlowA_DoSend()">📧 Send OTP to Email</button>
+      <div class="rg-status" id="rgFlowAStatus"></div>
+    </div>
+  </div>
+</div>`;
+    document.body.appendChild(d);
+}
+
+async function _regFlowA_DoSend() {
+    const btn = document.getElementById('rgFlowASendBtn');
+    const st  = document.getElementById('rgFlowAStatus');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    st.style.color = '#6b7280'; st.textContent = 'Generating OTP…';
+
+    const otp = String(Math.floor(10000000 + Math.random() * 90000000));
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    try {
+        const ok = await _supaSet(_REG_OTP_KEY, JSON.stringify({ pin: otp, expiresAt }));
+        if (!ok) throw new Error('Supabase write failed');
     } catch(e) {
-        console.warn('[Master Setup] devices table check failed, falling back to KV:', e.message);
-        // Offline fallback: use the old KV key
-        try {
-            const existingMasterId = await _supaGet(_MASTER_DEVICE_KEY);
-            if (existingMasterId && existingMasterId !== _DEVICE_UUID) {
-                _showClientDeviceSetupModal();
-                return;
-            }
-        } catch(_e) {}
-        _showFirstLaunchPasswordSetup();
-    }
-}
-
-/**
- * Master Device Setup Modal — Send PIN via EmailJS
- */
-function _showMasterDeviceSetupModal() {
-    let modal = document.getElementById('masterDeviceSetupModal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'masterDeviceSetupModal';
-        modal.innerHTML = `
-<style>
-.master-setup-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, .85);
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-}
-.master-setup-card {
-    background: #fff;
-    width: 100%;
-    max-width: 500px;
-    border-radius: 12px;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, .3);
-    overflow: hidden;
-}
-.master-setup-hdr {
-    padding: 20px;
-    background: linear-gradient(135deg, #059669, #047857);
-    color: #fff;
-    font-size: 18px;
-    font-weight: 900;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-.master-setup-body {
-    padding: 24px;
-}
-.master-setup-step {
-    margin-bottom: 20px;
-    font-size: 14px;
-    line-height: 1.6;
-    color: #374151;
-}
-.master-setup-step strong {
-    color: #059669;
-}
-.master-setup-warning {
-    background: #fef3c7;
-    border: 1px solid #fcd34d;
-    color: #78350f;
-    padding: 12px 14px;
-    border-radius: 8px;
-    font-size: 12px;
-    margin: 16px 0;
-}
-.master-setup-actions {
-    display: flex;
-    gap: 10px;
-    justify-content: flex-end;
-}
-.master-setup-btn {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 700;
-    cursor: pointer;
-}
-.master-setup-btn-primary {
-    background: #059669;
-    color: #fff;
-}
-.master-setup-btn-primary:hover {
-    background: #047857;
-}
-.master-setup-btn-secondary {
-    background: #e5e7eb;
-    color: #374151;
-}
-.master-setup-status {
-    font-size: 12px;
-    color: #6b7280;
-    margin-top: 12px;
-    min-height: 20px;
-}
-</style>
-<div class="master-setup-overlay" id="masterSetupOverlay">
-  <div class="master-setup-card">
-    <div class="master-setup-hdr">👑 Master Device Setup</div>
-    <div class="master-setup-body">
-      <div class="master-setup-step">
-        This is the <strong>first device</strong> after system purge. It will become the <strong>Master Device</strong>.
-      </div>
-      <div class="master-setup-warning">
-        ⚠️ An 8-digit PIN will be sent to your email. Use it to set the master password. All client devices will sync this password.
-      </div>
-      <div class="master-setup-step">
-        <strong>Email:</strong> ${RESET_EMAIL_ADDRESS || '(not configured)'}
-      </div>
-      <div class="master-setup-actions">
-        <button class="master-setup-btn master-setup-btn-secondary" onclick="_closeMasterSetupModal()">Cancel</button>
-        <button class="master-setup-btn master-setup-btn-primary" onclick="_sendMasterSetupPin()">📧 Send PIN to Email</button>
-      </div>
-      <div class="master-setup-status" id="masterSetupStatus"></div>
-    </div>
-  </div>
-</div>`;
-        document.body.appendChild(modal);
-    }
-    document.getElementById('masterSetupStatus').textContent = '';
-    modal.style.display = '';
-}
-
-function _closeMasterSetupModal() {
-    const m = document.getElementById('masterDeviceSetupModal');
-    if (m) m.style.display = 'none';
-    // Fall back to first launch setup
-    _showFirstLaunchPasswordSetup();
-}
-
-/**
- * Generate and send master PIN via EmailJS
- */
-async function _sendMasterSetupPin() {
-    const statusEl = document.getElementById('masterSetupStatus');
-    
-    if (!RESET_EMAIL_ADDRESS || RESET_EMAIL_ADDRESS.includes('YOUR_')) {
-        statusEl.textContent = '❌ Email address not configured.';
-        statusEl.style.color = 'var(--red)';
+        st.style.color = '#dc2626'; st.textContent = '❌ Could not save OTP. Check connection.';
+        if (btn) { btn.disabled = false; btn.textContent = '📧 Send OTP to Email'; }
         return;
     }
-    
-    if (typeof emailjs === 'undefined') {
-        statusEl.textContent = '❌ EmailJS not loaded.';
-        statusEl.style.color = 'var(--red)';
-        return;
-    }
-    
-    statusEl.textContent = 'Generating PIN…';
-    statusEl.style.color = '#6b7280';
-    
-    // Generate 8-digit PIN
-    _generatedMasterPin = String(Math.floor(10000000 + Math.random() * 90000000));
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 minutes
-    
     try {
-        // Store in Supabase
-        await _supaSet(_MASTER_SETUP_SUPABASE_KEY, JSON.stringify({
-            pin: _generatedMasterPin,
-            expiresAt,
-            deviceId: _DEVICE_UUID,
-            createdAt: new Date().toISOString()
-        }));
-        
-        // Send via EmailJS
-        const bi = (typeof _getBranchIdentity === 'function') ? _getBranchIdentity() : {};
         await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-            to_email: RESET_EMAIL_ADDRESS,
-            reset_pin: _generatedMasterPin,
-            shop_name: bi.businessName || bi.branchName || 'Pharma POS',
-            counter_id: bi.counterId || 'Master Device',
-            expires_in: '15 minutes',
-            email_subject: '👑 Pharma POS Master Device Setup PIN'
+            to_email:   RESET_EMAIL_ADDRESS,
+            reset_pin:  otp,
+            shop_name:  'Pharma POS',
+            counter_id: 'First Setup',
+            expires_in: '10 minutes',
+            email_subject: '🔐 PharmaPos — First Setup OTP'
         }, EMAILJS_PUBLIC_KEY);
-        
-        statusEl.textContent = '✅ PIN sent! Check your email.';
-        statusEl.style.color = '#059669';
-        
-        // Move to PIN entry step
-        setTimeout(() => _showMasterPinEntryModal(), 1500);
-        
+        st.style.color = '#059669'; st.textContent = '✅ OTP sent! Check your email.';
+        setTimeout(() => _showRegFlowA_VerifyOtp(), 1200);
     } catch(err) {
-        console.error('[Master Setup] PIN send failed:', err);
-        statusEl.textContent = '❌ Failed to send PIN: ' + (err.message || 'Unknown error');
-        statusEl.style.color = '#dc2626';
+        try { await _supaDel(_REG_OTP_KEY); } catch(_e) {}
+        st.style.color = '#dc2626'; st.textContent = '❌ Email failed: ' + (err.text || err.message || 'Unknown');
+        if (btn) { btn.disabled = false; btn.textContent = '📧 Send OTP to Email'; }
     }
 }
 
-/**
- * Master Device PIN Entry Modal
- */
-function _showMasterPinEntryModal() {
-    const m = document.getElementById('masterDeviceSetupModal');
-    if (m) m.style.display = 'none';
-    
-    let modal = document.getElementById('masterPinEntryModal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'masterPinEntryModal';
-        modal.innerHTML = `
-<style>
-.master-pin-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, .85);
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.master-pin-card {
-    background: #fff;
-    width: 100%;
-    max-width: 420px;
-    border-radius: 12px;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, .3);
-    overflow: hidden;
-}
-.master-pin-hdr {
-    padding: 18px 20px;
-    background: linear-gradient(135deg, #059669, #047857);
-    color: #fff;
-    font-weight: 900;
-    font-size: 16px;
-}
-.master-pin-body {
-    padding: 24px;
-}
-.master-pin-instruction {
-    font-size: 13px;
-    color: #6b7280;
-    margin-bottom: 18px;
-    line-height: 1.5;
-}
-.master-pin-dots {
-    display: flex;
-    gap: 8px;
-    justify-content: center;
-    margin: 20px 0;
-}
-.master-pin-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: #e5e7eb;
-    transition: all 150ms ease;
-}
-.master-pin-dot.filled {
-    background: #059669;
-    box-shadow: 0 0 8px rgba(5, 150, 105, .5);
-}
-.master-pin-keypad {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    margin: 20px 0;
-}
-.master-pin-key {
-    padding: 12px;
-    border: 1px solid #d1d5db;
-    background: #f9fafb;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    user-select: none;
-    transition: all 150ms ease;
-}
-.master-pin-key:hover {
-    background: #f3f4f6;
-    border-color: #9ca3af;
-}
-.master-pin-key:active {
-    background: #e5e7eb;
-    transform: scale(.95);
-}
-.master-pin-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 16px;
-}
-.master-pin-btn {
-    flex: 1;
-    padding: 10px;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-}
-.master-pin-btn-cancel {
-    background: #e5e7eb;
-    color: #374151;
-}
-.master-pin-btn-submit {
-    background: #059669;
-    color: #fff;
-}
-.master-pin-status {
-    font-size: 11px;
-    color: #6b7280;
-    margin-top: 10px;
-    min-height: 18px;
-    text-align: center;
-}
-</style>
-<div class="master-pin-overlay">
-  <div class="master-pin-card">
-    <div class="master-pin-hdr">Enter Master Setup PIN</div>
-    <div class="master-pin-body">
-      <div class="master-pin-instruction">
-        Enter the 8-digit PIN sent to your email to set master password.
-      </div>
-      <div class="master-pin-dots" id="masterPinDots">
-        ${[...Array(8)].map((_, i) => `<div class="master-pin-dot" id="masterPinDot${i}"></div>`).join('')}
-      </div>
-      <div class="master-pin-keypad">
-        ${[1,2,3,4,5,6,7,8,9,0].map(n => `<button class="master-pin-key" onclick="_masterPinKey('${n}')">${n}</button>`).join('')}
-        <button class="master-pin-key" style="grid-column: 1 / -1;" onclick="_masterPinBack()">← Delete</button>
-      </div>
-      <div class="master-pin-actions">
-        <button class="master-pin-btn master-pin-btn-cancel" onclick="_cancelMasterPinEntry()">Cancel</button>
-        <button class="master-pin-btn master-pin-btn-submit" onclick="_verifyMasterPin()">Verify</button>
-      </div>
-      <div class="master-pin-status" id="masterPinStatus"></div>
+function _showRegFlowA_VerifyOtp() {
+    _regRemoveAll();
+    _regOtpValue = '';
+    _regOtpVerifyFn = _regFlowA_VerifyOtp;
+    const d = document.createElement('div');
+    d.id = 'regGateModal';
+    d.innerHTML = `
+<div class="rg-overlay">
+  <div class="rg-card">
+    <div class="rg-hdr">
+      <div class="rg-hdr-title">🔐 Enter Email OTP</div>
+      <div class="rg-hdr-sub">Enter the 8-digit code sent to your email</div>
+    </div>
+    <div class="rg-body">
+      ${_buildOtpKeypad('rgOtp', '_regOtpKey', '_regOtpBack', '_regFlowA_VerifyOtp')}
+      <div class="rg-status" id="rgOtpStatus"></div>
     </div>
   </div>
 </div>`;
-        document.body.appendChild(modal);
-    }
-    _masterSetupPin = '';
-    _updateMasterPinDisplay();
-    document.getElementById('masterPinStatus').textContent = '';
-    modal.style.display = '';
+    document.body.appendChild(d);
 }
 
-function _masterPinKey(d) {
-    if (_masterSetupPin.length >= 8) return;
-    _masterSetupPin += d;
-    _updateMasterPinDisplay();
-    if (_masterSetupPin.length === 8) setTimeout(_verifyMasterPin, 180);
-}
-
-function _masterPinBack() {
-    _masterSetupPin = _masterSetupPin.slice(0, -1);
-    _updateMasterPinDisplay();
-}
-
-function _updateMasterPinDisplay() {
-    const len = _masterSetupPin.length;
-    for (let i = 0; i < 8; i++) {
-        const dot = document.getElementById(`masterPinDot${i}`);
-        if (dot) dot.classList.toggle('filled', i < len);
-    }
-}
-
-async function _verifyMasterPin() {
-    const statusEl = document.getElementById('masterPinStatus');
-    
-    if (_masterSetupPin.length !== 8) {
-        statusEl.textContent = '❌ Enter all 8 digits.';
-        statusEl.style.color = '#dc2626';
-        return;
-    }
-    
-    statusEl.textContent = 'Verifying…';
-    statusEl.style.color = '#6b7280';
-    
+async function _regFlowA_VerifyOtp() {
+    const st = document.getElementById('rgOtpStatus');
+    st.style.color = '#6b7280'; st.textContent = 'Verifying…';
     try {
-        const raw = await _supaGet(_MASTER_SETUP_SUPABASE_KEY);
-        if (!raw) {
-            statusEl.textContent = '❌ PIN expired or not found.';
-            statusEl.style.color = '#dc2626';
-            return;
-        }
-        
+        const raw = await _supaGet(_REG_OTP_KEY);
+        if (!raw) { st.style.color = '#dc2626'; st.textContent = '❌ OTP not found or expired.'; _regOtpValue = ''; _regUpdateDots('rgOtp'); return; }
         const stored = JSON.parse(raw);
         if (new Date(stored.expiresAt).getTime() < Date.now()) {
-            statusEl.textContent = '⏰ PIN has expired.';
-            statusEl.style.color = '#d97706';
-            await _supaDel(_MASTER_SETUP_SUPABASE_KEY);
-            return;
+            await _supaDel(_REG_OTP_KEY).catch(() => {});
+            st.style.color = '#d97706'; st.textContent = '⏰ OTP expired. Go back and resend.';
+            _regOtpValue = ''; _regUpdateDots('rgOtp'); return;
         }
-        
-        if (stored.pin !== _masterSetupPin) {
-            statusEl.textContent = '❌ Incorrect PIN.';
-            statusEl.style.color = '#dc2626';
-            _masterSetupPin = '';
-            _updateMasterPinDisplay();
-            return;
+        if (stored.pin !== _regOtpValue) {
+            st.style.color = '#dc2626'; st.textContent = '❌ Incorrect OTP.';
+            _regOtpValue = ''; _regUpdateDots('rgOtp'); return;
         }
-        
-        // ✅ PIN verified — move to password setup
-        statusEl.textContent = '✅ PIN verified!';
-        statusEl.style.color = '#059669';
-        
-        // Delete used PIN
-        await _supaDel(_MASTER_SETUP_SUPABASE_KEY);
-        
-        // Phase 2+: master identity lives in the `devices` table (written by
-        // devices.js registration). Keep localStorage flag for UI checks only.
-        StorageModule.set('sys_is_master_device', 'true');
-        
-        setTimeout(() => _showMasterPasswordSetupModal(), 1000);
-        
-    } catch(err) {
-        console.error('[Master PIN] Verification failed:', err);
-        statusEl.textContent = '❌ Verification error.';
-        statusEl.style.color = '#dc2626';
-    }
-}
-
-function _cancelMasterPinEntry() {
-    const m = document.getElementById('masterPinEntryModal');
-    if (m) m.style.display = 'none';
-    _showMasterDeviceSetupModal();
-}
-
-/**
- * Master Password Setup Modal — Set password that syncs to all devices
- */
-function _showMasterPasswordSetupModal() {
-    const m = document.getElementById('masterPinEntryModal');
-    if (m) m.style.display = 'none';
-    
-    let modal = document.getElementById('masterPasswordSetupModal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'masterPasswordSetupModal';
-        modal.innerHTML = `
-<style>
-.master-pass-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, .85);
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-}
-.master-pass-card {
-    background: #fff;
-    width: 100%;
-    max-width: 460px;
-    border-radius: 12px;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, .3);
-    overflow: hidden;
-}
-.master-pass-hdr {
-    padding: 18px 20px;
-    background: linear-gradient(135deg, #059669, #047857);
-    color: #fff;
-    font-weight: 900;
-    font-size: 16px;
-}
-.master-pass-body {
-    padding: 24px;
-}
-.master-pass-instruction {
-    font-size: 13px;
-    color: #6b7280;
-    margin-bottom: 16px;
-    line-height: 1.5;
-}
-.master-pass-field {
-    margin-bottom: 14px;
-}
-.master-pass-label {
-    display: block;
-    font-size: 12px;
-    font-weight: 600;
-    color: #374151;
-    margin-bottom: 4px;
-}
-.master-pass-input {
-    width: 100%;
-    padding: 10px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 6px;
-    font-size: 13px;
-    box-sizing: border-box;
-}
-.master-pass-input:focus {
-    outline: none;
-    border-color: #059669;
-    box-shadow: 0 0 0 3px rgba(5, 150, 105, .1);
-}
-.master-pass-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 20px;
-}
-.master-pass-btn {
-    flex: 1;
-    padding: 10px;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-}
-.master-pass-btn-cancel {
-    background: #e5e7eb;
-    color: #374151;
-}
-.master-pass-btn-confirm {
-    background: #059669;
-    color: #fff;
-}
-.master-pass-status {
-    font-size: 11px;
-    color: #6b7280;
-    margin-top: 10px;
-    min-height: 18px;
-}
-</style>
-<div class="master-pass-overlay">
-  <div class="master-pass-card">
-    <div class="master-pass-hdr">👑 Set Master Password</div>
-    <div class="master-pass-body">
-      <div class="master-pass-instruction">
-        Set an 8-digit master password. This will be synced to all client devices.
-      </div>
-      <div class="master-pass-field">
-        <label class="master-pass-label">Master Password</label>
-        <input type="password" id="masterPassNewPass" class="master-pass-input" placeholder="8 digits" maxlength="8" autocomplete="off">
-      </div>
-      <div class="master-pass-field">
-        <label class="master-pass-label">Confirm Password</label>
-        <input type="password" id="masterPassConfirmPass" class="master-pass-input" placeholder="8 digits" maxlength="8" autocomplete="off">
-      </div>
-      <div class="master-pass-actions">
-        <button class="master-pass-btn master-pass-btn-cancel" onclick="_cancelMasterPasswordSetup()">Cancel</button>
-        <button class="master-pass-btn master-pass-btn-confirm" onclick="_confirmMasterPasswordSetup()">Set Password</button>
-      </div>
-      <div class="master-pass-status" id="masterPassStatus"></div>
-    </div>
-  </div>
-</div>`;
-        document.body.appendChild(modal);
-    }
-    document.getElementById('masterPassNewPass').value = '';
-    document.getElementById('masterPassConfirmPass').value = '';
-    document.getElementById('masterPassStatus').textContent = '';
-    modal.style.display = '';
-    document.getElementById('masterPassNewPass').focus();
-}
-
-function _cancelMasterPasswordSetup() {
-    const m = document.getElementById('masterPasswordSetupModal');
-    if (m) m.style.display = 'none';
-}
-
-async function _confirmMasterPasswordSetup() {
-    const newPassEl = document.getElementById('masterPassNewPass');
-    const confirmPassEl = document.getElementById('masterPassConfirmPass');
-    const statusEl = document.getElementById('masterPassStatus');
-    
-    const newP = (newPassEl?.value || '').trim();
-    const confP = (confirmPassEl?.value || '').trim();
-    
-    if (!newP || newP.length !== 8 || !/^\d{8}$/.test(newP)) {
-        statusEl.textContent = '❌ Password must be exactly 8 digits.';
-        statusEl.style.color = '#dc2626';
-        return;
-    }
-    
-    if (newP !== confP) {
-        statusEl.textContent = '❌ Passwords do not match.';
-        statusEl.style.color = '#dc2626';
-        return;
-    }
-    
-    statusEl.textContent = 'Saving…';
-    statusEl.style.color = '#6b7280';
-    
-    try {
-        const hash = await _hashPassword(newP);
-        await _persistPassword(hash);
-        
-        newPassEl.value = '';
-        confirmPassEl.value = '';
-        
-        statusEl.textContent = '✅ Master password set and synced!';
-        statusEl.style.color = '#059669';
-        
-        showToast('👑 Master device configured. Password synced to cloud.');
-        
-        // Close all modals
-        const m = document.getElementById('masterPasswordSetupModal');
-        if (m) m.style.display = 'none';
-        
-        setTimeout(() => location.reload(), 1500);
-        
-    } catch(err) {
-        console.error('[Master Password] Setup failed:', err);
-        statusEl.textContent = '❌ Setup failed: ' + (err.message || 'Unknown error');
-        statusEl.style.color = '#dc2626';
-    }
-}
-
-/**
- * Client Device Setup Modal — Receive password from cloud
- */
-function _showClientDeviceSetupModal() {
-    let modal = document.getElementById('clientDeviceSetupModal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'clientDeviceSetupModal';
-        modal.innerHTML = `
-<style>
-.client-setup-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, .85);
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px;
-}
-.client-setup-card {
-    background: #fff;
-    width: 100%;
-    max-width: 450px;
-    border-radius: 12px;
-    box-shadow: 0 25px 50px rgba(0, 0, 0, .3);
-    overflow: hidden;
-}
-.client-setup-hdr {
-    padding: 18px 20px;
-    background: linear-gradient(135deg, #2563eb, #1d4ed8);
-    color: #fff;
-    font-weight: 900;
-    font-size: 16px;
-}
-.client-setup-body {
-    padding: 24px;
-    text-align: center;
-}
-.client-setup-icon {
-    font-size: 48px;
-    margin-bottom: 12px;
-}
-.client-setup-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: #1f2937;
-    margin-bottom: 8px;
-}
-.client-setup-text {
-    font-size: 13px;
-    color: #6b7280;
-    line-height: 1.6;
-    margin-bottom: 20px;
-}
-.client-setup-status {
-    font-size: 12px;
-    color: #2563eb;
-    padding: 10px;
-    background: #dbeafe;
-    border-radius: 6px;
-    margin-bottom: 16px;
-}
-.client-setup-btn {
-    padding: 10px 20px;
-    background: #2563eb;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-}
-.client-setup-btn:hover {
-    background: #1d4ed8;
-}
-</style>
-<div class="client-setup-overlay">
-  <div class="client-setup-card">
-    <div class="client-setup-hdr">🖥️ Client Device Setup</div>
-    <div class="client-setup-body">
-      <div class="client-setup-icon">⚡</div>
-      <div class="client-setup-title">Syncing Master Password…</div>
-      <div class="client-setup-text">
-        This device will receive the master password from the cloud. You can now login with the master password set on the Master Device.
-      </div>
-      <div class="client-setup-status" id="clientSetupStatus">
-        Connecting to cloud…
-      </div>
-      <button class="client-setup-btn" onclick="_completeClientDeviceSetup()">Continue</button>
-    </div>
-  </div>
-</div>`;
-        document.body.appendChild(modal);
-    }
-    
-    // Check for master password sync
-    _syncClientPassword(document.getElementById('clientSetupStatus'));
-    modal.style.display = '';
-}
-
-async function _syncClientPassword(statusEl) {
-    try {
-        // Wait for master password to be available (max 30 seconds)
-        let attempts = 0;
-        while (attempts < 30) {
-            const cloudHash = await _supaGet('pharma_master_password_hash');
-            if (cloudHash) {
-                // Found it! Store locally
-                StorageModule.set('sys_admin_pass_hash', cloudHash);
-                StorageModule.set('sys_has_password', 'true');
-                statusEl.textContent = '✅ Password synced! Ready to login.';
-                statusEl.style.color = '#059669';
-                return;
-            }
-            attempts++;
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-        
-        statusEl.textContent = '⏰ Timeout waiting for password. Try again.';
-        statusEl.style.color = '#d97706';
-    } catch(err) {
-        statusEl.textContent = '❌ Sync failed: ' + (err.message || 'Unknown error');
-        statusEl.style.color = '#dc2626';
-    }
-}
-
-function _completeClientDeviceSetup() {
-    const m = document.getElementById('clientDeviceSetupModal');
-    if (m) m.style.display = 'none';
-    location.reload();
-}
-
-// =========================================================================
-// FIRST-LAUNCH PASSWORD SETUP — Task 2: exactly 8 digits
-// =========================================================================
-function _showFirstLaunchPasswordSetup() {
-    const modal = document.getElementById('firstLaunchModal');
-    if (modal) {
-        modal.classList.add('visible');
-        setTimeout(() => { const f = document.getElementById('flNewPass'); if (f) f.focus(); }, 120);
-    }
-}
-async function saveFirstLaunchPassword() {
-    const newP     = (document.getElementById('flNewPass').value    || '').trim();
-    const confirmP = (document.getElementById('flConfirmPass').value || '').trim();
-    if (!newP || newP.length !== 8 || !/^\d{8}$/.test(newP)) {
-        showToast('❌ Password must be exactly 8 digits.', true); return;
-    }
-    if (newP !== confirmP) { showToast('❌ Passwords do not match.', true); return; }
-    const h = await _hashPassword(newP);
-    await _persistPassword(h);
-    document.getElementById('flNewPass').value    = '';
-    document.getElementById('flConfirmPass').value = '';
-    document.getElementById('firstLaunchModal').classList.remove('visible');
-    showToast('✅ Admin password set. System is ready.');
-}
-
-// =========================================================================
-// STARTUP MIGRATION — localStorage → Supabase
-// =========================================================================
-let _migrationDone = false;
-async function _migrateSecretsOnStartup() {
-    if (_migrationDone) return;
-    _migrationDone = true;
-
-    // Migrate plain-text password to hash first
-    const plain = StorageModule.get('sys_admin_pass');
-    if (plain) {
-        const h = await _hashPassword(plain);
-        StorageModule.set('sys_admin_pass_hash', h);
-        StorageModule.remove('sys_admin_pass');
-    }
-
-    // Migrate localStorage hash → Supabase if not already there
-    try {
-        // ── FIX: Post-purge check BEFORE cloud read ───────────────────────
-        // After a Global Purge, localStorage is wiped but the cloud password hash
-        // in `pharma_sync` may still exist (purge doesn't always delete it).
-        // Old flow: read cloud hash first → if found, skip setup → master never
-        // gets the EmailJS PIN flow or Admin PIN reset.
-        // Fix: if a purge happened within the last 10 minutes, run master setup
-        // immediately and skip the cloud hash check entirely.
-        const _lastPurge    = StorageModule.get('sys_last_purge_time');
-        const _sincePurgeMs = _lastPurge ? (Date.now() - parseInt(_lastPurge)) : null;
-        if (_sincePurgeMs !== null && _sincePurgeMs < 10 * 60 * 1000) {
-            // Clear the stale purge marker so this branch only fires once
-            StorageModule.remove('sys_last_purge_time');
-            await _checkAndInitMasterSetup();
-            return; // skip the rest of the migration on this run
-        }
-
-        const cloudHash = await _supaGet('pharma_master_password_hash');
-        if (!cloudHash) {
-            const localHash = StorageModule.get('sys_admin_pass_hash');
-            if (localHash) {
-                // Push to Supabase then clean localStorage
-                await _supaSet('pharma_master_password_hash', localHash);
-                StorageModule.remove('sys_admin_pass_hash');
-            } else {
-                // Check if this is post-purge scenario (fallback: timer not set)
-                const lastPurgeTime = StorageModule.get('sys_last_purge_time');
-                const timeSincePurge = lastPurgeTime ? (Date.now() - parseInt(lastPurgeTime)) : null;
-                
-                // If purged within last 5 minutes, init master setup
-                if (timeSincePurge && timeSincePurge < 5 * 60 * 1000) {
-                    await _checkAndInitMasterSetup();
-                } else {
-                    // Truly first launch — show setup modal
-                    _showFirstLaunchPasswordSetup();
-                }
-            }
-        } else {
-            // Cloud has it — remove localStorage copy (cloud is source of truth)
-            StorageModule.remove('sys_admin_pass_hash');
-            StorageModule.remove('sys_admin_pass');
-            StorageModule.set('sys_has_password', 'true');
-        }
+        await _supaDel(_REG_OTP_KEY).catch(() => {});
+        st.style.color = '#059669'; st.textContent = '✅ Verified!';
+        setTimeout(() => _showRegFlowA_SetPin(), 800);
     } catch(e) {
-        // Offline — if we have a local hash that's fine, keep it
-        if (!StorageModule.get('sys_admin_pass_hash')) {
-            _showFirstLaunchPasswordSetup();
-        }
+        st.style.color = '#dc2626'; st.textContent = '❌ Error: ' + (e.message || e);
+        _regOtpValue = ''; _regUpdateDots('rgOtp');
     }
-
-    // Migrate staff PINs to hashed versions
-    const list = _getStaffList();
-    let changed = false;
-    list.forEach(s => {
-        if (s.pin && !s.pinHash) {
-            _hashPin(s.pin).then(h => { s.pinHash = h; });
-            changed = true;
-        }
-    });
-    if (changed) setTimeout(() => _saveStaffList(_getStaffList()), 500);
 }
-function _migratePasswordOnStartup() { _migrateSecretsOnStartup().catch(() => {}); }
+
+function _showRegFlowA_SetPin() {
+    _regRemoveAll();
+    const d = document.createElement('div');
+    d.id = 'regGateModal';
+    d.innerHTML = `
+<div class="rg-overlay">
+  <div class="rg-card">
+    <div class="rg-hdr">
+      <div class="rg-hdr-title">🔒 Set Admin PIN</div>
+      <div class="rg-hdr-sub">This PIN protects admin actions on all devices</div>
+    </div>
+    <div class="rg-body">
+      <div class="rg-info" style="margin-bottom:12px;">Choose an 8-digit Admin PIN. All registered devices will use this PIN for admin actions.</div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:11px;font-weight:700;color:#374151;display:block;margin-bottom:4px;">New Admin PIN (8 digits)</label>
+        <input type="password" id="rgSetPin1" maxlength="8" inputmode="numeric" pattern="[0-9]*" placeholder="••••••••"
+          style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:18px;text-align:center;letter-spacing:4px;box-sizing:border-box;">
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="font-size:11px;font-weight:700;color:#374151;display:block;margin-bottom:4px;">Confirm PIN</label>
+        <input type="password" id="rgSetPin2" maxlength="8" inputmode="numeric" pattern="[0-9]*" placeholder="••••••••"
+          style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:18px;text-align:center;letter-spacing:4px;box-sizing:border-box;">
+      </div>
+      <button class="rg-btn" id="rgSetPinBtn" onclick="_regFlowA_SavePin()">✅ Set Admin PIN</button>
+      <div class="rg-status" id="rgSetPinStatus"></div>
+    </div>
+  </div>
+</div>`;
+    document.body.appendChild(d);
+    const p1 = document.getElementById('rgSetPin1');
+    const p2 = document.getElementById('rgSetPin2');
+    if (p1) { p1.focus(); p1.addEventListener('keydown', e => { if (e.key === 'Enter') { p2 && p2.focus(); } }); }
+    if (p2) p2.addEventListener('keydown', e => { if (e.key === 'Enter') _regFlowA_SavePin(); });
+}
+
+async function _regFlowA_SavePin() {
+    const btn = document.getElementById('rgSetPinBtn');
+    const st  = document.getElementById('rgSetPinStatus');
+    const p1  = (document.getElementById('rgSetPin1')?.value || '').trim();
+    const p2  = (document.getElementById('rgSetPin2')?.value || '').trim();
+    if (!p1 || p1.length !== 8 || !/^\d{8}$/.test(p1)) { st.style.color = '#dc2626'; st.textContent = '❌ PIN must be exactly 8 digits.'; return; }
+    if (p1 !== p2) { st.style.color = '#dc2626'; st.textContent = '❌ PINs do not match.'; return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    st.style.color = '#6b7280'; st.textContent = 'Saving…';
+    const hash = await _hashPassword(p1);
+    await _persistPassword(hash);
+    st.style.color = '#059669'; st.textContent = '✅ Admin PIN saved!';
+    setTimeout(() => _showRegDeviceSetup(), 800);
+}
+
+// =========================================================================
+// FLOW B — Existing system: Enter Admin PIN → Send OTP → Verify → Device setup
+// =========================================================================
+function _showRegFlowB_AdminPin() {
+    _regRemoveAll();
+    _regPinEntered = '';
+    const d = document.createElement('div');
+    d.id = 'regGateModal';
+    d.innerHTML = `
+<div class="rg-overlay">
+  <div class="rg-card">
+    <div class="rg-hdr">
+      <div class="rg-hdr-title">🔐 Register This Device</div>
+      <div class="rg-hdr-sub">Enter the Admin PIN to begin registration</div>
+    </div>
+    <div class="rg-body">
+      <div class="rg-info" style="margin-bottom:8px;">Enter the 8-digit Admin PIN to prove this is an authorised device.</div>
+      ${_buildPinKeypad('rgAdminPin', '_regAdminPinKey', '_regAdminPinBack', '_regFlowB_VerifyPin')}
+      <div class="rg-status" id="rgAdminPinStatus"></div>
+    </div>
+  </div>
+</div>`;
+    document.body.appendChild(d);
+}
+
+function _regAdminPinKey(d) {
+    if (_regPinEntered.length >= 8) return;
+    _regPinEntered += d;
+    _regUpdatePinDots('rgAdminPin');
+    if (_regPinEntered.length === 8) setTimeout(_regFlowB_VerifyPin, 180);
+}
+function _regAdminPinBack() { _regPinEntered = _regPinEntered.slice(0, -1); _regUpdatePinDots('rgAdminPin'); }
+
+async function _regFlowB_VerifyPin() {
+    const st = document.getElementById('rgAdminPinStatus');
+    st.style.color = '#6b7280'; st.textContent = 'Verifying…';
+    const ok = await _verifyPassword(_regPinEntered).catch(() => false);
+    if (!ok) {
+        st.style.color = '#dc2626'; st.textContent = '❌ Incorrect Admin PIN.';
+        _regPinEntered = ''; _regUpdatePinDots('rgAdminPin'); return;
+    }
+    st.style.color = '#059669'; st.textContent = '✅ PIN correct! Sending OTP…';
+    setTimeout(() => _showRegFlowB_SendOtp(), 800);
+}
+
+function _showRegFlowB_SendOtp() {
+    _regRemoveAll();
+    const d = document.createElement('div');
+    d.id = 'regGateModal';
+    d.innerHTML = `
+<div class="rg-overlay">
+  <div class="rg-card">
+    <div class="rg-hdr">
+      <div class="rg-hdr-title">📧 Email Verification</div>
+      <div class="rg-hdr-sub">Send OTP to confirm device registration</div>
+    </div>
+    <div class="rg-body">
+      <div class="rg-info">An OTP will be sent to the owner email to confirm this device registration.</div>
+      <div><span class="rg-email-chip">📧 ${RESET_EMAIL_ADDRESS}</span></div>
+      <button class="rg-btn" id="rgFlowBSendBtn" onclick="_regFlowB_DoSend()">📧 Send OTP to Email</button>
+      <div class="rg-status" id="rgFlowBStatus"></div>
+    </div>
+  </div>
+</div>`;
+    document.body.appendChild(d);
+}
+
+async function _regFlowB_DoSend() {
+    const btn = document.getElementById('rgFlowBSendBtn');
+    const st  = document.getElementById('rgFlowBStatus');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    st.style.color = '#6b7280'; st.textContent = 'Generating OTP…';
+
+    const otp = String(Math.floor(10000000 + Math.random() * 90000000));
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    try {
+        const ok = await _supaSet(_REG_OTP_KEY, JSON.stringify({ pin: otp, expiresAt }));
+        if (!ok) throw new Error('Supabase write failed');
+    } catch(e) {
+        st.style.color = '#dc2626'; st.textContent = '❌ Could not save OTP. Check connection.';
+        if (btn) { btn.disabled = false; btn.textContent = '📧 Send OTP to Email'; }
+        return;
+    }
+    try {
+        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+            to_email:   RESET_EMAIL_ADDRESS,
+            reset_pin:  otp,
+            shop_name:  'Pharma POS',
+            counter_id: 'Device Registration',
+            expires_in: '10 minutes',
+            email_subject: '🔐 PharmaPos — Device Registration OTP'
+        }, EMAILJS_PUBLIC_KEY);
+        st.style.color = '#059669'; st.textContent = '✅ OTP sent! Check your email.';
+        setTimeout(() => _showRegFlowB_VerifyOtp(), 1200);
+    } catch(err) {
+        try { await _supaDel(_REG_OTP_KEY); } catch(_e) {}
+        st.style.color = '#dc2626'; st.textContent = '❌ Email failed: ' + (err.text || err.message || 'Unknown');
+        if (btn) { btn.disabled = false; btn.textContent = '📧 Send OTP to Email'; }
+    }
+}
+
+function _showRegFlowB_VerifyOtp() {
+    _regRemoveAll();
+    _regOtpValue = '';
+    _regOtpVerifyFn = _regFlowB_VerifyOtp;
+    const d = document.createElement('div');
+    d.id = 'regGateModal';
+    d.innerHTML = `
+<div class="rg-overlay">
+  <div class="rg-card">
+    <div class="rg-hdr">
+      <div class="rg-hdr-title">🔐 Enter Email OTP</div>
+      <div class="rg-hdr-sub">Enter the 8-digit code from your email</div>
+    </div>
+    <div class="rg-body">
+      ${_buildOtpKeypad('rgOtp', '_regOtpKey', '_regOtpBack', '_regFlowB_VerifyOtp')}
+      <div class="rg-status" id="rgOtpStatus"></div>
+    </div>
+  </div>
+</div>`;
+    document.body.appendChild(d);
+}
+
+async function _regFlowB_VerifyOtp() {
+    const st = document.getElementById('rgOtpStatus');
+    st.style.color = '#6b7280'; st.textContent = 'Verifying…';
+    try {
+        const raw = await _supaGet(_REG_OTP_KEY);
+        if (!raw) { st.style.color = '#dc2626'; st.textContent = '❌ OTP not found or expired.'; _regOtpValue = ''; _regUpdateDots('rgOtp'); return; }
+        const stored = JSON.parse(raw);
+        if (new Date(stored.expiresAt).getTime() < Date.now()) {
+            await _supaDel(_REG_OTP_KEY).catch(() => {});
+            st.style.color = '#d97706'; st.textContent = '⏰ OTP expired.';
+            _regOtpValue = ''; _regUpdateDots('rgOtp'); return;
+        }
+        if (stored.pin !== _regOtpValue) {
+            st.style.color = '#dc2626'; st.textContent = '❌ Incorrect OTP.';
+            _regOtpValue = ''; _regUpdateDots('rgOtp'); return;
+        }
+        await _supaDel(_REG_OTP_KEY).catch(() => {});
+        st.style.color = '#059669'; st.textContent = '✅ Verified!';
+        setTimeout(() => _showRegDeviceSetup(), 800);
+    } catch(e) {
+        st.style.color = '#dc2626'; st.textContent = '❌ Error: ' + (e.message || e);
+        _regOtpValue = ''; _regUpdateDots('rgOtp');
+    }
+}
+
+// =========================================================================
+// SHARED — OTP keypad helpers + Device Setup page
+// =========================================================================
+
+function _regOtpKey(d) {
+    if (_regOtpValue.length >= 8) return;
+    _regOtpValue += d;
+    _regUpdateDots('rgOtp');
+    if (_regOtpValue.length === 8 && _regOtpVerifyFn) setTimeout(_regOtpVerifyFn, 180);
+}
+function _regOtpBack() { _regOtpValue = _regOtpValue.slice(0, -1); _regUpdateDots('rgOtp'); }
+
+function _regUpdateDots(prefix) {
+    const len = _regOtpValue.length;
+    for (let i = 0; i < 8; i++) {
+        const el = document.getElementById(prefix + 'Dot' + i);
+        if (el) el.classList.toggle('filled', i < len);
+    }
+}
+function _regUpdatePinDots(prefix) {
+    const len = _regPinEntered.length;
+    for (let i = 0; i < 8; i++) {
+        const el = document.getElementById(prefix + 'Dot' + i);
+        if (el) el.classList.toggle('filled', i < len);
+    }
+}
+
+function _buildOtpKeypad(dotPrefix, keyFn, backFn, submitFn) {
+    return `
+<div style="display:flex;gap:8px;justify-content:center;margin:16px 0;">
+  ${[...Array(8)].map((_, i) => `<div id="${dotPrefix}Dot${i}" style="width:12px;height:12px;border-radius:50%;background:#e5e7eb;transition:all 150ms;" class="rg-dot"></div>`).join('')}
+</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0;">
+  ${[1,2,3,4,5,6,7,8,9].map(n => `<button onclick="${keyFn}('${n}')" style="padding:12px;border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">${n}</button>`).join('')}
+  <button onclick="${backFn}()" style="padding:12px;border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">⌫</button>
+  <button onclick="${keyFn}('0')" style="padding:12px;border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">0</button>
+  <button onclick="void(0)" style="padding:12px;border:1px solid transparent;background:transparent;cursor:default;"></button>
+</div>`;
+}
+
+function _buildPinKeypad(dotPrefix, keyFn, backFn, submitFn) {
+    return `
+<div style="display:flex;gap:8px;justify-content:center;margin:16px 0;">
+  ${[...Array(8)].map((_, i) => `<div id="${dotPrefix}Dot${i}" style="width:12px;height:12px;border-radius:50%;background:#e5e7eb;transition:all 150ms;" class="rg-dot"></div>`).join('')}
+</div>
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0;">
+  ${[1,2,3,4,5,6,7,8,9].map(n => `<button onclick="${keyFn}('${n}')" style="padding:12px;border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">${n}</button>`).join('')}
+  <button onclick="${backFn}()" style="padding:12px;border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">⌫</button>
+  <button onclick="${keyFn}('0')" style="padding:12px;border:1px solid #d1d5db;background:#f9fafb;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;">0</button>
+  <button onclick="${submitFn}()" style="padding:12px;background:#0f766e;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">✓</button>
+</div>`;
+}
+
+/** Final step: collect device name + counter ID then register */
+function _showRegDeviceSetup() {
+    _regRemoveAll();
+    const d = document.createElement('div');
+    d.id = 'regGateModal';
+    d.innerHTML = `
+<div class="rg-overlay">
+  <div class="rg-card">
+    <div class="rg-hdr">
+      <div class="rg-hdr-title">📱 Device Setup</div>
+      <div class="rg-hdr-sub">Name this device and set a counter ID</div>
+    </div>
+    <div class="rg-body">
+      <div class="rg-info" style="margin-bottom:16px;">Almost done! Give this device a name and counter ID to start working.</div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:11px;font-weight:700;color:#374151;display:block;margin-bottom:4px;">Device Name</label>
+        <input id="rgDevName" type="text" placeholder="e.g. Main Counter, Pharmacy Desk…" maxlength="40" autocomplete="off"
+          style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;box-sizing:border-box;">
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="font-size:11px;font-weight:700;color:#374151;display:block;margin-bottom:4px;">Counter ID</label>
+        <input id="rgDevCounter" type="text" placeholder="e.g. C-01, MAIN, POS-2…" maxlength="20" autocomplete="off"
+          style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;box-sizing:border-box;">
+      </div>
+      <div id="rgDevErr" style="font-size:11px;color:#dc2626;min-height:16px;margin-bottom:8px;"></div>
+      <button class="rg-btn" id="rgDevSaveBtn" onclick="_regDeviceSetup_Save()">✅ Start Working</button>
+      <div class="rg-status" id="rgDevStatus"></div>
+    </div>
+  </div>
+</div>`;
+    document.body.appendChild(d);
+    const inp = document.getElementById('rgDevName');
+    if (inp) {
+        inp.focus();
+        inp.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { const ci = document.getElementById('rgDevCounter'); if (ci && !ci.value.trim()) ci.focus(); else _regDeviceSetup_Save(); }
+        });
+    }
+    const ci = document.getElementById('rgDevCounter');
+    if (ci) ci.addEventListener('keydown', e => { if (e.key === 'Enter') _regDeviceSetup_Save(); });
+}
+
+async function _regDeviceSetup_Save() {
+    const btn = document.getElementById('rgDevSaveBtn');
+    const err = document.getElementById('rgDevErr');
+    const st  = document.getElementById('rgDevStatus');
+    const name      = (document.getElementById('rgDevName')?.value || '').trim();
+    const counterId = (document.getElementById('rgDevCounter')?.value || '').trim();
+
+    if (!name || name.length < 2) { if (err) err.textContent = 'Enter a device name (at least 2 characters).'; return; }
+    if (!counterId) { if (err) err.textContent = 'Enter a counter ID.'; return; }
+    if (err) err.textContent = '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Registering…'; }
+    st.style.color = '#6b7280'; st.textContent = 'Connecting to cloud…';
+
+    try {
+        // Check device limit
+        const { data: allDevs } = await _dbSelect('devices', 'is_active=eq.true', 'uuid');
+        const MAX_DEVICES = 10;
+        if (allDevs && allDevs.length >= MAX_DEVICES) {
+            if (err) err.textContent = `❌ Max ${MAX_DEVICES} devices allowed. Ask admin to remove a device first.`;
+            if (btn) { btn.disabled = false; btn.textContent = '✅ Start Working'; }
+            st.textContent = '';
+            return;
+        }
+
+        // Determine role: first device is master if none active
+        const { data: masterDevs } = await _dbSelect('devices', 'role=eq.master&is_active=eq.true', 'uuid');
+        const role = (!masterDevs || masterDevs.length === 0) ? 'master' : 'client';
+
+        const now = new Date().toISOString();
+        const { error } = await _dbUpsert('devices', {
+            uuid: _DEVICE_UUID, name, counter_id: counterId,
+            role, registered_at: now, last_seen_at: now, is_active: true
+        }, 'uuid');
+
+        if (error) {
+            if (err) err.textContent = '❌ Registration failed: ' + error;
+            if (btn) { btn.disabled = false; btn.textContent = '✅ Start Working'; }
+            st.textContent = '';
+            return;
+        }
+
+        StorageModule.set('pharma_device_name', name);
+        StorageModule.set('pharma_device_role', role);
+        StorageModule.set('pharma_device_counter_id', counterId);
+        StorageModule.set('pharma_device_registered', 'true');
+
+        // Update branch identity counter
+        try {
+            const bi = JSON.parse(localStorage.getItem('pharma_branch_identity') || '{}');
+            bi.counterId = counterId;
+            localStorage.setItem('pharma_branch_identity', JSON.stringify(bi));
+        } catch(_e) {}
+
+        st.style.color = '#059669'; st.textContent = '✅ Registered! Loading…';
+        setTimeout(() => {
+            _regRemoveAll();
+            location.reload();
+        }, 1200);
+
+    } catch(e) {
+        if (err) err.textContent = '❌ Unexpected error: ' + (e.message || e);
+        if (btn) { btn.disabled = false; btn.textContent = '✅ Start Working'; }
+        st.textContent = '';
+    }
+}
+
+// ── Dot fill helper shared across all steps ───────────────────────────────
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('rg-dot')) e.preventDefault();
+});
+// Inject shared dot CSS once
+(function _injectRegDotCss() {
+    if (document.getElementById('regDotStyle')) return;
+    const s = document.createElement('style');
+    s.id = 'regDotStyle';
+    s.textContent = '.rg-dot.filled{background:#0f766e!important;box-shadow:0 0 8px rgba(15,118,110,.5);}';
+    document.head.appendChild(s);
+})();
+
+// ── Backward-compat stubs (called from old code paths, now no-ops or rerouted) ─
+function _checkAndInitMasterSetup() { /* removed — registration gate handles this */ }
+function _showMasterDeviceSetupModal() { _startDeviceRegistrationGate(); }
+function _showClientDeviceSetupModal() { _startDeviceRegistrationGate(); }
+function _showFirstLaunchPasswordSetup() { _startDeviceRegistrationGate(); }
+async function saveFirstLaunchPassword() { /* removed — flow A handles this */ }
+function _migratePasswordOnStartup() { /* removed — no startup login gate */ }
+
 
 // =========================================================================
 // ADMIN AUTH MODAL — Task 2: exactly 8-digit PIN
@@ -1122,10 +826,6 @@ function confirmPurgeAction() {
     savedInvoicesLedger = []; temporaryHeldBills = []; masterInventoryDB = []; activeCartItems = []; currentlyEditingInvoiceId = null;
     updateStatsCounters(); renderHistoryCards([]); renderInvoiceUI(); updateHdrStats();
     StorageModule.purgeCloudStorageOnly().catch(() => {});
-    
-    // Mark purge time for master setup detection
-    StorageModule.set('sys_last_purge_time', String(Date.now()));
-    
     showToast('⚠️ All records purged.');
 }
 const _purgeConfirmInput = document.getElementById('purgeConfirmInput');

@@ -104,7 +104,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     try { savedInvoicesLedger = await StorageModule.loadInvoices();  } catch(e) { savedInvoicesLedger = []; }
 
     syncInvoiceCounterFromLedger(savedInvoicesLedger);
-    _migratePasswordOnStartup();
     loadBranchIdentity();
     updateStatsCounters();
     renderHistoryCards(savedInvoicesLedger);
