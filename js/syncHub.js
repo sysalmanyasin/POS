@@ -110,6 +110,48 @@ async function _processQueueItem(item, deviceUuid) {
         case 'INVOICE':
             await _processInvoiceItem(item, deviceUuid);
             break;
+        // SCHEMA FIX: INVOICE_UPDATE type — patches a single column on an existing
+        // invoice row (e.g. is_fully_refunded=true after processFullRefund).
+        // Payload must include invoice_number + the column(s) to patch.
+        case 'INVOICE_UPDATE': {
+            const upd = item.payload;
+            if (upd && upd.invoice_number && typeof _dbUpsert === 'function') {
+                try {
+                    const { error } = await _dbUpsert('invoices', [upd], 'invoice_number');
+                    if (!error) {
+                        await StorageModule.deleteFromSyncQueue(item.queueId);
+                    } else {
+                        console.warn('[SyncEngine] INVOICE_UPDATE upsert failed:', error);
+                    }
+                } catch (e) {
+                    console.warn('[SyncEngine] INVOICE_UPDATE error:', e);
+                }
+            } else {
+                await StorageModule.deleteFromSyncQueue(item.queueId);
+            }
+            break;
+        }
+        // FIX: INVENTORY_MOVEMENT type — directly upsert to inventory_movements table.
+        // These are pushed by _pushUnsyncedMovements when movements accumulate offline.
+        case 'INVENTORY_MOVEMENT': {
+            const mv = item.payload;
+            if (mv && mv.movement_id && typeof _dbUpsert === 'function') {
+                try {
+                    const { error } = await _dbUpsert('inventory_movements', [mv], 'movement_id');
+                    if (!error) {
+                        await StorageModule.deleteFromSyncQueue(item.queueId);
+                    } else {
+                        console.warn('[SyncEngine] INVENTORY_MOVEMENT upsert failed:', error);
+                    }
+                } catch (e) {
+                    console.warn('[SyncEngine] INVENTORY_MOVEMENT error:', e);
+                }
+            } else {
+                // Malformed — discard
+                await StorageModule.deleteFromSyncQueue(item.queueId);
+            }
+            break;
+        }
         default:
             // Unknown types: log and discard so they don't jam the queue
             console.warn('[SyncEngine] Unknown queue type:', item.type, '— discarding queueId', item.queueId);
@@ -251,12 +293,17 @@ async function _processInvoiceItem(item, deviceUuid) {
         const { product_code, quantity, expected_version } = lineItem;
         if (!product_code || !quantity) continue;
 
+        // FIX: pass movement_type from line item (REFUND / PARTIAL_REFUND / SALE)
+        // so the RPC records the correct movement type in inventory_movements table.
+        const _movementType = lineItem.movement_type || null;
+
         const handled = await _processLineItem(
             product_code,
             quantity,
             expected_version ?? item.capturedVersion ?? 1,
             deviceUuid,
-            invoice_number
+            invoice_number,
+            _movementType
         );
 
         if (!handled) {
@@ -299,10 +346,10 @@ async function _processInvoiceItem(item, deviceUuid) {
  * @returns {boolean} true if the item was handled (success or safe mitigation),
  *                    false if a retriable error occurred (leaves parent in queue).
  */
-async function _processLineItem(productCode, quantity, expectedVersion, deviceUuid, invoiceNumber) {
+async function _processLineItem(productCode, quantity, expectedVersion, deviceUuid, invoiceNumber, movementType) {
     try {
         const rpcResult = await _callDeductInventoryAtomic(
-            productCode, quantity, deviceUuid, invoiceNumber, expectedVersion
+            productCode, quantity, deviceUuid, invoiceNumber, expectedVersion, movementType
         );
 
         if (!rpcResult) {
@@ -343,8 +390,17 @@ async function _processLineItem(productCode, quantity, expectedVersion, deviceUu
 }
 
 // ── C4: Call the Supabase RPC ─────────────────────────────────────────────
-async function _callDeductInventoryAtomic(productCode, quantity, deviceUuid, invoiceNumber, expectedVersion) {
+async function _callDeductInventoryAtomic(productCode, quantity, deviceUuid, invoiceNumber, expectedVersion, movementType) {
     // RPC fix: no Supabase JS SDK in this app — use raw fetch POST to /rpc endpoint
+    const _rpcBody = {
+        p_product_code:     productCode,
+        p_quantity:         quantity,
+        p_device_uuid:      deviceUuid,
+        p_invoice_number:   invoiceNumber,
+        p_expected_version: expectedVersion
+    };
+    // FIX: pass movement_type to RPC so it records REFUND/PARTIAL_REFUND correctly
+    if (movementType) _rpcBody.p_movement_type = movementType;
     const response = await fetch(
         (typeof _SUPA_URL !== 'undefined' ? _SUPA_URL : '') + '/rest/v1/rpc/deduct_inventory_atomic',
         {
@@ -352,13 +408,7 @@ async function _callDeductInventoryAtomic(productCode, quantity, deviceUuid, inv
             headers: typeof _SUPA_HEADERS !== 'undefined'
                 ? Object.assign({}, _SUPA_HEADERS, { 'Content-Type': 'application/json' })
                 : { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                p_product_code:     productCode,
-                p_quantity:         quantity,
-                p_device_uuid:      deviceUuid,
-                p_invoice_number:   invoiceNumber,
-                p_expected_version: expectedVersion
-            })
+            body: JSON.stringify(_rpcBody)
         }
     );
 
@@ -1223,7 +1273,21 @@ async function forceInventoryPull() {
                         for (const m of movs) {
                             if (!m || !m.movement_id) continue;
                             if (m.device_uuid === _DEVICE_UUID) continue; // skip our own
-                            try { st.put({ ...m, id: m.movement_id, synced: true }); movementsMerged++; } catch(_e) {}
+                            // SCHEMA FIX: IDB keyPath is 'movementId' (camelCase) —
+                            // must map all Supabase snake_case fields to IDB camelCase
+                            try { st.put({
+                                movementId:     m.movement_id,
+                                productCode:    m.product_code,
+                                quantityChange: Number(m.quantity_change) || 0,
+                                stockAfter:     typeof m.stock_after === 'number' ? m.stock_after : 0,
+                                movementType:   m.movement_type   || 'ADJUSTMENT',
+                                invoiceId:      m.invoice_number  || null,
+                                description:    m.description     || null,
+                                timestamp:      m.moved_at ? new Date(m.moved_at).getTime() : Date.now(),
+                                deviceCode:     m.counter_id      || '',
+                                deviceUUID:     m.device_uuid     || '',
+                                synced:         true
+                            }); movementsMerged++; } catch(_e) {}
                         }
                     } catch(_e) {}
                 }
@@ -1963,15 +2027,20 @@ async function _gpExecuteNetworkPurge() {
         }
     } catch (_e) {}
 
-    // 5. Remove localStorage keys (keep device identity so registration recovers cleanly).
+    // 5. Remove localStorage keys (keep only minimal device id for recovery).
     try {
         const keep = new Set(['pharma_device_id']);
         const keys = Object.keys(localStorage);
-        // Clear purge timestamp — no longer needed (no master setup flow)
-        // Remove pharma_device_registered so every device re-registers after purge
+        // FIX: explicitly wipe all pharma_/sys_/tracking keys.
+        // pharma_device_registered is cleared so every device must re-register.
+        // pharma_applied_mov_ids cleared so movements replay correctly.
+        // pharma_synced_invoices cleared so invoices sync fresh.
         keys.forEach(k => {
             if (keep.has(k)) return;
-            if (k.startsWith('pharma_') || k.startsWith('sys_') || k === '_pharma_inv_fingerprint' || k === '_supabase_sync_on' || k === '_supabase_settings_ts') {
+            if (k.startsWith('pharma_') || k.startsWith('sys_') ||
+                k === '_pharma_inv_fingerprint' || k === '_supabase_sync_on' ||
+                k === '_supabase_settings_ts' || k === 'pharma_applied_mov_ids' ||
+                k === 'pharma_synced_invoices') {
                 try { localStorage.removeItem(k); } catch (_e) {}
             }
         });
@@ -2348,6 +2417,12 @@ async function _cpExecute() {
             'pharma_device_registered',
             'sys_admin_pass_hash', 'sys_has_password', '_supabase_sync_on'
         ]);
+        // FIX: also explicitly remove sync tracking keys that can re-populate cloud
+        ['pharma_applied_mov_ids', '_pharma_inv_fingerprint', '_supabase_settings_ts',
+         'pharma_synced_invoices', 'pharma_last_sync_time',
+         'pharma_inv_counter', 'pharma_cloud_inventory'].forEach(k => {
+            try { localStorage.removeItem(k); } catch (_e) {}
+        });
         Object.keys(localStorage).forEach(k => {
             if (keepKeys.has(k)) return;
             if (k.startsWith('pharma_') || k.startsWith('sys_') ||

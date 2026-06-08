@@ -100,7 +100,7 @@ function _flushPendingInventorySave() {
 // =========================================================================
 // INVENTORY MOVEMENT LEDGER — record + cloud push/pull
 // =========================================================================
-function _recordInvMovement(productCode, quantityChange, movementType, invoiceId, description) {
+function _recordInvMovement(productCode, quantityChange, movementType, invoiceId, description, stockAfter) {
     if (!db || !productCode || typeof quantityChange !== 'number') return;
     const movement = {
         movementId:     _DEVICE_UUID.slice(0, 8) + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6).toUpperCase(),
@@ -112,6 +112,8 @@ function _recordInvMovement(productCode, quantityChange, movementType, invoiceId
         timestamp:      Date.now(),
         deviceCode:     _getDeviceCode(),
         deviceUUID:     _DEVICE_UUID,
+        // SCHEMA FIX: store stock_after (NOT NULL, no default in Supabase)
+        stockAfter:     typeof stockAfter === 'number' ? stockAfter : 0,
         synced:         false
     };
     try {
@@ -123,6 +125,9 @@ function _recordInvMovement(productCode, quantityChange, movementType, invoiceId
 
 async function _pushUnsyncedMovements() {
     if (!db) return;
+    // FIX (Sync Gap): push unsynced movements to the relational
+    // `inventory_movements` table via _dbUpsert so all devices can pull them —
+    // previously this wrote a KV blob per device which other devices never read.
     return new Promise(resolve => {
         try {
             const tx = db.transaction(['inventory_movements'], 'readonly');
@@ -130,14 +135,46 @@ async function _pushUnsyncedMovements() {
                 const all      = e.target.result || [];
                 const unsynced = all.filter(m => !m.synced);
                 if (unsynced.length === 0) { resolve(); return; }
-                const supaKey  = 'pharma_cloud_inv_movements_' + _getDeviceCode() + '_' + _DEVICE_UUID.slice(0, 8);
                 try {
-                    await _supaSet(supaKey, JSON.stringify(all));
-                    const tx2 = db.transaction(['inventory_movements'], 'readwrite');
-                    const st2  = tx2.objectStore('inventory_movements');
-                    unsynced.forEach(m => st2.put(Object.assign({}, m, { synced: true })));
-                    tx2.oncomplete = () => resolve();
-                    tx2.onerror    = () => resolve();
+                    // Map IDB movement shape → Supabase inventory_movements columns
+                    const rows = unsynced.map(m => ({
+                        movement_id:    m.movementId,
+                        product_code:   m.productCode,
+                        quantity_change: Number(m.quantityChange) || 0,
+                        // SCHEMA FIX: stock_after is NOT NULL with no default
+                        stock_after:    typeof m.stockAfter === 'number' ? m.stockAfter : 0,
+                        movement_type:  m.movementType  || 'ADJUSTMENT',
+                        invoice_number: m.invoiceId     || null,
+                        description:    m.description   || null,
+                        device_uuid:    m.deviceUUID    || _DEVICE_UUID,
+                        counter_id:     m.deviceCode    || _getDeviceCode(),
+                        moved_at:       m.timestamp
+                            ? new Date(m.timestamp).toISOString()
+                            : new Date().toISOString()
+                    }));
+                    // Upsert in batches of 200 to stay within PostgREST payload limits
+                    const BATCH = 200;
+                    let allOk = true;
+                    for (let i = 0; i < rows.length; i += BATCH) {
+                        const batch = rows.slice(i, i + BATCH);
+                        // _dbUpsert is defined in config.js — gracefully skip if unavailable
+                        if (typeof _dbUpsert !== 'function') { allOk = false; break; }
+                        const { error } = await _dbUpsert('inventory_movements', batch, 'movement_id');
+                        if (error) { allOk = false; break; }
+                    }
+                    if (allOk) {
+                        // Also keep legacy KV blob for backward-compat with older clients
+                        const supaKey = 'pharma_cloud_inv_movements_' + _getDeviceCode() + '_' + _DEVICE_UUID.slice(0, 8);
+                        _supaSet(supaKey, JSON.stringify(all)).catch(() => {});
+                        // Mark movements as synced in IDB
+                        const tx2 = db.transaction(['inventory_movements'], 'readwrite');
+                        const st2  = tx2.objectStore('inventory_movements');
+                        unsynced.forEach(m => st2.put(Object.assign({}, m, { synced: true })));
+                        tx2.oncomplete = () => resolve();
+                        tx2.onerror    = () => resolve();
+                    } else {
+                        resolve();
+                    }
                 } catch(err) { resolve(); }
             };
             tx.onerror = () => resolve();
@@ -838,7 +875,7 @@ function saveProductFormData() {
 
             if (isNewProduct) {
                 const openingQty = Number(openingStock) || Number(stock) || 0;
-                _recordInvMovement(code, openingQty, 'OPENING', 'BASELINE', 'Initial baseline stock configuration');
+                _recordInvMovement(code, openingQty, 'OPENING', 'BASELINE', 'Initial baseline stock configuration', openingQty);
             }
 
             if (_invReady) renderInventoryView(); else showInventoryPlaceholder();
@@ -1039,7 +1076,29 @@ function deleteProductFromCatalogue(productCode) {
             return;
         }
 
-        window.masterInventoryDB = imported;
+        // FIX (CSV Merge): merge/upsert imported rows into existing inventory
+        // instead of overwriting — preserves stock for items not in CSV,
+        // and preserves company/supplier for existing items when CSV lacks those columns.
+        const _existingDB = Array.isArray(window.masterInventoryDB) ? window.masterInventoryDB : [];
+        const _importMap = new Map(imported.map(item => [item.code, item]));
+        // Overwrite existing items with imported data; keep items not in CSV
+        const _mergedDB = _existingDB.map(existing => {
+            const incoming = _importMap.get(existing.code);
+            if (incoming) {
+                // Merge: incoming wins for all fields it provides; preserve
+                // company/supplier if CSV did not include those columns
+                return Object.assign({}, existing, incoming,
+                    { company:  incoming.company  || existing.company  || '',
+                      supplier: incoming.supplier || existing.supplier || '' });
+            }
+            return existing; // not in CSV — keep as-is
+        });
+        // Add brand-new items from CSV that did not exist locally
+        const _existingCodes = new Set(_existingDB.map(p => p.code));
+        imported.filter(item => !_existingCodes.has(item.code)).forEach(item => _mergedDB.push(item));
+        const _newCount = _mergedDB.length - _existingDB.length;
+        const _updCount = imported.length - _newCount;
+        window.masterInventoryDB = _mergedDB;
         try {
             saveInventoryToDB(window.masterInventoryDB);
             const demoBanner = document.getElementById('demoInventoryBanner');
@@ -1048,7 +1107,7 @@ function deleteProductFromCatalogue(productCode) {
             else if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
             if (typeof updateHdrStats === 'function') updateHdrStats();
             const skipNote = skipped.length ? ' (' + skipped.length + ' rows skipped)' : '';
-            showToast('✅ CSV imported: ' + imported.length + ' products loaded.' + skipNote);
+            showToast('✅ CSV imported: ' + _updCount + ' updated, ' + _newCount + ' new products.' + skipNote);
             // Phase 4: push bootstrap to Supabase inventory table (master device only).
             // Runs asynchronously so it never blocks the local import flow.
             if (typeof _pushInventoryBootstrapToCloud === 'function') {

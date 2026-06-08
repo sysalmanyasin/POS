@@ -797,7 +797,7 @@ function _doCancelEditBill() {
                 const prod = masterInventoryDB.find(p => p.code === item.code);
                 if (prod) {
                     prod.stock = Number(prod.stock) + parseInt(item.qty, 10);
-                    _recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', currentlyEditingInvoiceId);
+                    _recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', currentlyEditingInvoiceId, null, Number(prod.stock));
                     _atomicStockWriteBack(item.code, Number(prod.stock));
                 }
             });
@@ -1064,7 +1064,17 @@ async function finalizeAndPrintBill() {
 
     const custName     = document.getElementById('customerNameInput').value.trim();
     const custPhone    = document.getElementById('customerPhoneInput').value.trim();
-    const staffNameTag = (typeof activeStaff !== 'undefined' && activeStaff) ? activeStaff.name : '';
+    // FIX (Staff Name): fall back to settings operatorName when no staff PIN login active,
+    // so the invoice always carries a meaningful staff/operator name.
+    const _settingsStaffName = (function() {
+        try {
+            const bi = JSON.parse(StorageModule.get('pharma_branch_identity') || '{}');
+            return bi.operatorName || '';
+        } catch(_e) { return ''; }
+    })();
+    const staffNameTag = (typeof activeStaff !== 'undefined' && activeStaff && activeStaff.name)
+        ? activeStaff.name
+        : _settingsStaffName;
     const _hasManual   = finalDetails.some(d => (d.code || '').startsWith('MANUAL'));
 
     // ── STEP 3: Write local ledger snapshot (History / refund paths) ──────
@@ -1163,6 +1173,8 @@ async function finalizeAndPrintBill() {
         customer_phone:  custPhone,
         staff_name:      staffNameTag,
         discount_pct:    disc,
+        // SCHEMA FIX: invoices.discount_amount NOT NULL, must be explicit
+        discount_amount: parseFloat(deduction.toFixed(2)),
         subtotal:        parseFloat(subtotal.toFixed(2)),
         net_total:       parseFloat(rounded.toFixed(2)),
         round_off_amt:   roStep > 0 ? parseFloat(roundOffAmt.toFixed(2)) : 0,
@@ -1192,7 +1204,7 @@ async function finalizeAndPrintBill() {
             const newStock = Math.max(0, Number(prod.stock) - soldQty);
             const deducted = Number(prod.stock) - newStock;
             prod.stock = newStock;
-            _recordInvMovement(item.code, -deducted, 'SALE', invoiceID);
+            _recordInvMovement(item.code, -deducted, 'SALE', invoiceID, null, newStock);
             _atomicStockWriteBack(item.code, newStock);
         }
     });
@@ -1280,7 +1292,7 @@ function _doRecallLastSaved(inv) {
         const prod = masterInventoryDB.find(p => p.code === item.code);
         if (prod) {
             prod.stock = Number(prod.stock) + parseInt(item.qty, 10);
-            _recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', inv.id);
+            _recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', inv.id, null, Number(prod.stock));
             _atomicStockWriteBack(item.code, prod.stock);
         }
     });
@@ -1350,7 +1362,7 @@ async function _doUpdateBill(invoiceId) {
             const prod = masterInventoryDB.find(p => p.code === item.code);
             if (prod) {
                 prod.stock = Number(prod.stock) + parseInt(item.qty, 10);
-                _recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', inv.id);
+                _recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', inv.id, null, Number(prod.stock));
                 _atomicStockWriteBack(item.code, prod.stock);
             }
         });
@@ -1390,7 +1402,7 @@ function processFullRefund(invoiceId) {
         const prod = masterInventoryDB.find(p => p.code === item.code);
         const returnQty = parseInt(item.qty, 10) || 0;
         if (prod) {
-            _recordInvMovement(item.code, returnQty, 'REFUND', invoiceId);
+            _recordInvMovement(item.code, returnQty, 'REFUND', invoiceId, null, Number(prod.stock) + returnQty);
             prod.stock = Number(prod.stock) + returnQty;
             _atomicStockWriteBack(item.code, prod.stock);
         }
@@ -1453,6 +1465,7 @@ function processFullRefund(invoiceId) {
                 customer_phone:   original.customerPhone || '',
                 staff_name:       original.staffName     || '',
                 discount_pct:     original.discountPct   || 0,
+                discount_amount:  0,  // full refund — no further discount computed
                 subtotal:         Number(original.netTotal) || 0,
                 net_total:        Number(original.netTotal) || 0,
                 round_off_amt:    original.roundOffAmt   || 0,
@@ -1468,6 +1481,15 @@ function processFullRefund(invoiceId) {
             };
             StorageModule.pushToSyncQueue('INVOICE', refPayload, maxVer).catch(e => {
                 console.warn('[FullRefund] pushToSyncQueue failed (non-fatal):', e);
+            });
+            // SCHEMA FIX: mark original invoice as is_fully_refunded=true in Supabase.
+            // Push a minimal INVOICE_UPDATE so syncHub can patch the original row.
+            // Uses is_edit:true so the upsert path runs without touching line_items.
+            StorageModule.pushToSyncQueue('INVOICE_UPDATE', {
+                invoice_number:    invoiceId,
+                is_fully_refunded: true
+            }, 1).catch(e => {
+                console.warn('[FullRefund] is_fully_refunded update push failed (non-fatal):', e);
             });
         } catch(qErr) {
             console.warn('[FullRefund] Queue payload assembly failed (non-fatal):', qErr);
@@ -1930,7 +1952,7 @@ function submitPartialRefund() {
         const prod      = masterInventoryDB.find(p => p.code === line.code);
         const returnQty = parseInt(line.returnQty, 10) || 0;
         if (prod) {
-            _recordInvMovement(line.code, returnQty, 'PARTIAL_REFUND', refId);
+            _recordInvMovement(line.code, returnQty, 'PARTIAL_REFUND', refId, null, Number(prod.stock) + returnQty);
             prod.stock = Number(prod.stock) + returnQty;
             _atomicStockWriteBack(line.code, prod.stock);
         }
@@ -2016,6 +2038,8 @@ function submitPartialRefund() {
                 customer_phone:      inv.customerPhone || '',
                 staff_name:          inv.staffName     || '',
                 discount_pct:        discountPct,
+                // SCHEMA FIX: discount_amount column must be explicit
+                discount_amount:     0,  // partial refund — no additional discount applied
                 subtotal:            Number(refAmt.toFixed(2)),
                 net_total:           Number(refAmt.toFixed(2)),
                 round_off_amt:       0,
