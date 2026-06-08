@@ -87,12 +87,8 @@ const DevicesModule = (() => {
         const myDevice = await _fetchMyDevice();
 
         if (!myDevice) {
-            // Brand new device — go through the registration gate (Admin PIN + EmailJS OTP)
-            if (typeof _startDeviceRegistrationGate === 'function') {
-                _startDeviceRegistrationGate();
-            } else {
-                _showRegistrationModal(); // fallback
-            }
+            // Brand new device on this browser
+            _showRegistrationModal();
             return;
         }
 
@@ -190,14 +186,9 @@ const DevicesModule = (() => {
                 return;
             }
 
-            // Auto-assign role — honour post-purge master flag as tiebreaker.
-            // If the EmailJS PIN flow completed on this device, sys_is_master_device
-            // is set to 'true'. Use it to force master even if a stale row survived
-            // the purge and _masterExists() incorrectly returns true.
+            // Auto-assign role
             const hasMaster = await _masterExists();
-            const forceMaster = StorageModule.get('sys_is_master_device') === 'true';
-            const role = (!hasMaster || forceMaster) ? 'master' : 'client';
-            if (forceMaster) StorageModule.remove('sys_is_master_device');
+            const role = hasMaster ? 'client' : 'master';
 
             const now = new Date().toISOString();
             const row = {
@@ -235,6 +226,11 @@ const DevicesModule = (() => {
             const roleLabel = role === 'master' ? '👑 Master' : '💻 Client';
             if (typeof showToast === 'function') {
                 showToast(`✅ Device "${name}" registered as ${roleLabel}.`);
+            }
+
+            // If this is the first master device, trigger master setup flow
+            if (role === 'master' && typeof _checkAndInitMasterSetup === 'function') {
+                setTimeout(() => _checkAndInitMasterSetup(), 800);
             }
 
         } catch(e) {
@@ -405,76 +401,22 @@ const DevicesModule = (() => {
             }
         } catch(_e) {}
 
-        // Cloud-wipe broadcast (DATA_WIPE) — wipes data only, keeps device identity + auth
+        // Targeted commands
         try {
-            const cwRaw = await _supaGet('pharma_cloud_wipe_cmd');
-            if (cwRaw) {
-                const cwCmd       = JSON.parse(cwRaw);
-                const now         = Date.now();
-                const exp         = Number(cwCmd && cwCmd.expiresAt) || 0;
-                const issuedBy    = cwCmd && cwCmd.issuedBy;
-                const lastApplied = localStorage.getItem('pharma_cloud_wipe_applied_at');
-                const issuedAt    = String(Number(cwCmd && cwCmd.issuedAt) || 0);
-
-                let issuerOk = (issuedBy === _DEVICE_UUID);
-                if (!issuerOk && issuedBy) {
-                    try {
-                        const { data } = await _dbSelect(
-                            'devices',
-                            'uuid=eq.' + encodeURIComponent(issuedBy) + '&role=eq.master',
-                            'uuid'
-                        );
-                        issuerOk = !!(data && data.length > 0);
-                    } catch(_e) { issuerOk = false; }
-                }
-
-                if (issuerOk && exp >= now && lastApplied !== issuedAt) {
-                    try { localStorage.setItem('pharma_cloud_wipe_applied_at', issuedAt); } catch(_e) {}
-                    await _executeCommand({ type: 'DATA_WIPE', sentBy: issuedBy });
-                    return;
-                }
-            }
-        } catch(_e) {}
-
-        // Targeted commands — F1.29: read per-device keys (pharma_cmd_{myUUID}_{ts})
-        // written by the updated sendCommand(). Also checks the legacy shared
-        // pharma_commands key so commands sent before the update still execute.
-        try {
-            // ── New path: per-device keys ────────────────────────────────
-            // List all KV keys, find those addressed to this device
-            const { data: allKeys } = await _dbSelect('pharma_sync', 'key', 'key=like.pharma_cmd_' + _DEVICE_UUID + '_%');
-            const deviceKeys = Array.isArray(allKeys) ? allKeys.map(r => r.key).filter(Boolean) : [];
-
-            for (const cmdKey of deviceKeys) {
-                try {
-                    const raw = await _supaGet(cmdKey);
-                    if (!raw) continue;
-                    const cmd = JSON.parse(raw);
-                    if (cmd && !cmd.executed) {
-                        await _executeCommand(cmd);
-                        // Delete the key after execution — no write-back needed
-                        await _supaDel(cmdKey);
-                    }
-                } catch(_cmdErr) {
-                    console.warn('[DevicesModule] Error processing command key', cmdKey, _cmdErr);
-                }
-            }
-
-            // ── Legacy path: shared pharma_commands array (backward compat) ──
-            const legacyRaw = await _supaGet(COMMANDS_KEY);
-            const legacyCmds = legacyRaw ? JSON.parse(legacyRaw) : [];
-            const legacyPending = (Array.isArray(legacyCmds) ? legacyCmds : []).filter(c => {
+            const raw      = await _supaGet(COMMANDS_KEY);
+            const commands = raw ? JSON.parse(raw) : [];
+            const pending  = (Array.isArray(commands) ? commands : []).filter(c => {
                 const target = c?.targetUUID || c?.target_uuid;
                 return target === _DEVICE_UUID && !c.executed;
             });
-            if (legacyPending.length > 0) {
-                for (const cmd of legacyPending) {
-                    await _executeCommand(cmd);
-                    cmd.executed   = true;
-                    cmd.executedAt = Date.now();
-                }
-                await _supaSet(COMMANDS_KEY, JSON.stringify(legacyCmds));
+            if (pending.length === 0) return;
+
+            for (const cmd of pending) {
+                await _executeCommand(cmd);
+                cmd.executed   = true;
+                cmd.executedAt = Date.now();
             }
+            await _supaSet(COMMANDS_KEY, JSON.stringify(commands));
         } catch(e) { console.warn('[DevicesModule] Command poll failed:', e); }
     }
 
@@ -540,14 +482,8 @@ const DevicesModule = (() => {
             }
             case 'GLOBAL_PURGE': {
                 console.warn('[DevicesModule] GLOBAL_PURGE received — wiping local data.');
-                if (typeof StorageModule !== 'undefined' && typeof StorageModule.setSyncEnabled === 'function') {
-                    try { StorageModule.setSyncEnabled(false); } catch(_e) {}
-                }
                 if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllPrimaryStores === 'function') {
                     try { StorageModule.clearAllPrimaryStores(); } catch(_e) {}
-                }
-                if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllQueues === 'function') {
-                    try { StorageModule.clearAllQueues(); } catch(_e) {}
                 }
                 try {
                     const keep = new Set(['pharma_device_id', 'pharma_global_purge_applied_at']);
@@ -565,54 +501,6 @@ const DevicesModule = (() => {
                 } catch(_e) {}
                 stop();
                 setTimeout(() => { try { window.location.reload(); } catch(_e) {} }, 2000);
-                break;
-            }
-            case 'DATA_WIPE': {
-                // Cloud Purge broadcast: wipe local data + queues.
-                // Keeps: device identity, auth keys, device role.
-                // No lock screen — device stays registered and usable after reload.
-                console.warn('[DevicesModule] DATA_WIPE received — clearing local data.');
-
-                // 1. Clear primary IDB stores (invoices, heldBills, cart)
-                if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllPrimaryStores === 'function') {
-                    try { StorageModule.clearAllPrimaryStores(); } catch(_e) {}
-                }
-                // 2. Clear sync queues so no stale writes repopulate cloud
-                if (typeof StorageModule !== 'undefined' && typeof StorageModule.clearAllQueues === 'function') {
-                    try { StorageModule.clearAllQueues(); } catch(_e) {}
-                }
-                // 3. Clear PharmaInventoryDB (inventory + movements)
-                try {
-                    if (typeof db !== 'undefined' && db) {
-                        try { db.transaction(['inventory'], 'readwrite').objectStore('inventory').clear(); } catch(_e) {}
-                        try { db.transaction(['inventory_movements'], 'readwrite').objectStore('inventory_movements').clear(); } catch(_e) {}
-                    }
-                } catch(_e) {}
-                // 4. Wipe localStorage — keep device identity + auth
-                try {
-                    const keepWipe = new Set([
-                        'pharma_device_id', 'pharma_device_name',
-                        'pharma_device_role', 'pharma_device_counter_id',
-                        'sys_admin_pass_hash', 'sys_has_password',
-                        '_supabase_sync_on', 'pharma_cloud_wipe_applied_at'
-                    ]);
-                    Object.keys(localStorage).forEach(k => {
-                        if (!keepWipe.has(k) && (k.startsWith('pharma_') || k.startsWith('sys_') ||
-                            k === '_pharma_inv_fingerprint' || k === '_supabase_settings_ts')) {
-                            try { localStorage.removeItem(k); } catch(_e) {}
-                        }
-                    });
-                } catch(_e) {}
-                // 5. Reset in-memory globals
-                try {
-                    if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = [];
-                    if (typeof temporaryHeldBills  !== 'undefined') temporaryHeldBills  = [];
-                    if (typeof masterInventoryDB   !== 'undefined') masterInventoryDB   = [];
-                    if (typeof activeCartItems     !== 'undefined') activeCartItems     = [];
-                } catch(_e) {}
-
-                stop();
-                setTimeout(() => { try { window.location.reload(); } catch(_e) {} }, 1500);
                 break;
             }
             default:
@@ -682,14 +570,10 @@ const DevicesModule = (() => {
     // ── Send command to a specific device ─────────────────────────────────
 
     async function sendCommand(targetUUID, type, payload) {
-        // F1.29: Write to a per-sender key (pharma_cmd_{senderUUID}_{ts}) instead of
-        // a shared pharma_commands array. This eliminates the read-modify-write race
-        // where two concurrent senders overwrite each other's commands.
-        // Recipients poll all keys matching pharma_cmd_{their_uuid}* or pharma_cmd_*
-        // (handled in the polling loop below).
         try {
-            const cmdKey = 'pharma_cmd_' + targetUUID + '_' + Date.now();
-            const cmd = {
+            const raw      = await _supaGet(COMMANDS_KEY);
+            const commands = raw ? JSON.parse(raw) : [];
+            commands.push({
                 id:         _DEVICE_UUID.slice(0, 8) + '_' + Date.now(),
                 targetUUID,
                 type,
@@ -699,8 +583,8 @@ const DevicesModule = (() => {
                 sentBy:     _DEVICE_UUID,
                 executed:   false,
                 executedAt: null
-            };
-            await _supaSet(cmdKey, JSON.stringify(cmd));
+            });
+            await _supaSet(COMMANDS_KEY, JSON.stringify(commands));
             if (typeof showToast === 'function') showToast('📨 Command "' + type + '" sent.');
         } catch(e) {
             console.error('[DevicesModule] sendCommand failed:', e);
@@ -880,40 +764,6 @@ const DevicesModule = (() => {
         }
     }
 
-    // Finding 1.8: True hard-delete — permanently removes the device row from
-    // the `devices` table, then sends a PURGE command so the target clears its
-    // local data.  DEVICE_DELETE in auth.js routes here; DEVICE_PURGE continues
-    // to use _doPurgeDevice (soft deactivation + purge command).
-    async function _doDeleteDevice(targetUUID) {
-        try {
-            // Send PURGE command first while the device row still exists so the
-            // recipient can act on it before the row disappears.
-            await sendCommand(targetUUID, 'PURGE');
-            // Hard-delete the row from the devices table
-            const { error } = await _dbDelete(
-                'devices',
-                'uuid=eq.' + encodeURIComponent(targetUUID)
-            );
-            if (error) throw new Error(String(error));
-            // Also clean up any per-device command keys left in pharma_sync
-            try {
-                const { data: cmdKeys } = await _dbSelect(
-                    'pharma_sync', 'key',
-                    'key=like.pharma_cmd_' + encodeURIComponent(targetUUID) + '_%'
-                );
-                if (Array.isArray(cmdKeys)) {
-                    for (const row of cmdKeys) {
-                        await _dbDelete('pharma_sync', 'key=eq.' + encodeURIComponent(row.key));
-                    }
-                }
-            } catch (_ce) { /* non-fatal — orphan keys expire naturally */ }
-            if (typeof showToast === 'function') showToast('🗑️ Device permanently deleted and PURGE command sent.');
-            await _refreshDashboard();
-        } catch(e) {
-            if (typeof showToast === 'function') showToast('❌ Delete failed: ' + (e.message || e), true);
-        }
-    }
-
     async function _setAsMaster(targetUUID) {
         requestAdminAccess('DEVICE_SET_MASTER', targetUUID);
     }
@@ -1065,7 +915,6 @@ const DevicesModule = (() => {
         _lockPinKey,
         _removeDevice,
         _doPurgeDevice,
-        _doDeleteDevice,
         _setAsMaster,
         _doSetAsMaster,
         _registerOrUpdateDevice,

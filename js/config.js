@@ -120,9 +120,7 @@ async function _dbInsert(table, rows) {
  */
 async function _dbUpsert(table, rows, onConflict = 'uuid') {
     try {
-        const url = _SUPA_URL + '/rest/v1/' + table +
-                    (onConflict ? '?on_conflict=' + encodeURIComponent(onConflict) : '');
-        const r = await fetch(url, {
+        const r = await fetch(_SUPA_URL + '/rest/v1/' + table, {
             method:  'POST',
             headers: {
                 ..._SUPA_HEADERS,
@@ -169,8 +167,6 @@ async function _dbUpdate(table, query, updates) {
  * @param {string} query — PostgREST filter, e.g. "uuid=eq.abc-123"
  */
 async function _dbDelete(table, query) {
-    // F1.1: Guard against empty filter — an empty query would delete ALL rows
-    if (!query) return { data: null, error: 'DELETE requires a non-empty filter' };
     try {
         const r = await fetch(_SUPA_URL + '/rest/v1/' + table + '?' + query, {
             method:  'DELETE',

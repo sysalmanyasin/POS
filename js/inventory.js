@@ -130,38 +130,15 @@ async function _pushUnsyncedMovements() {
                 const all      = e.target.result || [];
                 const unsynced = all.filter(m => !m.synced);
                 if (unsynced.length === 0) { resolve(); return; }
-
-                // FIX: Push to the relational inventory_movements table (not legacy KV blob).
-                // Maps IDB camelCase → Supabase snake_case column names.
-                const rows = unsynced.map(m => ({
-                    movement_id:     m.movementId,
-                    product_code:    m.productCode,
-                    quantity_change: typeof m.quantityChange === 'number' ? m.quantityChange : 0,
-                    movement_type:   m.movementType   || 'ADJUSTMENT',
-                    invoice_id:      m.invoiceId      || null,
-                    description:     m.description    || null,
-                    moved_at:        new Date(m.timestamp || Date.now()).toISOString(),
-                    device_code:     m.deviceCode     || _getDeviceCode(),
-                    device_uuid:     m.deviceUUID     || _DEVICE_UUID
-                }));
-
+                const supaKey  = 'pharma_cloud_inv_movements_' + _getDeviceCode() + '_' + _DEVICE_UUID.slice(0, 8);
                 try {
-                    const { error } = await _dbUpsert('inventory_movements', rows, 'movement_id');
-                    if (error) {
-                        console.warn('[Movements] Relational push failed:', error);
-                        resolve();
-                        return;
-                    }
-                    // Mark all flushed rows as synced in IDB
+                    await _supaSet(supaKey, JSON.stringify(all));
                     const tx2 = db.transaction(['inventory_movements'], 'readwrite');
-                    const st2 = tx2.objectStore('inventory_movements');
+                    const st2  = tx2.objectStore('inventory_movements');
                     unsynced.forEach(m => st2.put(Object.assign({}, m, { synced: true })));
                     tx2.oncomplete = () => resolve();
                     tx2.onerror    = () => resolve();
-                } catch(err) {
-                    console.warn('[Movements] Push threw:', err);
-                    resolve();
-                }
+                } catch(err) { resolve(); }
             };
             tx.onerror = () => resolve();
         } catch(e) { resolve(); }
@@ -521,9 +498,6 @@ function renderInventoryView() {
     const container = document.getElementById('inventoryViewContent');
     if (!container) return;
 
-    // Probe for missing Supabase columns (Generic/Company/Supplier blank fix)
-    if (navigator.onLine) _checkInventoryColumnsExist().catch(() => {});
-
     const items = Array.isArray(masterInventoryDB) ? [...masterInventoryDB] : [];
     if (items.length === 0) {
         container.innerHTML = '<div class="inv-empty">No inventory items. Import a CSV via Data Hub to get started.</div>';
@@ -603,7 +577,7 @@ function renderInventoryView() {
     const shownCount = filtered.length;
     const rows = filtered.map(item => {
         const s = Number(item.stock) || 0;
-        const stockCls = s < 0 ? 'inv-stock-neg' : s === 0 ? 'inv-stock-zero' : s <= 10 ? 'inv-stock-low' : 'inv-stock-ok';
+        const stockCls = s <= 0 ? 'inv-stock-zero' : s <= 10 ? 'inv-stock-low' : 'inv-stock-ok';
         const codeEsc = _escHtml(item.code);
         return `<tr class="inv-row" onclick="openItemHistoryDrawer('${codeEsc}')" title="View movement history">
             <td class="inv-td inv-td-code">${_escHtml(item.code)}</td>
@@ -687,162 +661,111 @@ document.addEventListener('DOMContentLoaded', function() {
     if (ledgerBtn) ledgerBtn.addEventListener('click', _compileLedgerForCurrentDrawer);
 });
 
-async function _compileLedgerForCurrentDrawer() {
+function _compileLedgerForCurrentDrawer() {
     const productCode = _currentDrawerCode;
     const body = document.getElementById('itemHistoryDrawerBody');
     if (!productCode || !body) return;
+    if (!db) { body.innerHTML = '<p class="inv-err" style="padding:16px;color:var(--red);">Database unavailable.</p>'; return; }
     body.innerHTML = '<div class="inv-loading" style="padding:16px;text-align:center;color:var(--g500);font-size:12px;">⏳ Compiling ledger…</div>';
+    try {
+        const tx  = db.transaction(['inventory_movements'], 'readonly');
+        const idx = tx.objectStore('inventory_movements').index('by_code');
+        const req = idx.getAll(IDBKeyRange.only(productCode));
 
-    const item = Array.isArray(masterInventoryDB) ? masterInventoryDB.find(it => it.code === productCode) : null;
+        req.onsuccess = function(e) {
+            const item = Array.isArray(masterInventoryDB) ? masterInventoryDB.find(it => it.code === productCode) : null;
+            const rawMovements = e.target.result || [];
 
-    // ── Step 1: Read local IDB movements ───────────────────────────────
-    let localMovements = [];
-    if (db) {
-        try {
-            localMovements = await new Promise((resolve, reject) => {
-                const tx  = db.transaction(['inventory_movements'], 'readonly');
-                const idx = tx.objectStore('inventory_movements').index('by_code');
-                const req = idx.getAll(IDBKeyRange.only(productCode));
-                req.onsuccess = e => resolve(e.target.result || []);
-                req.onerror   = () => reject(new Error('IDB read failed'));
+            const ascending = rawMovements.slice().sort((a, b) => {
+                const ta = typeof a.timestamp === 'number' ? a.timestamp : new Date(a.timestamp).getTime();
+                const tb = typeof b.timestamp === 'number' ? b.timestamp : new Date(b.timestamp).getTime();
+                return ta - tb;
             });
-        } catch (_e) { localMovements = []; }
-    }
 
-    // ── Step 2: Fetch cloud movements from Supabase ────────────────────
-    // inventory_movements are written by deduct_inventory_atomic (server-side).
-    // Client devices never get them in IDB — so we must query Supabase directly.
-    let cloudMovements = [];
-    if (navigator.onLine && typeof _dbSelect === 'function') {
-        try {
-            const filter = 'product_code=eq.' + encodeURIComponent(productCode) + '&order=moved_at.asc';
-            const { data, error } = await _dbSelect('inventory_movements', filter, '*');
-            if (!error && Array.isArray(data)) {
-                cloudMovements = data.map(r => ({
-                    movementId:     r.id              || '',
-                    productCode:    r.product_code    || productCode,
-                    quantityChange: Number(r.quantity_change) || 0,
-                    movementType:   r.movement_type   || 'UNKNOWN',
-                    invoiceId:      r.invoice_number  || '',
-                    description:    r.description     || '',
-                    timestamp:      r.moved_at ? new Date(r.moved_at).getTime() : 0,
-                    deviceCode:     r.device_uuid     || '—',
-                    _fromCloud:     true
-                }));
+            const hasOpening = ascending.some(m => m.movementType === 'OPENING');
+            let augmented = ascending;
+            if (!hasOpening && item) {
+                const sumDeltas = ascending.reduce((acc, m) => acc + (Number(m.quantityChange) || 0), 0);
+                const syntheticQty = Number(item.stock) - sumDeltas;
+                const earliestTs  = ascending.length > 0
+                    ? ((typeof ascending[0].timestamp === 'number' ? ascending[0].timestamp : new Date(ascending[0].timestamp).getTime()) - 1000)
+                    : Date.now();
+                augmented = [{
+                    movementId:     'BASELINE_ESTIMATE',
+                    productCode,
+                    quantityChange: syntheticQty,
+                    movementType:   'OPENING',
+                    invoiceId:      'BASELINE',
+                    description:    'Opening balance estimated from snapshot — no explicit record found',
+                    timestamp:      earliestTs,
+                    deviceCode:     '—',
+                    _isSynthetic:   true
+                }, ...ascending];
             }
-        } catch (_e) { /* non-fatal — use local only */ }
+
+            if (augmented.length === 0) {
+                body.innerHTML = '<p class="inv-hist-empty" style="padding:16px;text-align:center;color:var(--g500);">No movement records found for this item.</p>';
+                return;
+            }
+
+            let runningBalance = 0;
+            const ledgerWithBalance = augmented.map(function(m) {
+                runningBalance += Number(m.quantityChange) || 0;
+                return Object.assign({}, m, { _balanceAfter: runningBalance });
+            });
+
+            const descending = ledgerWithBalance.slice().reverse();
+            const finalLedgerStock = runningBalance;
+
+            const typeLabel = { SALE:'🛒 Sale', REFUND:'↩ Refund', PARTIAL_REFUND:'↩ Partial Refund', OPENING:'📦 Opening Stock', ADJUSTMENT:'🔧 Adjustment', EDIT_RESTORE:'✏️ Edit Restore' };
+            const typeClass = { SALE:'inv-mv-sale', REFUND:'inv-mv-refund', PARTIAL_REFUND:'inv-mv-refund', OPENING:'inv-mv-open', ADJUSTMENT:'inv-mv-adj', EDIT_RESTORE:'inv-mv-adj' };
+
+            const rows = descending.map(function(m) {
+                const sign    = Number(m.quantityChange) >= 0 ? '+' : '';
+                const label   = typeLabel[m.movementType] || _escHtml(String(m.movementType || '—'));
+                const cls     = typeClass[m.movementType] || '';
+                const isSynth = !!m._isSynthetic;
+                const tsRaw   = m.timestamp;
+                const tsMs    = typeof tsRaw === 'number' ? tsRaw : new Date(tsRaw).getTime();
+                const ts      = (tsMs && !isSynth)
+                    ? new Date(tsMs).toLocaleString([], { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })
+                    : (isSynth ? 'Baseline estimate' : '—');
+                const dispBal  = Math.max(0, m._balanceAfter);
+                const balCls   = m._balanceAfter <= 0 ? 'inv-mv-neg' : m._balanceAfter <= 10 ? 'inv-mv-low' : 'inv-mv-pos';
+                const rowStyle = isSynth ? ' style="opacity:.72;font-style:italic;"' : '';
+                const descText = m.description ? _escHtml(String(m.description)) : (isSynth ? '<em style="color:var(--g400);">Auto-estimated</em>' : '—');
+                return '<tr' + rowStyle + '>' +
+                    '<td class="inv-mv-td inv-mv-ts">'  + _escHtml(ts) + '</td>' +
+                    '<td class="inv-mv-td"><span class="inv-mv-type ' + cls + '">' + label + (isSynth ? ' *' : '') + '</span></td>' +
+                    '<td class="inv-mv-td inv-mv-qty '  + (Number(m.quantityChange) >= 0 ? 'inv-mv-pos' : 'inv-mv-neg') + '">' + _escHtml(sign + String(Number(m.quantityChange))) + '</td>' +
+                    '<td class="inv-mv-td inv-mv-bal '  + balCls + '">' + _escHtml(String(dispBal)) + '</td>' +
+                    '<td class="inv-mv-td inv-mv-inv">' + (m.invoiceId ? _escHtml(String(m.invoiceId)) : '—') + '</td>' +
+                    '<td class="inv-mv-td inv-mv-dev">' + _escHtml(String(m.deviceCode || (m.deviceUUID ? m.deviceUUID.slice(0, 8) : '—'))) + '</td>' +
+                    '<td class="inv-mv-td inv-mv-desc">' + descText + '</td>' +
+                '</tr>';
+            }).join('');
+
+            body.innerHTML =
+                '<div class="inv-hist-summary" style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 12px;background:var(--g50);border-bottom:1px solid var(--g200);font-size:12px;">' +
+                    '<span class="inv-hist-count" style="font-weight:700;color:var(--teal);">' + _escHtml(String(rawMovements.length)) + ' movement' + (rawMovements.length !== 1 ? 's' : '') + '</span>' +
+                    '<span class="inv-hist-ledger" style="color:var(--g700);">Computed Ledger Balance: <strong>' + _escHtml(String(finalLedgerStock)) + '</strong></span>' +
+                    (item ? '<span class="inv-hist-snapshot" style="color:var(--g600);">Snapshot Stock: <strong>' + _escHtml(String(item.stock != null ? item.stock : '—')) + '</strong></span>' : '') +
+                '</div>' +
+                '<div style="overflow-x:auto;">' +
+                '<table class="inv-mv-table" style="width:100%;border-collapse:collapse;">' +
+                    '<thead><tr>' +
+                        '<th class="inv-mv-th">Time</th><th class="inv-mv-th">Type</th><th class="inv-mv-th">Qty Δ</th>' +
+                        '<th class="inv-mv-th">Balance</th><th class="inv-mv-th">Invoice</th>' +
+                        '<th class="inv-mv-th">Device</th><th class="inv-mv-th">Description</th>' +
+                    '</tr></thead>' +
+                    '<tbody>' + rows + '</tbody>' +
+                '</table></div>';
+        };
+        req.onerror = function() { body.innerHTML = '<p class="inv-err" style="padding:16px;color:var(--red);">Failed to load movement history.</p>'; };
+        tx.onerror  = function() { body.innerHTML = '<p class="inv-err" style="padding:16px;color:var(--red);">Transaction error loading ledger.</p>'; };
+    } catch(e) {
+        body.innerHTML = '<p class="inv-err" style="padding:16px;color:var(--red);">Error: ' + _escHtml(String(e.message || e)) + '</p>';
     }
-
-    // ── Step 3: Merge — cloud authoritative; local fills any gaps ─────
-    // Deduplicate: prefer cloud record if movementId matches, else keep local.
-    const cloudIds = new Set(cloudMovements.map(m => m.movementId).filter(Boolean));
-    const localOnly = localMovements.filter(m => {
-        // Local IDB uses movementId; skip if cloud already has it
-        return !m.movementId || !cloudIds.has(String(m.movementId));
-    }).map(m => ({
-        movementId:     String(m.movementId || ''),
-        productCode:    m.productCode     || productCode,
-        quantityChange: Number(m.quantityChange) || 0,
-        movementType:   m.movementType    || 'UNKNOWN',
-        invoiceId:      m.invoiceId       || '',
-        description:    m.description     || '',
-        timestamp:      typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime(),
-        deviceCode:     m.deviceCode      || '—',
-        _fromCloud:     false
-    }));
-
-    const allMovements = [...cloudMovements, ...localOnly];
-    const rawCount = allMovements.length; // before adding synthetic baseline
-
-    // ── Step 4: Sort ascending ─────────────────────────────────────────
-    const ascending = allMovements.slice().sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-
-    // ── Step 5: Inject synthetic baseline if no OPENING record ────────
-    const hasOpening = ascending.some(m => m.movementType === 'OPENING');
-    let augmented = ascending;
-    if (!hasOpening && item) {
-        const sumDeltas = ascending.reduce((acc, m) => acc + (Number(m.quantityChange) || 0), 0);
-        const syntheticQty = Number(item.stock) - sumDeltas;
-        const earliestTs   = ascending.length > 0 ? ((ascending[0].timestamp || Date.now()) - 1000) : Date.now();
-        augmented = [{
-            movementId:     'BASELINE_ESTIMATE',
-            productCode,
-            quantityChange: syntheticQty,
-            movementType:   'OPENING',
-            invoiceId:      'BASELINE',
-            description:    'Opening balance estimated from snapshot — no explicit record found',
-            timestamp:      earliestTs,
-            deviceCode:     '—',
-            _isSynthetic:   true
-        }, ...ascending];
-    }
-
-    if (augmented.length === 0) {
-        body.innerHTML = '<p class="inv-hist-empty" style="padding:16px;text-align:center;color:var(--g500);">No movement records found for this item.</p>';
-        return;
-    }
-
-    // ── Step 6: Running balance ────────────────────────────────────────
-    let runningBalance = 0;
-    const ledgerWithBalance = augmented.map(function(m) {
-        runningBalance += Number(m.quantityChange) || 0;
-        return Object.assign({}, m, { _balanceAfter: runningBalance });
-    });
-    const descending       = ledgerWithBalance.slice().reverse();
-    const finalLedgerStock = runningBalance;
-
-    // ── Step 7: Render ─────────────────────────────────────────────────
-    const typeLabel = { SALE:'🛒 Sale', REFUND:'↩ Refund', PARTIAL_REFUND:'↩ Partial Refund', OPENING:'📦 Opening Stock', ADJUSTMENT:'🔧 Adjustment', EDIT_RESTORE:'✏️ Edit Restore', UNKNOWN:'— Unknown' };
-    const typeClass = { SALE:'inv-mv-sale', REFUND:'inv-mv-refund', PARTIAL_REFUND:'inv-mv-refund', OPENING:'inv-mv-open', ADJUSTMENT:'inv-mv-adj', EDIT_RESTORE:'inv-mv-adj' };
-
-    const rows = descending.map(function(m) {
-        const sign    = Number(m.quantityChange) >= 0 ? '+' : '';
-        const label   = typeLabel[m.movementType] || _escHtml(String(m.movementType || '—'));
-        const cls     = typeClass[m.movementType] || '';
-        const isSynth = !!m._isSynthetic;
-        const tsMs    = m.timestamp || 0;
-        const ts      = (tsMs && !isSynth)
-            ? new Date(tsMs).toLocaleString([], { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })
-            : (isSynth ? 'Baseline estimate' : '—');
-        const dispBal  = Math.max(0, m._balanceAfter);
-        const balCls   = m._balanceAfter <= 0 ? 'inv-mv-neg' : m._balanceAfter <= 10 ? 'inv-mv-low' : 'inv-mv-pos';
-        const rowStyle = isSynth ? ' style="opacity:.72;font-style:italic;"' : '';
-        const descText = m.description ? _escHtml(String(m.description)) : (isSynth ? '<em style="color:var(--g400);">Auto-estimated</em>' : '—');
-        const srcBadge = m._fromCloud ? '<span style="font-size:9px;color:var(--g400);margin-left:3px;">☁</span>' : '';
-        return '<tr' + rowStyle + '>' +
-            '<td class="inv-mv-td inv-mv-ts">'  + _escHtml(ts) + '</td>' +
-            '<td class="inv-mv-td"><span class="inv-mv-type ' + cls + '">' + label + (isSynth ? ' *' : '') + '</span>' + srcBadge + '</td>' +
-            '<td class="inv-mv-td inv-mv-qty '  + (Number(m.quantityChange) >= 0 ? 'inv-mv-pos' : 'inv-mv-neg') + '">' + _escHtml(sign + String(Number(m.quantityChange))) + '</td>' +
-            '<td class="inv-mv-td inv-mv-bal '  + balCls + '">' + _escHtml(String(dispBal)) + '</td>' +
-            '<td class="inv-mv-td inv-mv-inv">' + (m.invoiceId ? _escHtml(String(m.invoiceId)) : '—') + '</td>' +
-            '<td class="inv-mv-td inv-mv-dev">' + _escHtml(String(m.deviceCode || '—')) + '</td>' +
-            '<td class="inv-mv-td inv-mv-desc">' + descText + '</td>' +
-        '</tr>';
-    }).join('');
-
-    const cloudNote = cloudMovements.length > 0
-        ? ' <span style="font-size:10px;color:var(--g400);">(☁ ' + cloudMovements.length + ' cloud + 💾 ' + localOnly.length + ' local)</span>'
-        : (navigator.onLine ? '' : ' <span style="font-size:10px;color:var(--amber);">⚠️ Offline — cloud movements not loaded</span>');
-
-    body.innerHTML =
-        '<div class="inv-hist-summary" style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 12px;background:var(--g50);border-bottom:1px solid var(--g200);font-size:12px;">' +
-            '<span class="inv-hist-count" style="font-weight:700;color:var(--teal);">' + rawCount + ' movement' + (rawCount !== 1 ? 's' : '') + cloudNote + '</span>' +
-            '<span>Computed Ledger Balance: <strong>' + finalLedgerStock + '</strong></span>' +
-            (item ? '<span>Snapshot Stock: <strong>' + item.stock + '</strong></span>' : '') +
-        '</div>' +
-        '<div class="inv-hist-table-wrap" style="overflow-x:auto;">' +
-        '<table class="inv-hist-table" style="width:100%;border-collapse:collapse;font-size:12px;">' +
-            '<thead><tr style="background:var(--g100);">' +
-                '<th class="inv-mv-th" style="padding:6px 10px;text-align:left;font-weight:700;color:var(--g600);">Time</th>' +
-                '<th class="inv-mv-th" style="padding:6px 10px;text-align:left;font-weight:700;color:var(--g600);">Type</th>' +
-                '<th class="inv-mv-th" style="padding:6px 10px;text-align:right;font-weight:700;color:var(--g600);">Qty Δ</th>' +
-                '<th class="inv-mv-th" style="padding:6px 10px;text-align:right;font-weight:700;color:var(--g600);">Balance</th>' +
-                '<th class="inv-mv-th" style="padding:6px 10px;text-align:left;font-weight:700;color:var(--g600);">Invoice</th>' +
-                '<th class="inv-mv-th" style="padding:6px 10px;text-align:left;font-weight:700;color:var(--g600);">Device</th>' +
-                '<th class="inv-mv-th" style="padding:6px 10px;text-align:left;font-weight:700;color:var(--g600);">Description</th>' +
-            '</tr></thead>' +
-            '<tbody>' + rows + '</tbody>' +
-        '</table></div>';
 }
 
 // =========================================================================
@@ -1031,9 +954,8 @@ function deleteProductFromCatalogue(productCode) {
         'manufacture':       'company',       // Candela RMS (no trailing 'r')
         'manufacturer':      'company',       // legacy alias
         'supplier':          'supplier',
-        'conversion factor': 'packDetails',             // Candela RMS pack/unit size
-        'conversion factor (pack size)': 'packDetails', // Candela RMS with full label
-        'pack size':         'packDetails'              // legacy alias
+        'conversion factor': 'packDetails',  // Candela RMS pack/unit size
+        'pack size':         'packDetails'   // legacy alias
     };
 
     function _splitCsvRow(line) {
@@ -1055,21 +977,14 @@ function deleteProductFromCatalogue(productCode) {
     }
 
     function _doCSVParse(text) {
-        const lines = text.replace(/\uFEFF/g, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n');
+        const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n');
         if (lines.length < 2) {
             showToast('⚠️ CSV appears empty or has no data rows.', true);
             return;
         }
 
         const rawHeaders = _splitCsvRow(lines[0]).map(function(h) {
-            return h
-                .replace(/^\u00EF\u00BB\u00BF/, '')  // UTF-8 BOM bytes if decoded as latin1
-                .replace(/\uFEFF/g, '')                 // UTF-8 BOM (Excel exports)
-                .replace(/\u00A0/g, ' ')                // non-breaking space → regular space
-                .replace(/\u200B/g, '')                 // zero-width space
-                .replace(/^\"|\"$/g, '')               // strip CSV quotes
-                .trim()
-                .toLowerCase();
+            return h.replace(/^"|"$/g, '').trim().toLowerCase();
         });
 
         const colIndex = {};
@@ -1077,41 +992,9 @@ function deleteProductFromCatalogue(productCode) {
             if (_CSV_COL_MAP[h]) colIndex[_CSV_COL_MAP[h]] = i;
         });
 
-        // Diagnostic: log detected mapping to browser console for debugging
-        console.log('[CSV Import] Detected headers:', rawHeaders);
-        console.log('[CSV Import] Column index:', JSON.stringify(colIndex));
-
-        // ── VISIBLE HEADER DIAGNOSTIC TOAST (always shown so mobile users can debug) ──
-        // Shows the first 6 raw header strings as detected after normalization.
-        // This reveals BOM/encoding/spacing issues that cause column mismatches.
-        const _hdrPreview = rawHeaders.slice(0, 8).map((h, i) => i + ':"' + h + '"').join(' | ');
-        const _detectedMap = [
-            ('code'        in colIndex ? '✓code'    : '✗code'),
-            ('name'        in colIndex ? '✓name'    : '✗name'),
-            ('generic'     in colIndex ? '✓generic' : '✗generic'),
-            ('company'     in colIndex ? '✓company' : '✗company'),
-            ('supplier'    in colIndex ? '✓supplier': '✗supplier'),
-            ('packDetails' in colIndex ? '✓pack'    : '✗pack'),
-            ('unitPrice'   in colIndex ? '✓price'   : '✗price'),
-            ('stock'       in colIndex ? '✓stock'   : '✗stock'),
-        ].join(' ');
-        showToast('🔍 CSV Headers: ' + _hdrPreview, false);
-        setTimeout(function() { showToast('🔍 Detected cols: ' + _detectedMap, false); }, 2500);
-
         if (!('code' in colIndex) || !('name' in colIndex)) {
-            // Show which headers WERE found to help diagnose the mismatch
-            const found = rawHeaders.map((h, i) => i + ':' + JSON.stringify(h)).join(', ');
-            showToast('❌ CSV must have "Product Code" and "Product Name" columns. Found: ' + found, true);
+            showToast('❌ CSV must have "Product Code" and "Product Name" columns.', true);
             return;
-        }
-
-        // Warn if Generic / Company / Supplier columns were not detected
-        const _missingCols = [];
-        if (!('generic'  in colIndex)) _missingCols.push('"Generic Detail"');
-        if (!('company'  in colIndex)) _missingCols.push('"Manufacture"');
-        if (!('supplier' in colIndex)) _missingCols.push('"Supplier"');
-        if (_missingCols.length > 0) {
-            showToast('⚠️ These columns were not found in the CSV and will be blank: ' + _missingCols.join(', '), false);
         }
 
         const imported = [];
@@ -1156,73 +1039,21 @@ function deleteProductFromCatalogue(productCode) {
             return;
         }
 
-        // F12: Deduplicate by product code (keep last occurrence) so a CSV with
-        // duplicate codes doesn't produce double entries in the in-memory array.
-        const _seenCodes = new Map();
-        imported.forEach(item => _seenCodes.set(item.code, item));
-        const dedupedImport = [..._seenCodes.values()];
-        if (dedupedImport.length < imported.length) {
-            console.warn('[CSV Import] Removed', imported.length - dedupedImport.length, 'duplicate product code(s).');
-            showToast('⚠️ Duplicate product codes removed during import (' + (imported.length - dedupedImport.length) + ' duplicates).', false);
-        }
-        window.masterInventoryDB = dedupedImport;
+        window.masterInventoryDB = imported;
         try {
             saveInventoryToDB(window.masterInventoryDB);
-
-            // FIX 1: Record an IMPORT movement for every imported product.
-            // This populates inventory_movements (which was always empty after CSV import)
-            // and feeds the relational push pipeline so Supabase inventory_movements table
-            // receives rows. Runs synchronously before the async cloud push so movements
-            // are queued in IDB before _pushUnsyncedMovementsRelational() fires.
-            const _importBatchId = 'CSV_' + Date.now();
-            imported.forEach(function(item) {
-                if (item.code && typeof item.stock === 'number' && item.stock > 0) {
-                    _recordInvMovement(
-                        item.code,
-                        item.stock,
-                        'IMPORT',
-                        _importBatchId,
-                        'CSV inventory import — ' + (item.name || item.code)
-                    );
-                }
-            });
-
             const demoBanner = document.getElementById('demoInventoryBanner');
             if (demoBanner) demoBanner.classList.remove('visible');
             if (typeof _invReady !== 'undefined' && _invReady) renderInventoryView();
             else if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
             if (typeof updateHdrStats === 'function') updateHdrStats();
             const skipNote = skipped.length ? ' (' + skipped.length + ' rows skipped)' : '';
-            // Show which columns were picked up so blank-column bugs are immediately visible
-            const _detectedCols = [];
-            if ('generic'     in colIndex) _detectedCols.push('Generic✓');
-            if ('company'     in colIndex) _detectedCols.push('Company✓');
-            if ('supplier'    in colIndex) _detectedCols.push('Supplier✓');
-            if ('packDetails' in colIndex) _detectedCols.push('Pack✓');
-            const _colNote = _detectedCols.length ? ' | ' + _detectedCols.join(' ') : ' | ⚠️ Generic/Company/Supplier NOT detected — check CSV headers';
-            showToast('✅ CSV imported: ' + imported.length + ' products loaded.' + skipNote + _colNote);
-            // Phase 4: push to Supabase inventory table (master device only).
-            // Always clears the bootstrap_done flag first so every CSV import
-            // re-pushes the full inventory to cloud (fixes re-import not syncing to clients).
+            showToast('✅ CSV imported: ' + imported.length + ' products loaded.' + skipNote);
+            // Phase 4: push bootstrap to Supabase inventory table (master device only).
             // Runs asynchronously so it never blocks the local import flow.
             if (typeof _pushInventoryBootstrapToCloud === 'function') {
-                (async function _clearFlagThenPush() {
-                    try {
-                        // Clear the one-time guard so the push is never skipped
-                        if (typeof _dbUpsert === 'function') {
-                            await _dbUpsert('settings', [{
-                                device_uuid: _DEVICE_UUID,
-                                key:         'inventory_bootstrap_done',
-                                value:       'false',
-                                updated_at:  new Date().toISOString()
-                            }], 'device_uuid,key');
-                        }
-                    } catch (_e) {
-                        console.warn('[CSVImport] Could not clear bootstrap flag — push may be skipped:', _e);
-                    }
-                    await _pushInventoryBootstrapToCloud();
-                })().catch(function(e) {
-                    showToast('⚠️ Cloud push failed: ' + (e.message || e), true);
+                _pushInventoryBootstrapToCloud().catch(function(e) {
+                    showToast('⚠️ Cloud bootstrap push failed: ' + (e.message || e), true);
                 });
             }
         } catch(e) {
@@ -1330,24 +1161,23 @@ async function _executePurgeInventory() {
     }
     
     const enteredPassword = passwordInput.value.trim();
-
-    // F1: Use the canonical _verifyPassword() from auth.js which handles
-    // the correct FDPP_v1_ prefix, Supabase-first lookup, and localStorage
-    // fallback — replacing the broken custom hash that always rejected.
-    let passwordOk = false;
+    
+    // Hash the entered password with SHA256
+    let hashedInput;
     try {
-        if (typeof _verifyPassword === 'function') {
-            passwordOk = await _verifyPassword(enteredPassword);
-        } else {
-            if (statusEl) { statusEl.textContent = '❌ Auth module not ready.'; statusEl.style.color = '#dc2626'; }
-            return;
-        }
+        const encoder = new TextEncoder();
+        const data = encoder.encode(enteredPassword);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        hashedInput = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     } catch (e) {
-        if (statusEl) { statusEl.textContent = '❌ Password check failed.'; statusEl.style.color = '#dc2626'; }
+        if (statusEl) { statusEl.textContent = '❌ Password hashing failed.'; statusEl.style.color = '#dc2626'; }
         return;
     }
-
-    if (!passwordOk) {
+    
+    // Compare with stored hash in localStorage
+    const storedHash = localStorage.getItem('pharma_master_password_hash');
+    if (!storedHash || hashedInput !== storedHash) {
         if (statusEl) { statusEl.textContent = '❌ Invalid password.'; statusEl.style.color = '#dc2626'; }
         showToast('❌ Invalid master password. Purge cancelled.', true);
         return;
@@ -1416,89 +1246,17 @@ function _purgeLocalInventoryData() {
 //   _DEVICE_UUID   uploaded_by        FK → devices.uuid
 //   (now)          uploaded_at / updated_at
 //
+// KNOWN GAP: 'company' (Manufacture) and 'supplier' columns exist in local
+// IDB but have NO matching column in the Phase 1 Supabase inventory schema.
+// They are preserved in IndexedDB only and will NOT sync across devices.
+// These fields will be available in the app UI but invisible to other devices.
+// Resolution: extend the inventory table schema in a future phase, or accept
+// them as local-only metadata. Flagged here for Phase 9 / schema review.
 // =========================================================================
-// SUPABASE ROW MAPPERS
-// IDB field        → Supabase column
-//   code           code
-//   name           name
-//   generic        generic_name
-//   company        company        (Manufacturer)
-//   supplier       supplier
-//   packDetails    pack_size
-//   unitPrice      unit_price
-//   stock          stock
-//   version        version
-//   _DEVICE_UUID   uploaded_by        FK → devices.uuid
-//   (now)          uploaded_at / updated_at
-// =========================================================================
-// =========================================================================
-
-// ── Column-existence probe ────────────────────────────────────────────────
-// The `company` and `supplier` columns were added in a later migration.
-// If they don't exist in Supabase, the push silently drops them and the
-// pull returns nulls — so Generic / Company / Supplier always show blank.
-// This helper probes for the column once per session and shows a persistent
-// banner with the exact SQL if it's missing.
-let _invColumnsChecked = false;
-
-async function _checkInventoryColumnsExist() {
-    if (_invColumnsChecked) return;
-    _invColumnsChecked = true;
-    try {
-        // Probe: SELECT company,supplier,generic_name,pack_size,unit_price on 1 row.
-        // If columns are missing, PostgREST returns a 400 with
-        // "column … does not exist" in the error body.
-        const r = await fetch(
-            _SUPA_URL + '/rest/v1/inventory?select=company,supplier,generic_name,pack_size,unit_price&limit=1',
-            { headers: _SUPA_HEADERS }
-        );
-        if (r.ok) return; // columns exist — nothing to do
-
-        const errText = await r.text().catch(() => '');
-        const isMissingCol = r.status === 400 &&
-            (errText.includes('company') || errText.includes('supplier') ||
-             errText.includes('generic_name') || errText.includes('pack_size') ||
-             errText.includes('unit_price'));
-
-        if (isMissingCol || r.status === 400) {
-            _showMissingColumnsBanner();
-        }
-    } catch (_e) { /* offline — skip */ }
-}
-
-function _showMissingColumnsBanner() {
-    if (document.getElementById('invColMigrationBanner')) return; // already shown
-    const banner = document.createElement('div');
-    banner.id = 'invColMigrationBanner';
-    banner.style.cssText = [
-        'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:9990',
-        'background:#7c3aed', 'color:#fff', 'padding:12px 16px',
-        'font-size:12px', 'line-height:1.6', 'box-shadow:0 4px 12px rgba(0,0,0,.3)'
-    ].join(';');
-    banner.innerHTML =
-        '<div style="display:flex;align-items:flex-start;gap:12px;">' +
-        '<span style="font-size:20px;flex-shrink:0;">⚠️</span>' +
-        '<div style="flex:1;">' +
-        '<strong>Database migration required — Generic / Company / Supplier columns are missing from Supabase.</strong><br>' +
-        'Run this SQL once in <a href="https://supabase.com/dashboard" target="_blank" ' +
-        'style="color:#e9d5ff;text-decoration:underline;">Supabase → SQL Editor</a>, then re-push your inventory:<br>' +
-        '<code style="display:block;margin-top:6px;padding:8px;background:rgba(0,0,0,.3);border-radius:5px;font-family:monospace;font-size:11px;white-space:pre-wrap;">' +
-        'ALTER TABLE inventory\n' +
-        '  ADD COLUMN IF NOT EXISTS generic_name text NOT NULL DEFAULT \'\',\n' +
-        '  ADD COLUMN IF NOT EXISTS company      text NOT NULL DEFAULT \'\',\n' +
-        '  ADD COLUMN IF NOT EXISTS supplier     text NOT NULL DEFAULT \'\',\n' +
-        '  ADD COLUMN IF NOT EXISTS pack_size    text NOT NULL DEFAULT \'\',\n' +
-        '  ADD COLUMN IF NOT EXISTS unit_price   numeric(12,2) NOT NULL DEFAULT 0;' +
-        '</code>' +
-        '</div>' +
-        '<button onclick="document.getElementById(\'invColMigrationBanner\').remove();_invColumnsChecked=false;" ' +
-        'style="flex-shrink:0;background:rgba(255,255,255,.2);border:none;color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-weight:700;">✕ Dismiss</button>' +
-        '</div>';
-    document.body.insertBefore(banner, document.body.firstChild);
-}
 
 /**
  * Map a local IDB inventory record to the Supabase inventory table row shape.
+ * NOTE: 'company' and 'supplier' are intentionally excluded — see KNOWN GAP above.
  */
 function _idbRowToSupabaseRow(item) {
     const now = new Date().toISOString();
@@ -1506,8 +1264,6 @@ function _idbRowToSupabaseRow(item) {
         code:         item.code,
         name:         item.name         || '',
         generic_name: item.generic      || '',
-        company:      item.company      || '',   // FIX 5: was excluded (KNOWN GAP)
-        supplier:     item.supplier     || '',   // FIX 5: was excluded (KNOWN GAP)
         pack_size:    item.packDetails  || '',
         unit_price:   parseFloat((Number(item.unitPrice) || 0).toFixed(2)),
         stock:        parseInt(item.stock, 10) || 0,
@@ -1520,14 +1276,15 @@ function _idbRowToSupabaseRow(item) {
 
 /**
  * Map a Supabase inventory table row back to the local IDB record shape.
+ * 'company' and 'supplier' are cleared on pull (not stored in Supabase).
  */
 function _supabaseRowToIdbRow(row) {
     return {
         code:        row.code,
         name:        row.name         || '',
         generic:     row.generic_name || '',
-        company:     row.company      || '',   // FIX 5: was always cleared to ''
-        supplier:    row.supplier     || '',   // FIX 5: was always cleared to ''
+        company:     '',               // not in Supabase schema — see KNOWN GAP
+        supplier:    '',               // not in Supabase schema — see KNOWN GAP
         packDetails: row.pack_size    || '',
         unitPrice:   parseFloat((Number(row.unit_price) || 0).toFixed(2)),
         stock:       parseInt(row.stock, 10) || 0,
@@ -1556,17 +1313,16 @@ async function _pushInventoryBootstrapToCloud() {
         return;
     }
 
-    // ── Column-existence check (Generic/Company/Supplier) ─────────────────
-    // Show the migration SQL banner if columns are missing, but continue the
-    // push anyway so stock values still reach Supabase.
-    _invColumnsChecked = false; // force re-probe on every push
-    await _checkInventoryColumnsExist().catch(() => {});
-
-    // NOTE: The one-time-only guard has been intentionally removed.
-    // The CSV import flow now clears the bootstrap_done flag before calling
-    // this function, so every import always re-pushes the full inventory to
-    // Supabase. The flag is still written on success so client devices can
-    // confirm the master has bootstrapped before they attempt a pull.
+    // ── One-time-only guard — check settings table ────────────────────────
+    const { data: flagRows, error: flagErr } = await _dbSelect(
+        'settings',
+        'device_uuid=eq.' + encodeURIComponent(_DEVICE_UUID) + '&key=eq.inventory_bootstrap_done',
+        'value'
+    );
+    if (!flagErr && flagRows && flagRows.length > 0 && flagRows[0].value === 'true') {
+        showToast('ℹ️ Inventory already bootstrapped — cloud not overwritten. Delete the bootstrap flag in settings to re-run.', false);
+        return;
+    }
 
     // ── Push in batches of 500 (avoids payload / PostgREST limits) ────────
     showToast('⬆️ Bootstrapping inventory to cloud (' + items.length + ' products)…');
@@ -1595,100 +1351,11 @@ async function _pushInventoryBootstrapToCloud() {
     }], 'device_uuid,key');
 
     if (flagWriteErr) {
+        // Push succeeded but flag write failed — warn but don't roll back
         console.warn('[Phase4] bootstrap_done flag write failed:', flagWriteErr);
         showToast('⚠️ Inventory pushed (' + pushed + ' items) but bootstrap flag write failed. Subsequent imports may re-push.', false);
     } else {
-        showToast('✅ Inventory synced to cloud (' + pushed + ' products). Clients will pull on next sync cycle.');
-    }
-
-    // FIX 2: Write inventory_last_updated timestamp so client devices can detect
-    // that the master has pushed new inventory during their 60-second sync cycle.
-    // Without this signal, clients only pull on startup — never during a session.
-    try {
-        await _dbUpsert('settings', [{
-            device_uuid: _DEVICE_UUID,
-            key:         'inventory_last_updated',
-            value:       now,
-            updated_at:  now
-        }], 'device_uuid,key');
-        console.log('[Phase4] inventory_last_updated signal written:', now);
-    } catch (_sigErr) {
-        console.warn('[Phase4] inventory_last_updated signal write failed (non-fatal):', _sigErr);
-    }
-}
-
-// =========================================================================
-// FIX 3 — CLIENT INVENTORY CHANGE DETECTOR
-//
-// Called by syncHub._runSyncCycle() every 60 seconds on ALL devices.
-// Client devices compare the master's inventory_last_updated timestamp
-// against the last value they pulled. If master has a newer timestamp,
-// client pulls the full inventory from Supabase without a page reload.
-//
-// This replaces the "only pull on startup" limitation and gives clients
-// real-time inventory updates whenever the master imports a new CSV.
-// =========================================================================
-async function _checkAndPullInventoryIfUpdated() {
-    // Only client devices need to pull — master IS the source of truth
-    const _role = (typeof StorageModule !== 'undefined')
-        ? StorageModule.get('pharma_device_role') : null;
-    if (_role === 'master') return false;
-
-    // Resolve master device UUID
-    let masterUUID = null;
-    try {
-        const { data: masterRows } = await _dbSelect(
-            'devices',
-            'role=eq.master&is_active=eq.true',
-            'uuid'
-        );
-        if (!masterRows || masterRows.length === 0) return false;
-        masterUUID = masterRows[0].uuid;
-    } catch(_e) { return false; }
-
-    // Read master's inventory_last_updated signal from settings
-    let masterTs = null;
-    try {
-        const { data: flagRows } = await _dbSelect(
-            'settings',
-            'device_uuid=eq.' + encodeURIComponent(masterUUID) + '&key=eq.inventory_last_updated',
-            'value'
-        );
-        if (!flagRows || flagRows.length === 0) return false;
-        masterTs = flagRows[0].value;
-    } catch(_e) { return false; }
-
-    if (!masterTs) {
-        // inventory_last_updated not written yet (e.g. bootstrap failed mid-way).
-        // If the client has no inventory at all, do a force pull anyway.
-        const localCount = Array.isArray(window.masterInventoryDB) ? window.masterInventoryDB.length : 0;
-        if (localCount === 0) {
-            console.log('[InvSync] No masterTs signal but client has 0 products — attempting force pull.');
-            try { return await _pullInventoryFromSupabase(true); } catch(_e) { return false; }
-        }
-        return false;
-    }
-
-    // Compare with the timestamp we last pulled
-    const _pulledKey = 'pharma_inv_last_pulled_' + masterUUID.slice(0, 8);
-    const localPulledTs = (function() {
-        try { return localStorage.getItem(_pulledKey) || ''; } catch(_e) { return ''; }
-    })();
-
-    if (masterTs <= localPulledTs) return false; // Already up to date
-
-    // Master has newer inventory — pull full inventory from Supabase
-    console.log('[InvSync] Master inventory updated at ' + masterTs + ' (local: ' + localPulledTs + '). Pulling…');
-    try {
-        const pulled = await _pullInventoryFromSupabase();
-        if (pulled) {
-            try { localStorage.setItem(_pulledKey, masterTs); } catch(_e) {}
-            console.log('[InvSync] ✅ Inventory pulled from master.');
-        }
-        return pulled;
-    } catch(_e) {
-        console.warn('[InvSync] Pull from master failed:', _e);
-        return false;
+        showToast('✅ Inventory bootstrapped to cloud (' + pushed + ' products). Clients will pull on next startup.');
     }
 }
 
@@ -1702,16 +1369,8 @@ async function _checkAndPullInventoryIfUpdated() {
  *   3. Fetch all rows from `inventory` table.
  *   4. Map to IDB shape and overwrite local store + in-memory cache.
  */
-async function _pullInventoryFromSupabase(force = false) {
+async function _pullInventoryFromSupabase() {
     // ── Step 1: resolve master UUID ───────────────────────────────────────
-    // Probe for missing Supabase columns (Generic/Company/Supplier blank fix).
-    // Reset the guard so every pull re-probes — ensures the migration banner
-    // appears even on clients that haven't visited the Inventory tab yet.
-    if (navigator.onLine) {
-        _invColumnsChecked = false;
-        _checkInventoryColumnsExist().catch(() => {});
-    }
-
     const { data: masterRows, error: masterErr } = await _dbSelect(
         'devices',
         'role=eq.master&is_active=eq.true',
@@ -1724,50 +1383,30 @@ async function _pullInventoryFromSupabase(force = false) {
     const masterUUID = masterRows[0].uuid;
 
     // ── Step 2: confirm bootstrap flag exists on master ───────────────────
-    // Skipped when force=true (manual Pull button) — user explicitly wants
-    // inventory regardless of whether the flag was written successfully.
-    if (!force) {
-        const { data: flagRows } = await _dbSelect(
-            'settings',
-            'device_uuid=eq.' + encodeURIComponent(masterUUID) + '&key=eq.inventory_bootstrap_done',
-            'value'
-        );
-        if (!flagRows || flagRows.length === 0 || flagRows[0].value !== 'true') {
-            console.info('[Phase4] Master has not bootstrapped inventory yet — skipping pull.');
-            return false;
-        }
+    const { data: flagRows } = await _dbSelect(
+        'settings',
+        'device_uuid=eq.' + encodeURIComponent(masterUUID) + '&key=eq.inventory_bootstrap_done',
+        'value'
+    );
+    if (!flagRows || flagRows.length === 0 || flagRows[0].value !== 'true') {
+        console.info('[Phase4] Master has not bootstrapped inventory yet — skipping pull.');
+        return false;
     }
 
-    // ── Step 3: fetch inventory rows (paginated — PostgREST default cap = 1000) ──
-    // A single _dbSelect('inventory') silently returns only the first 1000 rows.
-    // We page in chunks of 1000 until a page comes back smaller than the chunk size.
-    const _INV_PAGE = 1000;
-    let allInvRows  = [];
-    let _offset     = 0;
-    while (true) {
-        const { data: page, error: invErr } = await _dbSelect(
-            'inventory',
-            'limit=' + _INV_PAGE + '&offset=' + _offset,
-            '*'
-        );
-        if (invErr) {
-            console.warn('[Phase4] Inventory pull error (offset=' + _offset + '):', invErr);
-            showToast('⚠️ Cloud inventory pull failed: ' + invErr, true);
-            return false;
-        }
-        if (!page || page.length === 0) break;          // no more rows
-        allInvRows = allInvRows.concat(page);
-        if (page.length < _INV_PAGE) break;              // last (partial) page
-        _offset += _INV_PAGE;
+    // ── Step 3: fetch inventory rows ──────────────────────────────────────
+    const { data: invRows, error: invErr } = await _dbSelect('inventory', '', '*');
+    if (invErr) {
+        console.warn('[Phase4] Inventory pull error:', invErr);
+        showToast('⚠️ Cloud inventory pull failed: ' + invErr, true);
+        return false;
     }
-    if (allInvRows.length === 0) {
+    if (!invRows || invRows.length === 0) {
         console.info('[Phase4] Cloud inventory table is empty — skipping overwrite.');
         return false;
     }
-    console.log('[Phase4] Inventory pull complete — ' + allInvRows.length + ' rows fetched.');
 
     // ── Step 4: map, overwrite IDB + in-memory cache ─────────────────────
-    const mapped = allInvRows.map(_supabaseRowToIdbRow);
+    const mapped = invRows.map(_supabaseRowToIdbRow);
     window.masterInventoryDB = mapped;
     saveInventoryToDB(mapped);
 
@@ -1789,39 +1428,81 @@ async function _pullInventoryFromSupabase(force = false) {
 // Used by the Push / Pull buttons in the Inventory toolbar.
 // =========================================================================
 async function pushInventoryToCloud() {
-    // FIX 6: Was writing to the legacy pharma_sync KV key 'pharma_cloud_inventory'
-    // (a single JSON blob, capped at ~5 MB, invisible to _pullInventoryFromSupabase).
-    // Now delegates to _pushInventoryBootstrapToCloud() which batches 500 rows at a
-    // time into the relational `inventory` table and writes the
-    // inventory_last_updated signal so clients auto-pull within 60 s.
+    if (typeof _supaSet !== 'function') {
+        showToast('❌ Cloud module not loaded.', true);
+        return;
+    }
+    if (!Array.isArray(window.masterInventoryDB)) {
+        showToast('⚠️ Inventory not yet loaded.', true);
+        return;
+    }
+    showToast('⬆️ Pushing inventory to cloud…');
     if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('syncing');
     try {
-        await _pushInventoryBootstrapToCloud();
+        const payload = JSON.stringify(window.masterInventoryDB);
+        const ok = await _supaSet('pharma_cloud_inventory', payload);
+        if (!ok) throw new Error('Cloud write rejected');
+
+        try {
+            const arr = window.masterInventoryDB;
+            if (arr.length > 0) {
+                const fp = arr.length + '|' + (arr[0] ? arr[0].code : '') + '|' + (arr[arr.length - 1] ? arr[arr.length - 1].code : '');
+                localStorage.setItem('_pharma_inv_fingerprint', fp);
+            } else {
+                localStorage.removeItem('_pharma_inv_fingerprint');
+            }
+        } catch(_e) {}
+
+        if (typeof _pushUnsyncedMovements === 'function') {
+            try { await _pushUnsyncedMovements(); } catch(_e) {}
+        }
+
         if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('connected');
-    } catch(e) {
+        showToast('✅ Inventory pushed (' + window.masterInventoryDB.length + ' items). Other devices will see it on next sync.');
+    } catch (e) {
         if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('offline');
         showToast('❌ Push failed: ' + (e.message || e), true);
     }
 }
 
 async function pullInventoryFromCloud() {
-    // FIX 6: Was reading from the legacy pharma_sync KV key 'pharma_cloud_inventory'.
-    // That key is a single JSON blob written by the old pushInventoryToCloud() and
-    // has nothing to do with the relational `inventory` table that the system now
-    // uses.  Replaced with _pullInventoryFromSupabase(force=true) which pages through
-    // the relational table in 1000-row chunks (no 5 MB size cap, no row-count cap).
+    if (typeof _supaGet !== 'function') {
+        showToast('❌ Cloud module not loaded.', true);
+        return;
+    }
+    showToast('⬇️ Pulling inventory from cloud…');
     if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('syncing');
     try {
-        showToast('⬇️ Pulling inventory from cloud (relational table)…');
-        const ok = await _pullInventoryFromSupabase(true); // force=true skips bootstrap_done guard
-        if (ok) {
+        const raw = await _supaGet('pharma_cloud_inventory');
+        if (raw === null || raw === undefined) {
             if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('connected');
-            // toast is already shown inside _pullInventoryFromSupabase
-        } else {
-            if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('connected');
-            showToast('ℹ️ Nothing pulled — cloud inventory may be empty or master not found.', false);
+            showToast('ℹ️ No inventory found in cloud yet.', true);
+            return;
         }
-    } catch(e) {
+        let cloudInv;
+        try { cloudInv = JSON.parse(raw); } catch(_e) { throw new Error('Corrupt cloud payload'); }
+        if (!Array.isArray(cloudInv)) throw new Error('Cloud inventory is not an array');
+
+        // OVERWRITE local with cloud truth (Pull = authoritative remote state)
+        window.masterInventoryDB = cloudInv;
+        if (typeof saveInventoryToDB === 'function') saveInventoryToDB(cloudInv);
+
+        try {
+            if (cloudInv.length > 0) {
+                const fp = cloudInv.length + '|' + (cloudInv[0] ? cloudInv[0].code : '') + '|' + (cloudInv[cloudInv.length - 1] ? cloudInv[cloudInv.length - 1].code : '');
+                localStorage.setItem('_pharma_inv_fingerprint', fp);
+            } else {
+                localStorage.removeItem('_pharma_inv_fingerprint');
+            }
+        } catch(_e) {}
+
+        if (typeof _invReady !== 'undefined' && _invReady && typeof renderInventoryView === 'function') {
+            try { renderInventoryView(); } catch(_e) {}
+        }
+
+        if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('connected');
+        showToast('✅ Inventory pulled (' + cloudInv.length + ' items).');
+    } catch (e) {
         if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('offline');
         showToast('❌ Pull failed: ' + (e.message || e), true);
     }
