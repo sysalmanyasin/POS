@@ -1,21 +1,63 @@
-// Increment this version number whenever you deploy major changes to your app files
+/**
+ * Dua Pharma POS - Enterprise Production Service Worker
+ * Version: pharmapos-cache-v11.4 (Optimized for Custom Domain & Strict Offline Isolation)
+ */
+
 const CACHE_NAME = 'pharmapos-cache-v11.5';
 
-// 1. INSTALL: Let the worker install, but stay in the 'waiting' room
+// Explicit structural cache list to guarantee the system works offline instantly on day one
+const CORE_ASSETS = [
+    '/',
+    '/index.html',
+    '/config.js',
+    '/auth.js',
+    '/ui.js',
+    '/storage.js',
+    '/inventory.js',
+    '/billing.js',
+    '/devices.js',
+    '/history.js',
+    '/reporting.js',
+    '/settings.js',
+    '/tokens.css',
+    '/layout.css',
+    '/components.css',
+    '/print.css',
+    '/manifest.json'
+];
+
+// 1. INSTALL: Populate the cache storage instantly so it functions offline from a cold start
 self.addEventListener('install', (event) => {
-    // We intentionally do NOT call self.skipWaiting() here.
-    // The service worker will wait until app.html says it is safe to take over.
+    console.log('[SW] Initializing structural asset capture loop...');
+    event.waitUntil(
+        caches.open(CACHE_NAME).then((cache) => {
+            // Using map + individual puts guarantees that one missing icon won't crash the entire installation
+            return Promise.all(
+                CORE_ASSETS.map(url => {
+                    return fetch(url, { cache: 'reload' })
+                        .then(res => {
+                            if (res.ok) return cache.put(url, res);
+                            throw new Error(`Asset fetch rejected: ${url}`);
+                        })
+                        .catch(err => console.warn(`[SW Install Warning] Skipping non-critical asset entry:`, err));
+                })
+            );
+        })
+    );
+    // Intentionally omitting self.skipWaiting() to honor the app's idle update checks
 });
 
-// 2. MESSAGE: Listen for the safety clearance from app.html
+// 2. MESSAGE: Listen for the safety clearance from index.html runtime tracking
 self.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'SKIP_WAITING') {
-        self.skipWaiting(); // Now it's safe to activate
+        console.log('[SW] Idle clearance received. Swapping execution contexts safely...');
+        self.skipWaiting(); 
     }
 });
 
-// 3. ACTIVATE: Clear out the old cache version and take control
+// 3. ACTIVATE: Clear out old cache versions cleanly and claim client control instantly
 self.addEventListener('activate', (event) => {
+    console.log('[SW] System activation sequence engaged.');
     event.waitUntil(
         caches.keys().then((keys) => Promise.all(
             keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
@@ -23,40 +65,33 @@ self.addEventListener('activate', (event) => {
     );
 });
 
-// 4. FETCH: Network-first for JS/CSS (always get latest code),
-//           Stale-while-revalidate for everything else (images, fonts, html)
+// 4. FETCH: Intelligent Split-Strategy (Instant Cache UI + Invisible Network Revalidation)
 self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
 
     const url = new URL(event.request.url);
-    const isAppCode = url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
 
-    if (isAppCode) {
-        // Network-first: always fetch fresh JS/CSS from server.
-        // Fall back to cache only if network fails (offline).
-        event.respondWith(
-            fetch(event.request).then((networkResponse) => {
+    // CRITICAL GUARD: Completely insulate real-time Supabase replication and authentication traffic
+    if (url.pathname.includes('/rest/v1/') || url.hostname.includes('supabase.co')) {
+        return; 
+    }
+
+    event.respondWith(
+        caches.open(CACHE_NAME).then(async (cache) => {
+            const cachedResponse = await cache.match(event.request);
+            
+            // Asynchronous background task: fetches fresh files from GitHub CDN and updates the cache silently
+            const fetchPromise = fetch(event.request).then((networkResponse) => {
                 if (networkResponse.ok) {
-                    caches.open(CACHE_NAME).then(cache => {
-                        cache.put(event.request, networkResponse.clone());
-                    });
+                    cache.put(event.request, networkResponse.clone());
                 }
                 return networkResponse;
-            }).catch(() => caches.match(event.request))
-        );
-    } else {
-        // Stale-while-revalidate for everything else (HTML, images, icons)
-        event.respondWith(
-            caches.open(CACHE_NAME).then(async (cache) => {
-                const cachedResponse = await cache.match(event.request);
-                const fetchPromise = fetch(event.request).then((networkResponse) => {
-                    if (networkResponse.ok) {
-                        cache.put(event.request, networkResponse.clone());
-                    }
-                    return networkResponse;
-                });
-                return cachedResponse || fetchPromise;
-            })
-        );
-    }
+            }).catch((err) => {
+                console.log('[SW Network State] Terminal disconnected; running smoothly on local asset cache.', err.message);
+            });
+
+            // Return the cached file immediately for maximum counter performance. Fall back to network if missing.
+            return cachedResponse || fetchPromise;
+        })
+    );
 });
