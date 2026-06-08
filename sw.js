@@ -3,7 +3,7 @@
  * Version: pharmapos-cache-v11.4 (Optimized for Custom Domain & Strict Offline Isolation)
  */
 
-const CACHE_NAME = 'pharmapos-cache-v12.1';
+const CACHE_NAME = 'pharmapos-cache-v12.2';
 
 // Explicit structural cache list to guarantee the system works offline instantly on day one
 const CORE_ASSETS = [
