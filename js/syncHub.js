@@ -1870,23 +1870,36 @@ async function _gpExecuteNetworkPurge() {
         'pharma_master_password_hash',
         // Also clear the master PIN setup key so the EmailJS flow re-runs correctly.
         'pharma_master_setup_pin',
+        // FIX: Clean up the purge broadcast keys themselves so they don't linger
+        // in pharma_sync and cause confusion on the next purge cycle.
+        'pharma_global_purge_cmd',
+        'pharma_global_purge_otp',
     ];
+    // FIX: Snapshot device list BEFORE deleting pharma_devices from KV.
+    // Previously this read happened AFTER the loop that deleted pharma_devices,
+    // so it always returned [] and per-device movement/held-bill/counter keys
+    // were orphaned in pharma_sync on every purge.
+    let _knownDevices = [];
+    try {
+        const _devRaw = await _supaGet('pharma_devices');
+        _knownDevices = _devRaw ? JSON.parse(_devRaw) : [];
+        if (!Array.isArray(_knownDevices)) _knownDevices = [];
+        log('📋 Snapshotted ' + _knownDevices.length + ' device(s) for per-device key cleanup.');
+    } catch (_e) {}
+
     for (const k of staticCloudKeys) {
         try { await _supaDel(k); log('☁️  deleted cloud key: ' + k); }
         catch (e) { log('⚠️ cloud delete failed: ' + k); }
     }
-    // Per-device movement / held-bill / counter keys — enumerate devices we knew about
+    // Per-device movement / held-bill / counter keys — uses pre-snapshotted list
     try {
-        const raw = await _supaGet('pharma_devices');
-        let devices = raw ? JSON.parse(raw) : [];
-        if (!Array.isArray(devices)) devices = [];
         const prefixes = ['pharma_cloud_inv_movements_', 'pharma_cloud_held_bills_', 'pharma_inv_counter_'];
-        for (const d of devices) {
+        for (const d of _knownDevices) {
             for (const p of prefixes) {
                 try { await _supaDel(p + d.uuid); } catch (_e) {}
             }
         }
-        log('☁️  deleted per-device cloud keys for ' + devices.length + ' device(s).');
+        log('☁️  deleted per-device cloud keys for ' + _knownDevices.length + ' device(s).');
     } catch (_e) {}
 
     // 2b. Delete ALL rows from the relational tables (Phase-1 schema).
@@ -1979,6 +1992,11 @@ async function _gpExecuteNetworkPurge() {
         localStorage.removeItem('_supabase_settings_ts');
         log('🧹 Cleared cloud sync inventory tracking fingerprints.');
     } catch (_e) {}
+
+    // Set post-purge flag BEFORE reload. _registerOrUpdateDevice() checks this on
+    // next boot and forces the registration modal even if the Supabase devices table
+    // DELETE silently failed (e.g. missing RLS policy for the anon role).
+    try { localStorage.setItem('pharma_post_purge', '1'); } catch (_e) {}
 
     log('✅ Purge complete. Reloading in 2 s…');
     setTimeout(() => { try { window.location.reload(); } catch (_e) {} }, 2000);

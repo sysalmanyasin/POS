@@ -84,6 +84,18 @@ const DevicesModule = (() => {
      * If deregistered (is_active = false) → show re-registration prompt.
      */
     async function _registerOrUpdateDevice() {
+        // POST-PURGE GUARD: if a global purge just ran on this device (issuing OR remote),
+        // force the registration modal regardless of what the cloud devices table contains.
+        // This handles the case where the Supabase DELETE on the devices table failed
+        // silently (missing RLS policy / grant), leaving a stale row that would otherwise
+        // cause a heartbeat instead of re-registration.
+        const isPostPurge = localStorage.getItem('pharma_post_purge') === '1';
+        if (isPostPurge) {
+            try { localStorage.removeItem('pharma_post_purge'); } catch(_e) {}
+            _showRegistrationModal();
+            return;
+        }
+
         const myDevice = await _fetchMyDevice();
 
         if (!myDevice) {
@@ -486,12 +498,23 @@ const DevicesModule = (() => {
                     try { StorageModule.clearAllPrimaryStores(); } catch(_e) {}
                 }
                 try {
+                    // Keep only device UUID and purge-applied dedup stamp.
+                    // IMPORTANT: also strip sys_* keys (sys_has_password, sys_admin_pass_hash,
+                    // sys_admin_pass) — without this they survive on remote devices and
+                    // _migrateSecretsOnStartup pushes the old hash back to cloud,
+                    // silently undoing the purge for ALL devices.
                     const keep = new Set(['pharma_device_id', 'pharma_global_purge_applied_at']);
                     Object.keys(localStorage).forEach(k => {
-                        if (!keep.has(k) && (k.startsWith('pharma_') || k === 'pharma_master_password_hash')) {
+                        if (keep.has(k)) return;
+                        if (k.startsWith('pharma_') || k.startsWith('sys_') ||
+                            k === '_pharma_inv_fingerprint' || k === '_supabase_sync_on' ||
+                            k === '_supabase_settings_ts') {
                             try { localStorage.removeItem(k); } catch(_e) {}
                         }
                     });
+                    // Forces re-registration modal on next boot even if Supabase
+                    // devices table DELETE silently failed (missing RLS grant).
+                    localStorage.setItem('pharma_post_purge', '1');
                 } catch(_e) {}
                 try {
                     if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = [];
