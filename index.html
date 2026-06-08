@@ -1,952 +1,1668 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#0f9e88">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="description" content="DuaPharmaPos — Offline-First Pharmacy Point of Sale">
-    <title>DuaPharmaPos</title>
-
-    <!-- Stylesheets — order is important -->
-    <link rel="stylesheet" href="css/tokens.css">
-    <link rel="stylesheet" href="css/layout.css">
-    <link rel="stylesheet" href="css/components.css">
-    <link rel="stylesheet" href="css/print.css">
-
-    <!-- Dynamic thermal CSS injected by settings.js -->
-    <style id="thermalCssBlock"></style>
-
-    <!-- Service worker registration -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./js/sw.js').catch(() => {});
-            });
-        }
-    </script>
-</head>
-<body>
-
-<!-- =========================================================================
-     CUSTOM CONFIRM MODAL (global, all pages)
-     ========================================================================= -->
-<div id="customConfirmModal">
-    <div class="ccm-card">
-        <div class="ccm-title" id="ccmTitle"  style="display:none;"></div>
-        <div class="ccm-sub"   id="ccmSub"    style="display:none;"></div>
-        <div class="ccm-msg"   id="ccmMsg"    style="display:none;"></div>
-        <div class="ccm-actions">
-            <button class="ccm-cancel" id="ccmCancelBtn" onclick="ccmCancel()">Cancel</button>
-            <button class="ccm-ok"     id="ccmOkBtn"     onclick="ccmConfirm()">Confirm</button>
-        </div>
-    </div>
-</div>
-
-<!-- Toast notification -->
-<div class="toast-notif" id="toastNotif"></div>
-
-<!-- =========================================================================
-     APP SHELL
-     ========================================================================= -->
-<div id="app">
-
-    <!-- ── Status Bar ────────────────────────────────────────────────────── -->
-    <header class="status-bar">
-        <div style="display:flex;align-items:center;gap:10px;">
-            <span class="app-title">💊 DuaPharmaPos</span>
-            <span style="display:flex;align-items:center;gap:4px;font-size:10px;opacity:.85;">
-                <span id="supabase-sync-badge" class="connecting"></span>
-                <span id="supabaseSyncLabel">Connecting…</span>
-            </span>
-        </div>
-        <div class="sb-right">
-            <div class="sb-stat">
-                <span style="opacity:.7;">Today Bills</span>
-                <strong id="hdrTodayBills">0</strong>
-            </div>
-            <div class="sb-stat">
-                <span style="opacity:.7;">Revenue</span>
-                <strong id="hdrRevenue">Rs.0</strong>
-            </div>
-            <div class="sb-stat">
-                <span style="opacity:.7;">Time</span>
-                <strong id="statusClock">--:--</strong>
-            </div>
-            <button onclick="openStaffLogin()"
-                style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">
-                👤 <span id="activeStaffLabel">Login</span>
-            </button>
-            <button onclick="toggleSettingsDrawer()"
-                style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">
-                ⚙️ Settings
-            </button>
-        </div>
-    </header>
-
-    <!-- ── Banners ────────────────────────────────────────────────────────── -->
-    <div id="backupReminderBanner" class="banner" style="display:none;margin:4px 12px 0;cursor:pointer;" onclick="exportFullBackup()"></div>
-    <div id="storageWarnBanner"    style="display:none;margin:4px 12px 0;"></div>
-
-    <!-- ── Tab Bar ───────────────────────────────────────────────────────── -->
-    <nav class="tab-bar">
-        <button class="tab-btn active" id="tab-billing"   onclick="switchTab('billingView',   this)">🧾 Billing</button>
-        <button class="tab-btn"        id="tab-hold"      onclick="switchTab('holdView',      this)">
-            📋 On Hold <span class="tab-badge" id="holdCount">0</span>
-        </button>
-        <button class="tab-btn"        id="tab-history"   onclick="switchTab('historyView',   this)">📜 History</button>
-        <button class="tab-btn"        id="tab-inventory" onclick="switchTab('inventoryView', this)">📦 Inventory</button>
-        <button class="tab-btn"        id="tab-reports"   onclick="switchTab('reportingView', this)">📊 Reports</button>
-        <button class="tab-btn"        id="tabSyncHub"    onclick="switchTab('syncHubView',   this)">🔄 Sync Hub</button>
-        <button class="tab-btn"        id="tab-auditlog"  onclick="switchTab('auditLogView',  this)">📋 Audit Log</button>
-        <button class="tab-btn"        id="tab-devices"   onclick="DevicesModule.openDeviceTelemetryHub()">📡 Devices</button>
-    </nav>
-
-    <!-- ── Main Content ───────────────────────────────────────────────────── -->
-    <main class="main-content">
-
-        <!-- ================================================================
-             BILLING VIEW
-             ================================================================ -->
-        <div id="billingView" class="view active">
-
-            <!-- Edit mode alert bar (Bug 1 fix) -->
-            <div id="editModeAlertBar">
-                ✏️ Editing Invoice: <strong id="editingInvoiceIdBadge"></strong>
-                <button onclick="clearActiveInvoiceForm()" style="margin-left:auto;background:var(--amber);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;cursor:pointer;">✗ Cancel Edit</button>
-            </div>
-
-            <!-- Left: Product search & cart -->
-            <div class="billing-left">
-
-                <!-- Date / time panel -->
-                <div class="panel">
-                    <div class="panel-body" style="padding:10px 14px;">
-                        <div style="display:flex;align-items:center;gap:10px;">
-                            <div>
-                                <div style="font-size:11px;color:var(--g500);" id="panelDate"></div>
-                                <div style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;" id="panelTime"></div>
-                            </div>
-                            <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-                                <div style="font-size:10px;color:var(--g500);">Today</div>
-                                <div style="font-size:12px;font-weight:800;" id="statBillCount">0 bills</div>
-                                <div style="font-size:12px;font-weight:800;color:var(--teal);" id="statRevenue">Rs.0.00</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Product search -->
-                <div class="panel">
-                    <div class="panel-body" style="padding:10px 14px;">
-                        <div style="position:relative;">
-                            <input type="text" id="searchBox" placeholder="🔍 Scan barcode or search product…"
-                                oninput="handleSearchInput(this.value)"
-                                onkeydown="handleSearchKeydown(event)"
-                                autocomplete="off" spellcheck="false">
-                            <div id="searchDropdown"></div>
-                        </div>
-
-                        <!-- Product info card -->
-                        <div id="productInfoCard" style="margin-top:8px;">
-                            <div class="pic-name" id="picName"></div>
-                            <div class="pic-code" id="picCode"></div>
-                            <div style="display:flex;align-items:center;gap:12px;margin-top:6px;">
-                                <div>
-                                    <div class="pic-price" id="picPrice"></div>
-                                    <div class="pic-stock" id="picStock"></div>
-                                </div>
-                                <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
-                                    <button onclick="stepQty(-1)" style="width:26px;height:26px;border:1px solid var(--g300);border-radius:var(--r-sm);background:var(--g100);font-size:14px;cursor:pointer;">−</button>
-                                    <input type="number" id="billQty" value="1" min="1"
-                                        style="width:48px;text-align:center;border:1.5px solid var(--g300);border-radius:var(--r-sm);padding:4px;font-size:13px;font-weight:800;">
-                                    <button onclick="stepQty(1)" style="width:26px;height:26px;border:1px solid var(--g300);border-radius:var(--r-sm);background:var(--g100);font-size:14px;cursor:pointer;">+</button>
-                                    <button onclick="addItemToInvoiceRow()"
-                                        style="padding:5px 12px;background:var(--teal);color:#fff;border:none;border-radius:var(--r-md);font-size:12px;font-weight:800;cursor:pointer;margin-left:4px;">
-                                        Add
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Customer info -->
-                <div class="panel">
-                    <div class="panel-hdr">👤 Customer</div>
-                    <div class="panel-body">
-                        <input type="text" id="customerNameInput"  class="form-input" placeholder="Customer name (optional)" style="margin-bottom:6px;">
-                        <input type="text" id="customerPhoneInput" class="form-input" placeholder="Phone number (optional)">
-                    </div>
-                </div>
-
-                <!-- Payment & totals -->
-                <div class="panel">
-                    <div class="panel-hdr">💳 Payment</div>
-                    <div class="panel-body">
-                        <!-- Payment method -->
-                        <div style="display:flex;gap:6px;margin-bottom:10px;">
-                            <button class="pay-mode-btn active" data-method="cash"   onclick="setPaymentMethod('cash')">💵 Cash</button>
-                            <button class="pay-mode-btn"        data-method="card"   onclick="setPaymentMethod('card')">💳 Card</button>
-                            <button class="pay-mode-btn"        data-method="easypaisa" onclick="setPaymentMethod('easypaisa')">📲 EasyPaisa</button>
-                            <button class="pay-mode-btn"        data-method="jazzcash"  onclick="setPaymentMethod('jazzcash')">📲 JazzCash</button>
-                        </div>
-
-                        <!-- Totals -->
-                        <div class="bv-total-row"><span>Subtotal</span>     <span id="subtotalDisplay">Rs.0.00</span></div>
-                        <div class="bv-total-row"><span>Discount</span>     <span id="discountDisplay">Rs.0.00</span></div>
-                        <div class="bv-total-row"><span>Round Off</span>    <span id="roundOffDisplay">+Rs.0.00</span></div>
-                        <div class="bv-total-row bv-total-net"><span>Net Payable</span><span id="netPayableLarge">Rs.0.00</span></div>
-
-                        <!-- Discount controls -->
-                        <div style="display:flex;align-items:center;gap:6px;margin-top:10px;flex-wrap:wrap;">
-                            <input type="number" id="discountInput" min="0" max="100" value="0" step="0.5"
-                                style="width:60px;text-align:center;border:1.5px solid var(--g300);border-radius:var(--r-md);padding:5px;font-size:12px;font-weight:700;"
-                                oninput="calculateBillTotals()">
-                            <span style="font-size:11px;color:var(--g500);">% discount</span>
-                            <div id="discountPresetBtns" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
-                            <button id="roundOffToggle" onclick="toggleRoundOff()"
-                                style="margin-left:auto;padding:4px 10px;border:1px solid var(--g300);border-radius:var(--r-md);background:var(--g100);font-size:10px;font-weight:700;cursor:pointer;">
-                                ⚡ No R/O
-                            </button>
-                        </div>
-
-                        <!-- Cash received -->
-                        <div id="cashRow" style="margin-top:10px;">
-                            <label class="form-label">Cash Received</label>
-                            <input type="number" id="cashReceivedInput" class="form-input" placeholder="0.00" step="any" min="0">
-                            <div id="changeRow" style="display:none;margin-top:6px;display:flex;justify-content:space-between;font-size:12px;font-weight:700;">
-                                <span>Change:</span>
-                                <span id="changeDisplay" style="color:var(--teal);">0.00</span>
-                            </div>
-                        </div>
-
-                        <!-- Print toggle -->
-                        <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-                            <label class="tog-sw" id="printSwitch" onclick="this.classList.toggle('on');document.getElementById('printReceiptOnSave').checked=this.classList.contains('on')"></label>
-                            <input type="checkbox" id="printReceiptOnSave" style="display:none;">
-                            <span style="font-size:11px;color:var(--g600);">Print receipt on save</span>
-                        </div>
-
-                        <!-- Save bill -->
-                        <button id="saveBillBtn" onclick="promptAndSaveInvoice()" style="margin-top:10px;">
-                            ✅ Save Bill (<span id="cartItemCount">0 items</span>) — <span id="netPayableDisplay">0.00</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Right: Invoice cart table -->
-            <div class="billing-right">
-                <div class="panel" style="flex:1;display:flex;flex-direction:column;">
-                    <div class="panel-hdr">
-                        🛒 Invoice Items
-                        <button onclick="holdCurrentBill()"
-                            style="padding:4px 10px;border:1px solid var(--g300);border-radius:var(--r-md);background:var(--g100);font-size:10px;font-weight:700;cursor:pointer;">
-                            📋 Hold Bill (F4)
-                        </button>
-                    </div>
-                    <div style="flex:1;overflow:auto;">
-                        <table class="data-table" style="width:100%;">
-                            <thead>
-                                <tr>
-                                    <th style="width:32px;">#</th>
-                                    <th>Product</th>
-                                    <th style="text-align:right;">Unit Price</th>
-                                    <th style="text-align:center;width:80px;">Qty</th>
-                                    <th style="text-align:right;">Total</th>
-                                    <th style="width:32px;"></th>
-                                </tr>
-                            </thead>
-                            <tbody id="invoiceCards"></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Today's bills quick view -->
-                <div class="panel">
-                    <div class="panel-hdr">🧾 Today's Bills</div>
-                    <div class="panel-body" id="historyCardsContainer"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ================================================================
-             HOLD VIEW
-             ================================================================ -->
-        <div id="holdView" class="view">
-            <div class="panel">
-                <div class="panel-hdr">📋 Held Bills</div>
-                <div class="panel-body">
-                    <div id="heldBillsContainer"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ================================================================
-             HISTORY VIEW
-             ================================================================ -->
-        <div id="historyView" class="view">
-            <!-- Summary cards -->
-            <div class="hist-sum-grid">
-                <div class="hist-sum-card"><div class="hsc-label">Sales</div><div class="hsc-val" id="histSumSaleCount">0</div></div>
-                <div class="hist-sum-card"><div class="hsc-label">Refunds</div><div class="hsc-val" id="histSumRefundCount">0</div></div>
-                <div class="hist-sum-card"><div class="hsc-label">Sales Amt</div><div class="hsc-val" id="histSumSaleAmount">—</div></div>
-                <div class="hist-sum-card"><div class="hsc-label">Refund Amt</div><div class="hsc-val" id="histSumRefundAmount">—</div></div>
-                <div class="hist-sum-card"><div class="hsc-label">Net</div><div class="hsc-val" id="histSumNetAmount">—</div></div>
-            </div>
-
-            <!-- Filters -->
-            <div class="panel" style="margin-bottom:10px;">
-                <div class="panel-body" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                    <input type="text" id="histSearchInput" class="form-input" placeholder="Search ID, customer, staff…"
-                        oninput="onHistSearchInput()" style="width:200px;">
-                    <input type="date" id="filterStartDate" class="form-input" onchange="applyHistoryFilters()" style="width:140px;">
-                    <span style="font-size:11px;color:var(--g400);">to</span>
-                    <input type="date" id="filterEndDate"   class="form-input" onchange="applyHistoryFilters()" style="width:140px;">
-                    <select id="filterTypeSelect" class="form-input" onchange="applyHistoryFilters()" style="width:120px;">
-                        <option value="all">All Types</option>
-                        <option value="sales">Sales</option>
-                        <option value="refunds">Refunds</option>
-                        <option value="voids">Voids</option>
-                    </select>
-                    <select id="filterMethodSelect" class="form-input" onchange="applyHistoryFilters()" style="width:120px;">
-                        <option value="all">All Payments</option>
-                        <option value="cash">Cash</option>
-                        <option value="card">Card</option>
-                        <option value="easypaisa">EasyPaisa</option>
-                        <option value="jazzcash">JazzCash</option>
-                    </select>
-                    <select id="historySortSelect" class="form-input" onchange="applyHistoryFilters()" style="width:130px;">
-                        <option value="date_desc">Newest First</option>
-                        <option value="date_asc">Oldest First</option>
-                        <option value="amount_desc">Highest Amount</option>
-                        <option value="amount_asc">Lowest Amount</option>
-                    </select>
-                    <button onclick="exportFilteredHistoryCSV()" class="btn btn-outline btn-sm">⬇ Export CSV</button>
-                </div>
-            </div>
-
-            <!-- Match count + pagination -->
-            <div class="hist-pagin">
-                <span id="histMatchCount" style="font-weight:700;"></span>
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <button id="histPrevBtn" onclick="histPrevPage()">← Prev</button>
-                    <span id="histPaginInfo" style="font-size:11px;color:var(--g500);"></span>
-                    <button id="histNextBtn" onclick="histNextPage()">Next →</button>
-                </div>
-            </div>
-
-            <!-- Table -->
-            <div class="panel">
-                <div style="overflow-x:auto;">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Invoice #</th>
-                                <th>Date</th>
-                                <th>Customer</th>
-                                <th style="text-align:right;">Amount</th>
-                                <th style="text-align:center;">Payment</th>
-                                <th>Staff</th>
-                                <th style="text-align:center;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="historyTableBody"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- ================================================================
-             INVENTORY VIEW
-             ================================================================ -->
-        <div id="inventoryView" class="view">
-            <div id="demoInventoryBanner">
-                ⚠️ Using demo inventory. Import your actual products to get started.
-            </div>
-
-            <!-- ── STOCK OVERVIEW SECTION ─────────────────────────────────── -->
-            <div class="inv-section-hdr" onclick="_toggleInvSection('stockOverviewSection')">
-                📊 Stock Overview
-                <span class="inv-section-toggle" id="stockOverviewToggle">▲</span>
-            </div>
-            <div id="stockOverviewSection" class="inv-section-body">
-                <div class="inv-overview-grid">
-                    <div class="inv-ov-card inv-ov-total">
-                        <div class="inv-ov-icon">📦</div>
-                        <div class="inv-ov-val" id="ovTotalProducts">0</div>
-                        <div class="inv-ov-label">Total Products</div>
-                    </div>
-                    <div class="inv-ov-card inv-ov-value">
-                        <div class="inv-ov-icon">💰</div>
-                        <div class="inv-ov-val" id="ovInventoryValue">—</div>
-                        <div class="inv-ov-label">Stock Value</div>
-                    </div>
-                    <div class="inv-ov-card inv-ov-low">
-                        <div class="inv-ov-icon">⚠️</div>
-                        <div class="inv-ov-val" id="ovLowStock">0</div>
-                        <div class="inv-ov-label">Low Stock</div>
-                    </div>
-                    <div class="inv-ov-card inv-ov-out">
-                        <div class="inv-ov-icon">🚫</div>
-                        <div class="inv-ov-val" id="ovOutOfStock">0</div>
-                        <div class="inv-ov-label">Out of Stock</div>
-                    </div>
-                    <div class="inv-ov-card inv-ov-ok">
-                        <div class="inv-ov-icon">✅</div>
-                        <div class="inv-ov-val" id="ovInStock">0</div>
-                        <div class="inv-ov-label">In Stock</div>
-                    </div>
-                    <div class="inv-ov-card inv-ov-avg">
-                        <div class="inv-ov-icon">📈</div>
-                        <div class="inv-ov-val" id="ovAvgPrice">—</div>
-                        <div class="inv-ov-label">Avg Price</div>
-                    </div>
-                </div>
-                <!-- Top 5 low-stock products -->
-                <div style="margin-top:10px;">
-                    <div style="font-size:10px;font-weight:800;color:var(--g500);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;">⚠️ Lowest Stock Items</div>
-                    <div id="lowStockList" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
-                </div>
-            </div>
-
-            <!-- ── PRODUCT CATALOG SECTION ────────────────────────────────── -->
-            <div class="inv-section-hdr" onclick="_toggleInvSection('productCatalogSection')" style="margin-top:8px;">
-                💊 Product Catalog
-                <span class="inv-section-toggle" id="productCatalogToggle">▲</span>
-            </div>
-            <div id="productCatalogSection" class="inv-section-body">
-                <!-- Controls -->
-                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;">
-                    <input type="text" id="invSearch" class="form-input" placeholder="Search name, code, generic…"
-                        oninput="renderInventoryTable()" style="flex:1;min-width:150px;">
-                    <select id="invSortCol" class="form-input" onchange="renderInventoryTable()" style="width:120px;">
-                        <option value="name">Sort: Name</option>
-                        <option value="code">Sort: Code</option>
-                        <option value="stock">Sort: Stock</option>
-                        <option value="unit_price">Sort: Price</option>
-                    </select>
-                    <select id="invSortDir" class="form-input" onchange="renderInventoryTable()" style="width:70px;">
-                        <option value="asc">↑ Asc</option>
-                        <option value="desc">↓ Desc</option>
-                    </select>
-                    <button onclick="openQuickAdd()" class="btn btn-primary btn-sm">+ Add</button>
-                    <button onclick="exportInventoryCSV && exportInventoryCSV()" class="btn btn-outline btn-sm">⬇ CSV</button>
-                    <span id="invCount" style="font-size:11px;color:var(--g500);"></span>
-                </div>
-
-                <!-- Table (desktop) / Cards (mobile) -->
-                <div class="inv-table-wrap">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Code</th>
-                                <th>Name</th>
-                                <th>Generic</th>
-                                <th>Pack</th>
-                                <th>Company</th>
-                                <th style="text-align:right;">Price</th>
-                                <th style="text-align:center;">Stock</th>
-                                <th style="text-align:center;">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="inventoryTableBody"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- ================================================================
-             REPORTING VIEW
-             ================================================================ -->
-        <div id="reportingView" class="view">
-            <!-- Filters -->
-            <div class="panel" style="margin-bottom:12px;">
-                <div class="panel-body" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                    <input type="date" id="reportStartDate" class="form-input" style="width:140px;">
-                    <span style="font-size:11px;color:var(--g400);">to</span>
-                    <input type="date" id="reportEndDate"   class="form-input" style="width:140px;">
-                    <select id="reportGroupBy" class="form-input" style="width:100px;">
-                        <option value="day">By Day</option>
-                        <option value="week">By Week</option>
-                        <option value="month">By Month</option>
-                    </select>
-                    <select id="reportPayMethod" class="form-input" style="width:120px;">
-                        <option value="all">All Payments</option>
-                        <option value="cash">Cash</option>
-                        <option value="card">Card</option>
-                        <option value="easypaisa">EasyPaisa</option>
-                        <option value="jazzcash">JazzCash</option>
-                    </select>
-                    <button onclick="applyReportFilters()" class="btn btn-primary btn-sm">Apply</button>
-                    <button onclick="exportReportCSV()"    class="btn btn-outline btn-sm">⬇ Export CSV</button>
-                </div>
-            </div>
-
-            <!-- Summary cards -->
-            <div class="rpt-summary-grid" style="margin-bottom:12px;">
-                <div class="rpt-sum-card"><div class="rsc-label">Total Sales</div>    <div class="rsc-val" id="rptTotalSales">0</div></div>
-                <div class="rpt-sum-card"><div class="rsc-label">Total Revenue</div>  <div class="rsc-val" id="rptTotalRevenue">—</div></div>
-                <div class="rpt-sum-card"><div class="rsc-label">Avg Bill</div>       <div class="rsc-val" id="rptAvgBill">—</div></div>
-                <div class="rpt-sum-card"><div class="rsc-label">Daily Avg</div>      <div class="rsc-val" id="rptDailyAvg">—</div></div>
-                <div class="rpt-sum-card"><div class="rsc-label">Largest Bill</div>   <div class="rsc-val" id="rptMaxBill">—</div></div>
-                <div class="rpt-sum-card"><div class="rsc-label">Period</div>         <div class="rsc-val" style="font-size:12px;" id="rptDateRange">—</div></div>
-            </div>
-
-            <!-- Time-series chart -->
-            <div class="panel" style="margin-bottom:12px;">
-                <div class="panel-hdr">📈 Daily Sales Chart</div>
-                <div class="panel-body" id="timeSeriesChartArea" style="height:140px;padding:8px;overflow-x:auto;"></div>
-            </div>
-
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;flex-wrap:wrap;">
-                <!-- Product report -->
-                <div class="panel">
-                    <div class="panel-hdr">💊 Top Products <span id="productReportCount" style="font-size:10px;font-weight:400;color:var(--g400);"></span></div>
-                    <div style="overflow:auto;max-height:300px;">
-                        <table class="data-table">
-                            <thead><tr><th>Code</th><th>Name</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Bills</th><th style="text-align:right;">Revenue</th></tr></thead>
-                            <tbody id="productReportBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Staff report -->
-                <div class="panel">
-                    <div class="panel-hdr">👤 Staff Performance</div>
-                    <div style="overflow:auto;max-height:300px;">
-                        <table class="data-table">
-                            <thead><tr><th>Staff</th><th style="text-align:right;">Bills</th><th style="text-align:right;">Avg</th><th style="text-align:right;">Revenue</th></tr></thead>
-                            <tbody id="staffReportBody"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Payment method report -->
-            <div class="panel" style="margin-top:12px;">
-                <div class="panel-hdr">💳 Payment Method Breakdown</div>
-                <div style="overflow:auto;">
-                    <table class="data-table">
-                        <thead><tr><th>Method</th><th style="text-align:right;">Count</th><th style="text-align:right;">Share</th><th style="text-align:right;">Revenue</th></tr></thead>
-                        <tbody id="payMethodReportBody"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- ================================================================
-             AUDIT LOG VIEW
-             ================================================================ -->
-        <div id="auditLogView" class="view">
-            <!-- Filters -->
-            <div class="panel" style="margin-bottom:10px;">
-                <div class="panel-body" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                    <input type="text" id="auditSearchInp" class="form-input"
-                        placeholder="Search action, detail, staff…"
-                        oninput="AuditLog.onAuditSearch()" style="flex:1;min-width:160px;">
-                    <select id="auditCatFilter" class="form-input" onchange="AuditLog.applyFilters()" style="width:150px;"></select>
-                    <input type="date" id="auditStartDate" class="form-input" onchange="AuditLog.applyFilters()" style="width:140px;">
-                    <span style="font-size:11px;color:var(--g400);">to</span>
-                    <input type="date" id="auditEndDate"   class="form-input" onchange="AuditLog.applyFilters()" style="width:140px;">
-                    <button onclick="AuditLog.exportAuditCSV()" class="btn btn-outline btn-sm">⬇ Export CSV</button>
-                    <button onclick="AuditLog.openAuditLogTab()" class="btn btn-secondary btn-sm">🔄 Refresh</button>
-                </div>
-            </div>
-
-            <!-- Stats + pagination row -->
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
-                <span id="auditCount" style="font-size:11px;font-weight:700;color:var(--g600);"></span>
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <button id="auditPrevBtn" onclick="AuditLog.auditPrevPage()"
-                        style="padding:5px 12px;border:1px solid var(--g300);border-radius:var(--r-md);background:var(--g100);font-size:11px;font-weight:700;cursor:pointer;">← Prev</button>
-                    <span id="auditPaginInfo" style="font-size:11px;color:var(--g500);"></span>
-                    <button id="auditNextBtn" onclick="AuditLog.auditNextPage()"
-                        style="padding:5px 12px;border:1px solid var(--g300);border-radius:var(--r-md);background:var(--g100);font-size:11px;font-weight:700;cursor:pointer;">Next →</button>
-                </div>
-            </div>
-
-            <!-- Table -->
-            <div class="panel">
-                <div style="overflow-x:auto;">
-                    <table class="data-table" style="min-width:560px;">
-                        <thead>
-                            <tr>
-                                <th style="width:140px;">Time</th>
-                                <th style="width:130px;">Action</th>
-                                <th>Detail</th>
-                                <th style="width:110px;">Staff</th>
-                                <th style="width:80px;">Device</th>
-                            </tr>
-                        </thead>
-                        <tbody id="auditLogBody"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- ================================================================
-             SYNC HUB VIEW
-             ================================================================ -->
-        <div id="syncHubView" class="view">
-            <div class="panel" style="margin-bottom:12px;">
-                <div class="panel-hdr">
-                    🔄 Sync Hub
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <span class="sync-status-badge sync-idle" id="syncHubStatusBadge"></span>
-                        <span id="syncHubStatusLabel" style="font-size:11px;color:var(--g500);">Idle</span>
-                        <button onclick="SyncHubModule.forceSyncNow()" class="btn btn-primary btn-sm">⚡ Sync Now</button>
-                    </div>
-                </div>
-                <div class="panel-body">
-                    <div style="margin-bottom:10px;">
-                        <div style="font-size:11px;font-weight:700;color:var(--g600);margin-bottom:4px;">Queue Depth</div>
-                        <div id="syncQueueDepth" style="font-size:12px;font-weight:800;color:var(--g800);">0 pending</div>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;font-weight:700;color:var(--g600);margin-bottom:4px;">Pending Events</div>
-                        <div id="syncQueueDetails" style="max-height:200px;overflow-y:auto;"></div>
-                    </div>
-                    <button onclick="SyncHubModule.openSyncHubPanel()" class="btn btn-secondary btn-sm" style="margin-top:10px;">🔍 Refresh Panel</button>
-                </div>
-            </div>
-        </div>
-
-    </main><!-- /.main-content -->
-</div><!-- /#app -->
-
-<!-- =========================================================================
-     SETTINGS DRAWER
-     ========================================================================= -->
-<div id="settingsDrawer" class="settings-drawer">
-    <div class="settings-drawer-hdr">
-        <div style="font-size:15px;font-weight:800;">⚙️ Settings</div>
-        <button onclick="toggleSettingsDrawer()"
-            style="width:30px;height:30px;border:none;background:var(--g100);border-radius:50%;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;">×</button>
-    </div>
-
-    <div class="settings-drawer-body">
-
-        <!-- Branch Identity -->
-        <div class="settings-section">
-            <div class="settings-section-title">🏥 Branch Identity</div>
-            <div style="display:grid;gap:8px;">
-                <div><label class="form-label">Business Name</label><input id="settingBusinessName" type="text" class="form-input" placeholder="Dua Pharma…"></div>
-                <div><label class="form-label">Branch Name</label>  <input id="settingBranchName"   type="text" class="form-input" placeholder="Main Branch…"></div>
-                <div><label class="form-label">License No.</label>  <input id="settingLicenseNo"    type="text" class="form-input" placeholder="DRP-XXXXX"></div>
-                <div><label class="form-label">Counter ID</label>   <input id="settingCounterId"    type="text" class="form-input" placeholder="C-01…"></div>
-                <div><label class="form-label">Phone</label>        <input id="settingPhone"        type="text" class="form-input" placeholder="+92…"></div>
-                <div><label class="form-label">Address</label>      <input id="settingAddress"      type="text" class="form-input" placeholder="Street, City…"></div>
-                <div><label class="form-label">Tag Line</label>     <input id="settingTagLine"      type="text" class="form-input" placeholder="Your health is our priority"></div>
-            </div>
-        </div>
-
-        <!-- Billing -->
-        <div class="settings-section">
-            <div class="settings-section-title">💰 Billing</div>
-            <div style="display:grid;gap:8px;">
-                <div><label class="form-label">Currency Symbol</label>      <input id="settingCurrency"    type="text" class="form-input" placeholder="Rs." style="width:80px;"></div>
-                <div><label class="form-label">Round-Off Step (0 = off)</label><input id="settingRoundOffStep" type="number" class="form-input" placeholder="5" min="0" style="width:80px;"></div>
-                <div>
-                    <label class="form-label">Discount Presets (%)</label>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                        <input id="discPreset0" type="number" class="form-input" style="width:60px;" min="0" max="100">
-                        <input id="discPreset1" type="number" class="form-input" style="width:60px;" min="0" max="100">
-                        <input id="discPreset2" type="number" class="form-input" style="width:60px;" min="0" max="100">
-                        <input id="discPreset3" type="number" class="form-input" style="width:60px;" min="0" max="100">
-                        <input id="discPreset4" type="number" class="form-input" style="width:60px;" min="0" max="100">
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Receipt -->
-        <div class="settings-section">
-            <div class="settings-section-title">🧾 Receipt</div>
-            <div style="display:grid;gap:8px;">
-                <div><label class="form-label">Header Line</label><input id="settingReceiptHeader" type="text" class="form-input" placeholder="e.g. Thank you for shopping!"></div>
-                <div><label class="form-label">Footer Line</label><input id="settingReceiptFooter" type="text" class="form-input" placeholder="e.g. Come again. Stay healthy."></div>
-            </div>
-        </div>
-
-        <!-- Backup -->
-        <div class="settings-section">
-            <div class="settings-section-title">💾 Backup</div>
-            <div style="display:grid;gap:8px;">
-                <div>
-                    <label class="form-label">Auto Backup Every (minutes, 0 = off)</label>
-                    <input id="settingAutoBackupInterval" type="number" class="form-input" placeholder="0" min="0" style="width:80px;">
-                </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button onclick="exportFullBackup()" class="btn btn-primary btn-sm">⬇ Export Backup</button>
-                    <label class="btn btn-secondary btn-sm" style="cursor:pointer;">
-                        ⬆ Import Backup
-                        <input type="file" accept=".json" style="display:none;" onchange="importFullBackup(this.files[0])">
-                    </label>
-                </div>
-            </div>
-        </div>
-
-        <!-- Dark Mode -->
-        <div class="settings-section">
-            <div class="settings-section-title">🌙 Display</div>
-            <div style="display:flex;align-items:center;gap:10px;">
-                <label class="form-label" style="margin:0;">Dark Mode</label>
-                <input type="checkbox" id="settingDarkModeToggle" onchange="StorageModule.set('pharma_dark_mode', this.checked ? '1' : '0'); document.documentElement.classList.toggle('dark', this.checked);">
-            </div>
-        </div>
-
-        <!-- Staff Management (Bug 2 fix) -->
-        <div class="settings-section">
-            <div class="settings-section-title" style="display:flex;align-items:center;justify-content:space-between;">
-                👤 Staff Management
-                <button onclick="openAddStaffModal()" class="btn btn-primary btn-sm">+ Add</button>
-            </div>
-            <div id="staffListContainer" style="margin-top:8px;"></div>
-        </div>
-
-        <!-- Danger Zone -->
-        <div class="settings-section">
-            <div class="settings-section-title" style="color:var(--red);">⚠️ Danger Zone</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button onclick="confirmLocalPurge()" class="btn btn-danger btn-sm">🗑 Wipe Local Data</button>
-                <button onclick="requestAdminAccess('GLOBAL_PURGE')" class="btn btn-danger btn-sm">⚠️ Global Purge (Master)</button>
-            </div>
-        </div>
-
-        <!-- Save settings -->
-        <button onclick="saveBranchIdentity()" class="btn btn-primary btn-full" style="margin-top:8px;">
-            💾 Save All Settings
-        </button>
-    </div>
-</div>
-
-<!-- =========================================================================
-     JS MODULES — order matters (dependencies first)
-     1. config.js      — Supabase, device UUID, Lamport clock (Bug 9)
-     2. ui.js          — confirm modal, chunked render (Bug 11)
-     3. storage.js     — IDB, typed sync queue (Bugs 4, 7, 9)
-     4. inventory.js   — delta engine, movement ledger (Bugs 1, 5)
-     5. auth.js        — staff, hashing, write-through (Bug 2)
-     6. settings.js    — branch identity, purge (Bugs 2, 6)
-     7. devices.js     — master lease, device purge (Bugs 6, 10)
-     8. billing.js     — invoice engine, compound ID (Bugs 1, 4, 8)
-     9. history.js     — bill-view modal, chunked table (Bugs 3, 11)
-    10. reporting.js   — chunked reports (Bug 11)
-    11. syncHub.js     — routed drain, delta push (Bugs 4, 7, 11)
-     ========================================================================= -->
-<script src="js/config.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/storage.js"></script>
-<script src="js/inventory.js"></script>
-<script src="js/auth.js"></script>
-<script src="js/settings.js"></script>
-<script src="js/devices.js"></script>
-<script src="js/billing.js"></script>
-<script src="js/history.js"></script>
-<script src="js/reporting.js"></script>
-<script src="js/syncHub.js"></script>
-<script src="js/auditLog.js"></script>
-
-<!-- EmailJS (lazy loaded) -->
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js" defer></script>
-
+<meta charset="UTF-8">
 <script>
-// ── Inline wiring — minimal glue that doesn't belong in any module ─────
-// Product search → billing integration
-function handleSearchInput(val) {
-    const q = (val || '').toLowerCase().trim();
-    const dd = document.getElementById('searchDropdown');
-    if (!dd) return;
-
-    if (!q || q.length < 1) { dd.style.display = 'none'; return; }
-
-    const results = masterInventoryDB.filter(p =>
-        p.name.toLowerCase().includes(q) ||
-        (p.code || '').toLowerCase().includes(q) ||
-        (p.generic_name || '').toLowerCase().includes(q)
-    ).slice(0, 10);
-
-    if (results.length === 0) { dd.style.display = 'none'; return; }
-
-    const cur = typeof _getCurrency === 'function' ? _getCurrency() : 'Rs.';
-    dd.innerHTML = results.map((p, i) => `
-        <div class="sd-item" id="sdItem${i}" onclick="_selectSearchProduct('${_escHtml(p.code)}')">
-            <span class="sd-code">${_escHtml(p.code)}</span>
-            <span class="sd-name">${_escHtml(p.name)}</span>
-            <span class="sd-stock">Stk:${p.stock}</span>
-            <span class="sd-price">${cur}${Number(p.unit_price || 0).toFixed(2)}</span>
-        </div>`).join('');
-    dd.style.display = 'block';
-    activeDropdownIndex = -1;
-    window._searchResults = results;
-}
-
-function handleSearchKeydown(e) {
-    const dd = document.getElementById('searchDropdown');
-    if (!dd || dd.style.display === 'none') return;
-    const items = dd.querySelectorAll('.sd-item');
-    if (!items.length) return;
-
-    if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        activeDropdownIndex = Math.min(activeDropdownIndex + 1, items.length - 1);
-        items.forEach((el, i) => el.classList.toggle('active', i === activeDropdownIndex));
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        activeDropdownIndex = Math.max(activeDropdownIndex - 1, 0);
-        items.forEach((el, i) => el.classList.toggle('active', i === activeDropdownIndex));
-    } else if (e.key === 'Enter') {
-        e.preventDefault();
-        if (activeDropdownIndex >= 0 && window._searchResults && window._searchResults[activeDropdownIndex]) {
-            _selectSearchProduct(window._searchResults[activeDropdownIndex].code);
-        } else if (window._searchResults && window._searchResults.length === 1) {
-            _selectSearchProduct(window._searchResults[0].code);
-        } else if (activeDropdownIndex === -1 && dd.style.display !== 'none') {
-            activeDropdownIndex = 0;
-            items.forEach((el, i) => el.classList.toggle('active', i === 0));
-        }
-    } else if (e.key === 'Escape') {
-        dd.style.display = 'none';
-    }
-}
-
-function _selectSearchProduct(code) {
-    const prod = masterInventoryDB.find(p => p.code === code);
-    if (!prod) return;
-    selectedProductRef = prod;
-    const dd = document.getElementById('searchDropdown');
-    if (dd) dd.style.display = 'none';
-    const sb = document.getElementById('searchBox');
-    if (sb) sb.value = prod.name;
-
-    const cur = typeof _getCurrency === 'function' ? _getCurrency() : 'Rs.';
-    document.getElementById('picName').textContent  = prod.name;
-    document.getElementById('picCode').textContent  = prod.code + (prod.pack_size ? ' · ' + prod.pack_size : '');
-    document.getElementById('picPrice').textContent = cur + Number(prod.unit_price || 0).toFixed(2);
-    document.getElementById('picStock').textContent = 'In stock: ' + (prod.stock || 0);
-    document.getElementById('productInfoCard').style.display = '';
-
-    const qtyInp = document.getElementById('billQty');
-    if (qtyInp) { qtyInp.value = 1; qtyInp.focus(); qtyInp.select(); }
-}
-
-// Close search dropdown when clicking outside
-document.addEventListener('click', function(e) {
-    const dd = document.getElementById('searchDropdown');
-    const sb = document.getElementById('searchBox');
-    if (dd && !dd.contains(e.target) && e.target !== sb) dd.style.display = 'none';
-});
-
-// ── Inventory section collapse/expand ────────────────────────────────────
-function _toggleInvSection(sectionId) {
-    const body   = document.getElementById(sectionId);
-    const key    = sectionId + 'Toggle';
-    const toggle = document.getElementById(key);
-    if (!body) return;
-    const collapsed = body.classList.toggle('inv-section-collapsed');
-    if (toggle) toggle.textContent = collapsed ? '▼' : '▲';
-}
-
-// ── Inventory Stock Overview — compute and render ─────────────────────────
-function _renderStockOverview() {
-    const inv = window.masterInventoryDB || [];
-    const cur = (typeof _getCurrency === 'function') ? _getCurrency() : 'Rs.';
-    const LOW_THRESH = 10;
-
-    let totalValue = 0;
-    let lowStock   = 0;
-    let outStock   = 0;
-    let inStock    = 0;
-    let totalPrice = 0;
-    let priceCount = 0;
-
-    inv.forEach(p => {
-        const stock = Number(p.stock || p.quantity || 0);
-        const price = Number(p.unit_price || p.unitPrice || 0);
-        totalValue += stock * price;
-        if (price > 0) { totalPrice += price; priceCount++; }
-        if (stock <= 0)            outStock++;
-        else if (stock < LOW_THRESH) lowStock++;
-        else                         inStock++;
-    });
-
-    const _set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-    _set('ovTotalProducts',  inv.length);
-    _set('ovInventoryValue', cur + totalValue.toFixed(2));
-    _set('ovLowStock',       lowStock);
-    _set('ovOutOfStock',     outStock);
-    _set('ovInStock',        inStock);
-    _set('ovAvgPrice',       priceCount > 0 ? cur + (totalPrice / priceCount).toFixed(2) : '—');
-
-    // Low-stock chip list (bottom 8)
-    const lowList = [...inv]
-        .filter(p => Number(p.stock || 0) > 0 && Number(p.stock || 0) < LOW_THRESH)
-        .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0))
-        .slice(0, 8);
-
-    const ll = document.getElementById('lowStockList');
-    if (ll) {
-        ll.innerHTML = lowList.length === 0
-            ? '<span style="font-size:11px;color:var(--g400);">No low-stock items. 🎉</span>'
-            : lowList.map(p => `
-                <div style="display:inline-flex;align-items:center;gap:4px;background:var(--red-lt);border:1px solid var(--red);border-radius:var(--r-pill);padding:3px 9px;font-size:11px;font-weight:700;color:var(--red);">
-                    ${_escHtml(p.name)} <span style="opacity:.7;">(${p.stock})</span>
-                </div>`).join('');
-    }
-}
-
-// Refresh stock overview whenever inventory tab opens
-document.addEventListener('DOMContentLoaded', () => {
-    const invTab = document.getElementById('tab-inventory');
-    if (invTab) {
-        invTab.addEventListener('click', () => setTimeout(_renderStockOverview, 120));
-    }
-});
-
-// Round-off toggle
-function toggleRoundOff() {
-    const roSteps = [0, 1, 5, 10];
-    const idx     = roSteps.indexOf(roundOffStep);
-    roundOffStep  = roSteps[(idx + 1) % roSteps.length];
-    if (typeof StorageModule !== 'undefined') {
-        const bs = StorageModule.get('pharma_billing_settings');
-        try {
-            const obj = bs ? JSON.parse(bs) : {};
-            obj.roundOffStep = String(roundOffStep);
-            StorageModule.set('pharma_billing_settings', JSON.stringify(obj));
-        } catch(e) {}
-    }
-    if (typeof _syncRoundOffBtn === 'function') _syncRoundOffBtn();
-    if (typeof calculateBillTotals === 'function') calculateBillTotals();
-}
-
-// Held bills renderer
-function renderHeldBillsView() {
-    const container = document.getElementById('heldBillsContainer');
-    if (!container) return;
-    if (!temporaryHeldBills || temporaryHeldBills.length === 0) {
-        container.innerHTML = '<div class="hist-empty">No bills on hold.</div>';
-        return;
-    }
-    const cur = typeof _getCurrency === 'function' ? _getCurrency() : 'Rs.';
-    container.innerHTML = temporaryHeldBills.map((hb, idx) => {
-        const total = (hb.items || []).reduce((s, i) => s + (Number(i.total) || 0), 0);
-        return `<div class="hcard" style="justify-content:space-between;">
-            <div>
-                <div style="font-size:12px;font-weight:800;">Hold #${idx + 1} · ${(hb.items || []).length} item${hb.items.length === 1 ? '' : 's'}</div>
-                <div style="font-size:11px;color:var(--g500);">${hb.customerName || 'Walk-in'} · ${new Date(hb.heldAt || Date.now()).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
-            </div>
-            <div style="font-size:14px;font-weight:800;color:var(--teal);">${cur}${total.toFixed(2)}</div>
-            <button onclick="recallHeldBill(${idx})" class="btn btn-primary btn-sm">↩ Recall</button>
-        </div>`;
-    }).join('');
-}
-
-document.getElementById('tab-hold').addEventListener('click', () => setTimeout(renderHeldBillsView, 60));
+(function(){
+  var pref = localStorage.getItem('pharma_dark_mode');
+  if (pref === 'dark') { document.documentElement.setAttribute('data-theme','dark'); }
+  else if (!pref || pref === 'auto') {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+      document.documentElement.setAttribute('data-theme','dark');
+  }
+})();
 </script>
+<meta name="viewport" id="viewportMeta" content="width=1360">
+<script>
+(function(){
+  var ua = navigator.userAgent;
+  if (/Mobi|Android|iPhone|iPad/i.test(ua)) {
+    document.getElementById('viewportMeta').setAttribute('content','width=device-width,initial-scale=1');
+  }
+})();
+</script>
+<title id="pageTitle">Pharma Plus — POS</title>
 
+<!-- PWA manifest + icons -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#008080">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PharmaPOS">
+<link rel="apple-touch-icon" href="icons/icon-192.svg">
+<link rel="icon" type="image/svg+xml" href="icons/icon-192.svg">
+<meta name="msapplication-TileColor" content="#008080">
+<meta name="msapplication-TileImage" content="icons/icon-192.svg">
+
+<!-- CSS -->
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/print.css">
+
+<!-- EmailJS (Task 3) -->
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+</head>
+
+<body>
+<div id="appRoot">
+
+<!-- ═══ HEADER ═══ -->
+<header id="appHeader">
+  <div class="hdr-brand">
+    <span class="hdr-logo">💊</span>
+    <div class="hdr-text">
+      <div class="hdr-title" id="hdrAppTitle">Pharma Plus</div>
+      <div class="hdr-sub" id="hdrSubtitle">Advanced Billing Terminal</div>
+    </div>
+  </div>
+  <div class="hdr-divider"></div>
+  <div class="hdr-stat-block">
+    <div class="hdr-stat">
+      <div class="hdr-stat-v" id="hdrTodayBills">0</div>
+      <div class="hdr-stat-l">Bills Today</div>
+    </div>
+    <div class="hdr-stat">
+      <div class="hdr-stat-v" id="hdrRevenue">0</div>
+      <div class="hdr-stat-l">Revenue</div>
+    </div>
+  </div>
+  <div class="hdr-sp"></div>
+  <div class="hdr-actions">
+    <button class="hdr-btn" onclick="openDataHub()" title="Data Hub (Ctrl+D)">📦 Data Hub</button>
+    <span id="supabase-sync-badge" class="connecting" title="Device Telemetry Hub (click)" onclick="if(typeof DevicesModule!=='undefined')DevicesModule.openDeviceTelemetryHub()" style="cursor:pointer;" role="button" tabindex="0" onkeydown="if(event.key==='Enter'&&typeof DevicesModule!=='undefined')DevicesModule.openDeviceTelemetryHub()"><span class="dot"></span><span id="supabaseSyncLabel">Sync</span></span>
+    <button class="hdr-btn" onclick="toggleSettingsDrawer()" title="Settings (F12)">⚙️ Settings <span class="hdr-f12-hint">F12</span></button>
+    <button class="hdr-btn icon" id="hdrDarkModeBtn" onclick="toggleDarkMode()" title="Toggle Dark Mode">🌗</button>
+    <button class="hdr-btn icon" onclick="toggleShortcutsModal()" title="Keyboard Shortcuts (F1)">⌨️</button>
+    <button class="staff-badge" onclick="openStaffLogin()" title="Staff Login">
+      <span class="staff-dot"></span>
+      <span id="activeStaffLabel">Login</span>
+    </button>
+    <input type="file" id="csvFile" accept=".csv">
+    <input type="file" id="restoreFileInputHeader" accept=".json">
+  </div>
+</header>
+
+<!-- System Banners -->
+<div id="storageWarningBanner"></div>
+<div id="backupReminderBanner" onclick="openDataHub()"></div>
+<div id="demoInventoryBanner" onclick="openDataHub()">⚠️ Demo inventory active (3 sample items). Click here to import your real CSV via Data Hub.</div>
+<!-- Persistent stale-device warning — updated every 60 s by _startStaleBannerPoller() in synchub.js -->
+<div id="appStaleBanner" class="app-stale-banner" style="display:none;"></div>
+
+<!-- ═══ TAB STRIP ═══ -->
+<div id="tabStrip">
+  <button class="tab-btn active" id="tab-billing" onclick="switchTab('billingView',this)">
+    🧾 Billing <span class="tab-k">F5</span>
+  </button>
+  <button class="tab-btn" id="tab-hold" onclick="switchTab('holdView',this)">
+    📋 Held&nbsp;<span class="tab-badge" id="holdCount">0</span>
+    <span class="tab-k">F6</span>
+  </button>
+  <button class="tab-btn" id="tab-history" onclick="switchTab('historyView',this)">
+    📊 History <span class="tab-k">F7</span>
+  </button>
+  <button class="tab-btn" id="tab-inventory" onclick="switchTab('inventoryView',this)">
+    📦 Inventory <span class="tab-k">F8</span>
+  </button>
+  <button class="tab-btn" id="tab-settings" onclick="switchTab('settingsView',this)">
+    ⚙️ Settings <span class="tab-k">F12</span>
+  </button>
+  <button class="tab-btn" id="tabSyncHub" onclick="switchTab('syncHubView',this)">
+    ☁️ Cloud Sync Hub <kbd class="tab-k">F10</kbd>
+  </button>
+  <button class="tab-btn" id="tabReporting" onclick="switchTab('reportingView',this);renderReportingView();">
+    📈 Reports
+  </button>
+  <div class="tab-sep"></div>
+  <div id="editModeAlertBar">
+    ⚠️ EDITING&nbsp;<strong id="editingInvoiceIdBadge"></strong>
+    <button class="em-cancel" onclick="clearActiveInvoiceForm()">✕ Cancel</button>
+  </div>
+  <div class="tab-sp"></div>
+</div>
+
+<!-- ═══ APP BODY ═══ -->
+<div id="appBody">
+
+  <!-- ─── LEFT PANEL ─── -->
+  <div id="leftPanel">
+    <div id="leftContent">
+
+      <!-- BILLING VIEW -->
+      <div id="billingView" class="view active">
+        <div class="top-panel">
+          <!-- Customer bar -->
+          <div class="tp-cust-bar">
+            <span class="tp-cust-lbl">👤</span>
+            <input type="text" id="customerNameInput" class="tp-cust-inp" placeholder="Customer name (optional)" autocomplete="off" maxlength="60">
+            <span class="tp-cust-sep">|</span>
+            <span class="tp-cust-lbl">📞</span>
+            <input type="text" id="customerPhoneInput" class="tp-cust-inp tp-cust-phone" placeholder="Phone (optional)" autocomplete="off" maxlength="20">
+          </div>
+          <div class="tp-row1">
+            <div class="tp-datetime">
+              <div class="tp-date" id="panelDate">-- --- ----</div>
+              <div class="tp-time" id="panelTime">--:--:-- --</div>
+            </div>
+            <div class="tp-search-wrap">
+              <input type="text" id="searchBox"
+                placeholder="F2 · Search medicine (name, code, generic)…"
+                autocomplete="off" autocorrect="off" autocapitalize="off"
+                inputmode="text" tabindex="1">
+              <button class="search-clear" id="searchClearBtn" onclick="clearSearch()">×</button>
+              <div id="searchResults">
+                <div class="sr-hdr">
+                  <span>#</span><span>Product</span><span>Pack</span>
+                  <span>Generic</span><span class="sr-hdr-c">Stock</span><span class="sr-hdr-r">Price</span>
+                </div>
+              </div>
+              <div id="searchNoResults"></div>
+            </div>
+            <button id="search2Toggle" onclick="toggleSearch2()" title="Double filter search">⊕</button>
+            <button class="tp-add-btn" onclick="addItemToInvoiceRow()" title="Add to bill (Enter)">
+              ➕ Add <kbd>↵</kbd>
+            </button>
+          </div>
+
+          <!-- 2nd Search Bar (Double Filter Engine) -->
+          <div id="search2Row" style="display:none;">
+            <div class="s2-label-row">
+              <span id="s2FilterTag" class="s2-filter1-tag">
+                <span id="s2TagText">Filter 1: —</span>
+                <button class="s2-tag-x" onclick="clearSearch2Filter()" title="Clear filter 1">×</button>
+              </span>
+              <span class="s2-hint">+ narrow down with 2nd keyword</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div class="s2-wrap">
+                <input type="text" id="search2Box"
+                  placeholder="Type 2nd keyword to narrow results…"
+                  autocomplete="off" autocorrect="off" tabindex="3">
+                <button class="search2-clear" id="search2ClearBtn" onclick="clearSearch2Input()">×</button>
+                <div id="search2Results">
+                  <div class="s2r-hdr">
+                    <span>#</span><span>Product</span><span>Pack</span>
+                    <span>Generic</span><span class="sr-hdr-c">Stock</span><span class="sr-hdr-r">Price</span>
+                  </div>
+                </div>
+                <div id="search2NoResults"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Product Info Card -->
+          <div id="productInfoCard">
+            <div class="pic-grid">
+              <div class="pic-name" id="infoName">—</div>
+              <span class="pic-badge" id="infoStockBadge">— left</span>
+            </div>
+            <div class="pic-info-row">
+              <span>Code: <strong id="infoCode">—</strong></span>
+              <span>Generic: <strong id="infoGeneric">—</strong></span>
+              <span>Company: <strong id="infoCompany">—</strong></span>
+              <span>Pack: <strong id="infoPack">—</strong></span>
+              <span>Rate: <strong id="infoPrice">—</strong></span>
+            </div>
+            <div class="pic-qty-row">
+              <span class="pic-qty-label">Qty:</span>
+              <div class="pic-qty-wrap">
+                <button class="pic-step" onclick="stepQty(-1)" tabindex="-1">−</button>
+                <input type="number" id="billQty" value="1" min="1" tabindex="2">
+                <button class="pic-step" onclick="stepQty(1)" tabindex="-1">+</button>
+              </div>
+              <div class="pic-enter-hint">Press Enter to add →</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Invoice Table Panel -->
+        <div class="inv-panel">
+          <div class="inv-header-bar">
+            <span class="inv-title">Invoice Lines</span>
+            <span id="cartItemCount">0 items</span>
+            <div class="inv-sp"></div>
+            <div class="inv-f9-hint" id="invF9Hint">⚡ F9 EDIT MODE</div>
+          </div>
+          <div class="inv-table-wrap">
+            <table class="inv-table">
+              <colgroup><col><col><col><col><col><col></colgroup>
+              <thead>
+                <tr>
+                  <th class="inv-th c">#</th>
+                  <th class="inv-th">Product</th>
+                  <th class="inv-th r">Rate</th>
+                  <th class="inv-th c">Qty</th>
+                  <th class="inv-th r">Total</th>
+                  <th class="inv-th"></th>
+                </tr>
+              </thead>
+              <tbody id="invoiceCards"></tbody>
+            </table>
+          </div>
+        </div>
+      </div><!-- /billingView -->
+
+      <!-- HOLD VIEW -->
+      <div id="holdView" class="view">
+        <div class="hold-hdr">📋 Held Bills</div>
+        <div id="heldBillsContainer"></div>
+      </div>
+
+      <!-- HISTORY VIEW -->
+      <div id="historyView" class="view">
+        <!-- Phase 7 Step 2: Stale device banner (populated by _renderLedgerStaleBanner) -->
+        <div id="histStaleBanner" style="display:none;"></div>
+        <div class="hist-toolbar">
+          <div class="hist-filter">
+            <span class="hist-flbl">From</span>
+            <input type="date" class="hist-fdate" id="filterStartDate">
+          </div>
+          <div class="hist-filter">
+            <span class="hist-flbl">To</span>
+            <input type="date" class="hist-fdate" id="filterEndDate">
+          </div>
+          <div class="hist-filter">
+            <span class="hist-flbl">Device</span>
+            <select class="hist-finput" id="historyDeviceFilter" style="max-width:100px;">
+              <option value="">All Devices</option>
+            </select>
+          </div>
+          <div class="hist-filter">
+            <span class="hist-flbl">Invoice</span>
+            <input type="text" class="hist-finput" id="histInvSearch" placeholder="Invoice ID…" style="max-width:110px;" oninput="applyDateLedgerFilters()">
+          </div>
+          <div class="hist-factions">
+            <button class="hfb hfb-apply" onclick="applyDateLedgerFilters()">🔍 Filter</button>
+            <button class="hfb hfb-reset" onclick="resetLedgerFilters()">↺ Reset</button>
+            <button class="hfb" id="histSubFilterToggleBtn" onclick="toggleHistSubFilter()"
+              style="background:var(--g100);color:var(--g700);border:1px solid var(--g300);"
+              title="Dual medicine filter">⊕ Search</button>
+            <button class="hfb hfb-csv" onclick="exportMasterLedgerToCSV()">📥 Export CSV</button>
+            <button class="hfb hfb-staff" onclick="openStaffSalesReport()">👥 Staff Report</button>
+            <button class="hfb hfb-purge" onclick="requestAdminAccess('PURGE_DATABASE')">🗑 Purge All</button>
+          </div>
+        </div>
+
+        <!-- Dual Medicine Filter Bar -->
+        <div id="histSubFilterBar" style="display:none;border-top:1px dashed var(--g200);padding:7px 0 2px;margin-bottom:4px;">
+          <!-- Filter 1 -->
+          <div id="histF1Row" style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <span style="font-size:9px;font-weight:800;color:var(--teal);text-transform:uppercase;letter-spacing:.6px;white-space:nowrap;flex-shrink:0;">Medicine 1</span>
+            <div style="position:relative;flex:1;" id="histF1DropWrap">
+              <input type="text" id="histMed1Input"
+                placeholder="Type medicine name to search inventory…"
+                autocomplete="off" autocorrect="off"
+                style="width:100%;height:32px;background:var(--teal-lt);border:1.5px solid var(--teal);border-radius:3px;padding:0 30px 0 10px;font-size:12px;font-weight:500;color:var(--g900);outline:none;transition:border-color .15s,background .15s;">
+              <button id="histMed1ClearBtn" onclick="_histMed1ClearInput()" title="Clear"
+                style="display:none;position:absolute;right:5px;top:50%;transform:translateY(-50%);width:20px;height:20px;border-radius:50%;background:var(--teal);color:white;border:none;font-size:11px;cursor:pointer;align-items:center;justify-content:center;">×</button>
+              <div id="histMed1Dropdown"
+                style="display:none;position:absolute;left:0;right:0;top:34px;z-index:350;
+                       background:white;border:1.5px solid var(--teal);border-top:none;
+                       border-radius:0 0 4px 4px;box-shadow:var(--sh2);max-height:220px;overflow-y:auto;">
+                <div style="display:grid;grid-template-columns:20px 1fr 60px 50px;background:var(--teal);padding:3px 8px;">
+                  <span style="font-size:9px;font-weight:800;color:rgba(255,255,255,.7);text-transform:uppercase;">#</span>
+                  <span style="font-size:9px;font-weight:800;color:rgba(255,255,255,.7);text-transform:uppercase;">Medicine</span>
+                  <span style="font-size:9px;font-weight:800;color:rgba(255,255,255,.7);text-transform:uppercase;">Stock</span>
+                  <span style="font-size:9px;font-weight:800;color:rgba(255,255,255,.7);text-transform:uppercase;">Price</span>
+                </div>
+              </div>
+              <div id="histMed1NoResults" style="display:none;padding:6px 10px;font-size:11px;color:var(--g500);font-weight:600;background:var(--teal-lt);border:1.5px solid var(--teal);border-top:none;border-radius:0 0 4px 4px;">No medicines found.</div>
+            </div>
+          </div>
+          <!-- Filter 1 locked + Filter 2 -->
+          <div id="histF2Row" style="display:none;flex-direction:column;gap:5px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="s2-filter1-tag" id="histMed1Tag">
+                <span id="histMed1TagText">—</span>
+                <button class="s2-tag-x" onclick="clearHistMed1()" title="Clear Medicine 1">×</button>
+              </span>
+              <span class="s2-hint">+ pick a 2nd medicine to filter invoices containing both</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:9px;font-weight:800;color:var(--teal);text-transform:uppercase;letter-spacing:.6px;white-space:nowrap;flex-shrink:0;">Medicine 2</span>
+              <div style="position:relative;flex:1;" id="histF2DropWrap">
+                <input type="text" id="histMed2Input"
+                  placeholder="Type 2nd medicine name…"
+                  autocomplete="off" autocorrect="off"
+                  style="width:100%;height:32px;background:var(--teal-lt);border:1.5px solid var(--teal);border-radius:3px;padding:0 30px 0 10px;font-size:12px;font-weight:500;color:var(--g900);outline:none;transition:border-color .15s,background .15s;">
+                <button id="histMed2ClearBtn" onclick="_histMed2ClearInput()" title="Clear Medicine 2"
+                  style="display:none;position:absolute;right:5px;top:50%;transform:translateY(-50%);width:20px;height:20px;border-radius:50%;background:var(--teal);color:white;border:none;font-size:11px;cursor:pointer;align-items:center;justify-content:center;">×</button>
+                <div id="histMed2Dropdown"
+                  style="display:none;position:absolute;left:0;right:0;top:34px;z-index:350;
+                         background:white;border:1.5px solid var(--teal);border-top:none;
+                         border-radius:0 0 4px 4px;box-shadow:var(--sh2);max-height:220px;overflow-y:auto;">
+                  <div style="display:grid;grid-template-columns:20px 1fr 60px 50px;background:var(--teal);padding:3px 8px;">
+                    <span style="font-size:9px;font-weight:800;color:rgba(255,255,255,.7);text-transform:uppercase;">#</span>
+                    <span style="font-size:9px;font-weight:800;color:rgba(255,255,255,.7);text-transform:uppercase;">Medicine</span>
+                    <span style="font-size:9px;font-weight:800;color:rgba(255,255,255,.7);text-transform:uppercase;">Stock</span>
+                    <span style="font-size:9px;font-weight:800;color:rgba(255,255,255,.7);text-transform:uppercase;">Price</span>
+                  </div>
+                </div>
+                <div id="histMed2NoResults" style="display:none;padding:6px 10px;font-size:11px;color:var(--g500);font-weight:600;background:var(--teal-lt);border:1.5px solid var(--teal);border-top:none;border-radius:0 0 4px 4px;">No medicines found.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hist-gbar">
+          <div class="gbar-left">
+            <div class="gbar-lbl">Period Total</div>
+            <div class="gbar-count" id="ledgerBillCountDisplay">0 invoices</div>
+            <!-- Phase 7 Step 2: populated by _renderAsOfSyncLabel -->
+            <div id="histAsOfSync" style="font-size:9px;color:var(--g400);font-weight:500;margin-top:2px;"></div>
+          </div>
+          <div class="gbar-amt"><span class="cur-lbl">Rs.</span><span id="ledgerGrandTotalDisplay">0.00</span></div>
+        </div>
+        <div class="hist-table-wrap">
+          <table class="hist-table">
+            <thead>
+              <tr>
+                <th data-sort-col="id"    onclick="sortHistBy('id')"    style="cursor:pointer;user-select:none;">Invoice ID ↕</th>
+                <th data-sort-col="dev"   onclick="sortHistBy('dev')"   style="cursor:pointer;user-select:none;">Device ↕</th>
+                <th data-sort-col="date"  onclick="sortHistBy('date')"  style="cursor:pointer;user-select:none;">Date/Time ↕</th>
+                <th data-sort-col="cust"  onclick="sortHistBy('cust')"  style="cursor:pointer;user-select:none;">Customer ↕</th>
+                <th data-sort-col="staff" onclick="sortHistBy('staff')" style="cursor:pointer;user-select:none;">Staff ↕</th>
+                <th data-sort-col="total" onclick="sortHistBy('total')" style="cursor:pointer;user-select:none;">Net Total ↕</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="historyCards"></tbody>
+          </table>
+        </div>
+        <div id="histPagination" class="hist-pagination" style="display:none;"></div>
+      </div><!-- /historyView -->
+
+      <!-- INVENTORY VIEW (F8) -->
+      <div id="inventoryView" class="view">
+        <div class="inv-view-header">
+          <div class="inv-view-title">📦 Inventory Stock</div>
+          <div class="inv-view-controls">
+            <!-- Billing-style live search -->
+            <div class="inv-search-wrap">
+              <input type="text" id="invSearchInput" class="inv-search-inp"
+                placeholder="Search medicine (name, code, generic)…"
+                autocomplete="off" autocorrect="off" autocapitalize="off"
+                oninput="_invSearchInput()">
+              <!-- Selected product tag -->
+              <span id="invSearchTag" class="inv-search-tag" style="display:none;">
+                <span class="inv-tag-text"></span>
+                <button class="inv-tag-x" onclick="clearInvProductSearch()" title="Clear">×</button>
+              </span>
+              <!-- Live dropdown -->
+              <div id="invSearchResults" class="inv-sr-panel" style="display:none;"></div>
+            </div>
+            <button class="inv-apply-btn" onclick="applyInvProductSearch()" title="Search in table">🔍 Search</button>
+            <button class="inv-refresh-btn" onclick="generateInventoryReport()" title="Generate / Refresh full report">📊 Report</button>
+            <button class="inv-refresh-btn" onclick="exportInventoryCSV()" title="Export inventory as CSV" style="margin-left:0;">📥 CSV</button>
+            <button class="inv-add-btn" onclick="openAddProductModal()" title="Add New Product">+ Add</button>
+          </div>
+        </div>
+        <div id="inventoryViewContent" class="inv-view-content">
+          <div class="inv-empty">Open the Inventory tab to begin.</div>
+        </div>
+
+        <!-- Per-item movement history drawer — RULE 2: lightweight init, deferred ledger -->
+        <div id="itemHistoryDrawer" class="item-hist-drawer">
+          <!-- Use flex-column so body stretches to fill remaining drawer height -->
+          <div class="item-hist-drawer-inner" style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+            <div class="item-hist-drawer-header" style="flex-shrink:0;">
+              <span class="item-hist-drawer-title" id="itemHistoryDrawerTitle">Movement History</span>
+              <button class="item-hist-drawer-close" onclick="closeItemHistoryDrawer()" aria-label="Close">✕</button>
+            </div>
+
+            <!-- RULE 2B: Control pane — ledger is NOT loaded on drawer open.
+                 It is compiled only when the user explicitly clicks this button. -->
+            <div class="item-hist-drawer-ctrl" style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--g200);background:var(--g50);">
+              <button id="generateLedgerBtn"
+                style="padding:6px 18px;background:var(--teal);color:#fff;border:none;border-radius:5px;font-size:12px;font-weight:800;cursor:pointer;display:flex;align-items:center;gap:6px;letter-spacing:.3px;"
+                title="Compile the full movement audit trail for this product">
+                📊 Generate Ledger
+              </button>
+              <span style="font-size:11px;color:var(--g500);">Click to compile the audit trail for this product</span>
+            </div>
+
+            <!-- flex:1 + min-height:0 lets this div fill the remaining height and scroll -->
+            <div id="itemHistoryDrawerBody" class="item-hist-drawer-body"
+                 style="flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SETTINGS VIEW -->
+      <div id="settingsView" class="view">
+        <div class="sett-view-hdr">
+          <div class="sett-view-title">⚙️ System Settings</div>
+          <div class="sett-hdr-actions">
+            <button class="sett-save-all-btn" onclick="saveAllSettings()" title="Save all settings">💾 Save All Settings</button>
+            <button class="sett-back-btn" onclick="switchTab('billingView',document.getElementById('tab-billing'))">← Back to Billing</button>
+          </div>
+        </div>
+        <div class="sett-layout">
+
+          <!-- Column 1: Branch + Receipt + Thermal + Backup -->
+          <div>
+            <div class="sett-card">
+              <div class="sett-sec">Branch Identity</div>
+              <div class="sett-row"><span class="sett-lbl">Business Name</span><input type="text" class="sett-inp" id="settingBusinessName" placeholder="e.g. Fazal Din's Pharma Plus" autocomplete="off" maxlength="60"></div>
+              <div class="sett-row"><span class="sett-lbl">Branch Name</span><input type="text" class="sett-inp" id="settingBranchName" placeholder="e.g. Bahria Town" autocomplete="off" maxlength="50"></div>
+              <div class="sett-row"><span class="sett-lbl">Counter ID</span><input type="text" class="sett-inp" id="settingCounterId" placeholder="e.g. C-01" autocomplete="off" maxlength="20"></div>
+              <div class="sett-row"><span class="sett-lbl">Operator</span><input type="text" class="sett-inp" id="settingOperatorName" placeholder="e.g. Salman" autocomplete="off" maxlength="40"></div>
+              <button class="sett-save" onclick="saveBranchIdentity()">Save Identity Settings</button>
+
+              <div class="sett-sec sett-sec-mt">Receipt Customization</div>
+              <div class="sett-row"><span class="sett-lbl">Receipt Header</span><input type="text" class="sett-inp" id="settingReceiptHeader" placeholder="Override receipt title (blank = Business Name)" autocomplete="off" maxlength="80"></div>
+              <div class="sett-row"><span class="sett-lbl">Address</span><input type="text" class="sett-inp" id="settingReceiptAddress" placeholder="e.g. 12 Main Blvd, Bahria Town" autocomplete="off" maxlength="80"></div>
+              <div class="sett-row"><span class="sett-lbl">Phone</span><input type="text" class="sett-inp" id="settingReceiptPhone" placeholder="e.g. 0300-1234567" autocomplete="off" maxlength="40"></div>
+              <div class="sett-row"><span class="sett-lbl">Footer</span><input type="text" class="sett-inp" id="settingReceiptFooter" placeholder="e.g. Thank you for your visit!" autocomplete="off" maxlength="100"></div>
+              <div class="sett-row sett-row-sb sett-row-mt">
+                <span class="sett-lbl sett-lbl-auto">Print Mode</span>
+                <button id="paperModeBtn" class="sett-toggle-btn sett-toggle-off" onclick="togglePaperMode()">🧾 Thermal</button>
+              </div>
+              <button class="sett-save" onclick="saveReceiptSettings()">Save Receipt Settings</button>
+
+              <div class="sett-sec sett-sec-mt">🖨️ Thermal Printer Settings</div>
+              <div class="sett-thermal-hint">Controls the physical print layout. Changes apply on next print.</div>
+              <div class="sett-row"><span class="sett-lbl">Paper Width</span>
+                <select class="sett-inp sett-sel" id="settingPaperWidth">
+                  <option value="58">58 mm</option><option value="72" selected>72 mm (default)</option>
+                  <option value="76">76 mm</option><option value="80">80 mm (wide)</option>
+                </select></div>
+              <div class="sett-row"><span class="sett-lbl">Page Margin</span>
+                <select class="sett-inp sett-sel" id="settingPageMargin">
+                  <option value="0mm 0mm">None</option><option value="2mm 3mm" selected>Small (2mm)</option>
+                  <option value="4mm 5mm">Medium</option><option value="6mm 6mm">Large</option>
+                </select></div>
+              <div class="sett-row"><span class="sett-lbl">Header Font</span>
+                <select class="sett-inp sett-sel" id="settingHeaderFont">
+                  <option value="11">11px</option><option value="13" selected>13px</option>
+                  <option value="15">15px</option><option value="17">17px</option>
+                </select></div>
+              <div class="sett-row"><span class="sett-lbl">Body Font</span>
+                <select class="sett-inp sett-sel" id="settingBodyFont">
+                  <option value="8">8px</option><option value="9" selected>9px</option>
+                  <option value="10">10px</option><option value="11">11px</option>
+                </select></div>
+              <div class="sett-row"><span class="sett-lbl">Item Name Font</span>
+                <select class="sett-inp sett-sel" id="settingItemFont">
+                  <option value="9">9px</option><option value="11" selected>11px</option>
+                  <option value="12">12px</option><option value="13">13px</option>
+                </select></div>
+              <div class="sett-row"><span class="sett-lbl">Total Font</span>
+                <select class="sett-inp sett-sel" id="settingTotalFont">
+                  <option value="11">11px</option><option value="13" selected>13px</option>
+                  <option value="15">15px</option><option value="17">17px</option>
+                </select></div>
+              <div class="sett-row"><span class="sett-lbl">Line Spacing</span>
+                <select class="sett-inp sett-sel" id="settingLineSpacing">
+                  <option value="1.2">Tight</option><option value="1.5" selected>Normal</option>
+                  <option value="1.8">Relaxed</option><option value="2.0">Wide</option>
+                </select></div>
+              <div class="sett-row"><span class="sett-lbl">Divider Style</span>
+                <select class="sett-inp sett-sel" id="settingDividerStyle">
+                  <option value="dashed" selected>Dashed</option><option value="solid">Solid</option>
+                  <option value="dotted">Dotted</option><option value="double">Double</option>
+                </select></div>
+              <div class="sett-row"><span class="sett-lbl">Item Spacing</span>
+                <select class="sett-inp sett-sel" id="settingItemSpacing">
+                  <option value="2">Tight</option><option value="5" selected>Normal</option>
+                  <option value="8">Relaxed</option><option value="12">Wide</option>
+                </select></div>
+              <div class="sett-row"><span class="sett-lbl">Trailing Space</span>
+                <select class="sett-inp sett-sel" id="settingTrailingSpace">
+                  <option value="0">None</option><option value="20">Small</option>
+                  <option value="40" selected>Medium</option><option value="60">Large</option>
+                  <option value="80">Extra</option><option value="120">Max</option>
+                </select></div>
+              <div class="sett-row sett-row-sb"><div><span class="sett-lbl sett-lbl-auto">Bold Item Names</span><div class="sett-hint">UPPERCASE bold on receipt</div></div><button id="printBoldItemsBtn" class="sett-toggle-btn sett-toggle-on" onclick="togglePrintSetting('boldItems')">ON</button></div>
+              <div class="sett-row sett-row-sb"><div><span class="sett-lbl sett-lbl-auto">Show Subtotal Row</span><div class="sett-hint">Gross subtotal before discount</div></div><button id="printShowSubtotalBtn" class="sett-toggle-btn sett-toggle-on" onclick="togglePrintSetting('showSubtotal')">ON</button></div>
+              <div class="sett-row sett-row-sb"><div><span class="sett-lbl sett-lbl-auto">Show Discount Row</span><div class="sett-hint">Discount % and amount</div></div><button id="printShowDiscountBtn" class="sett-toggle-btn sett-toggle-on" onclick="togglePrintSetting('showDiscount')">ON</button></div>
+              <div class="sett-row sett-row-sb"><div><span class="sett-lbl sett-lbl-auto">Show Operator</span><div class="sett-hint">Operator name on receipt</div></div><button id="printShowOperatorBtn" class="sett-toggle-btn sett-toggle-on" onclick="togglePrintSetting('showOperator')">ON</button></div>
+              <div class="sett-row sett-row-sb"><div><span class="sett-lbl sett-lbl-auto">Show Terminal ID</span><div class="sett-hint">Counter/terminal line</div></div><button id="printShowTerminalBtn" class="sett-toggle-btn sett-toggle-on" onclick="togglePrintSetting('showTerminal')">ON</button></div>
+              <div class="sett-row sett-row-sb"><div><span class="sett-lbl sett-lbl-auto">Show Unit Price</span><div class="sett-hint">Qty × Price per line</div></div><button id="printShowUnitPriceBtn" class="sett-toggle-btn sett-toggle-on" onclick="togglePrintSetting('showUnitPrice')">ON</button></div>
+              <div class="sett-row sett-row-sb"><div><span class="sett-lbl sett-lbl-auto">Show Footer Message</span><div class="sett-hint">Thank you / policy text</div></div><button id="printShowFooterBtn" class="sett-toggle-btn sett-toggle-on" onclick="togglePrintSetting('showFooter')">ON</button></div>
+              <button class="sett-save sett-save-teal sett-save-mt8" onclick="saveThermalSettings()">💾 Save Printer Settings</button>
+            </div>
+
+            <div class="sett-card sett-card-mt">
+              <div class="sett-sec">Data &amp; Backup</div>
+              <div class="bk-row">
+                <button class="bk-btn bk-export" onclick="exportFullBackup()">💾 Export Backup<span class="bk-meta" id="backupStatus"> </span></button>
+                <button class="bk-btn bk-restore" onclick="document.getElementById('restoreFileInput').click()">↩ Restore Backup<span class="bk-meta">from .json</span></button>
+              </div>
+              <div class="bk-auto-wrap">
+                <button id="autoBackupToggleBtn" class="sett-toggle-btn" onclick="toggleAutoBackup()">Auto-Backup</button>
+                <span id="autoBackupBtnLabel" class="bk-auto-label">Loading…</span>
+              </div>
+              <input type="file" id="restoreFileInput" accept=".json" onchange="handleRestoreFileSelected(this)">
+            </div>
+          </div>
+
+          <!-- Column 2: Billing + Security + Staff -->
+          <div>
+            <div class="sett-card">
+              <div class="sett-sec">Billing Settings</div>
+              <div class="sett-row"><span class="sett-lbl">Inv. Prefix</span><input type="text" class="sett-inp sett-inp-sm" id="settingInvPrefix" placeholder="e.g. Inv-, FDP-" autocomplete="off" maxlength="10"></div>
+              <div class="sett-row"><span class="sett-lbl">Currency</span><input type="text" class="sett-inp sett-inp-sm" id="settingCurrencyLabel" placeholder="e.g. Rs., PKR, $" autocomplete="off" maxlength="10"></div>
+              <div class="sett-row"><span class="sett-lbl">Max Disc%</span><input type="number" class="sett-inp sett-inp-sm" id="settingMaxDiscount" placeholder="0=off" min="0" max="100" inputmode="numeric"></div>
+              <div class="disc-presets-hdr">Discount Presets</div>
+              <div class="disc-presets-wrap">
+                <input type="number" class="sett-inp sett-inp-tc" id="discPreset0" min="0" max="100" placeholder="%">
+                <input type="number" class="sett-inp sett-inp-tc" id="discPreset1" min="0" max="100" placeholder="%">
+                <input type="number" class="sett-inp sett-inp-tc" id="discPreset2" min="0" max="100" placeholder="%">
+                <input type="number" class="sett-inp sett-inp-tc" id="discPreset3" min="0" max="100" placeholder="%">
+                <input type="number" class="sett-inp sett-inp-tc" id="discPreset4" min="0" max="100" placeholder="%">
+              </div>
+              <div class="sett-row sett-row-sb sett-row-mt">
+                <div><span class="sett-lbl sett-lbl-auto">Allow Overstock</span><div class="sett-hint">Sell beyond recorded stock</div></div>
+                <button id="overstockSettingBtn" class="sett-toggle-btn sett-toggle-off" onclick="toggleOverstockSetting()">OFF</button>
+              </div>
+              <button class="sett-save" onclick="saveBillingSettings()">Save Billing Settings</button>
+
+              <div class="sett-sec sett-sec-mt">Appearance</div>
+              <div class="sett-row sett-row-sb">
+                <span class="sett-lbl sett-lbl-auto">Dark Mode</span>
+                <button id="darkModeToggleBtn" class="sett-toggle-btn sett-toggle-off" onclick="toggleDarkMode()">Auto</button>
+              </div>
+            </div>
+
+            <div class="sett-card sett-card-mt">
+              <div class="sett-sec">Staff Management</div>
+              <button class="sett-save sett-save-teal sett-save-mb" onclick="toggleShowUserIds()">👁 Show / Hide User IDs</button>
+              <div id="staffListSettings" class="sett-save-mb"></div>
+              <div class="sett-row sett-row-gap">
+                <input type="text" class="sett-inp sett-inp-flex" id="newStaffNameInput" placeholder="Staff name" autocomplete="off" maxlength="30">
+                <input type="password" class="sett-inp sett-pin-inp" id="newStaffPinInput" placeholder="4-digit ID" maxlength="4" inputmode="numeric">
+              </div>
+              <button class="sett-save sett-save-grn" onclick="addNewStaffMember()">+ Add Staff Member</button>
+              <button class="sett-save sett-save-violet sett-save-mt-sm" onclick="requestOwnerPinChange()">🔐 Change Owner User ID</button>
+
+              <div class="sett-row sett-row-sb sett-row-mt">
+                <div>
+                  <span class="sett-lbl sett-lbl-auto">Require PIN on Bill Save</span>
+                  <div class="sett-hint">Ask for staff PIN on every bill, even if already logged in</div>
+                </div>
+                <button id="requireStaffPinBtn" class="sett-toggle-btn sett-toggle-off" onclick="toggleRequireStaffPin()">OFF</button>
+              </div>
+
+              <div class="sett-sec sett-sec-mt" id="securitySectionTitle">Security — Change Admin Password</div>
+              <input type="password" class="sett-inp sett-inp-pw" id="currentAdminPasswordInput" placeholder="Current admin password" autocomplete="off" style="display:none;">
+              <input type="password" class="sett-inp sett-inp-pw" id="oldPassInput" placeholder="Current password" autocomplete="off" style="display:none;">
+              <input type="password" class="sett-inp sett-inp-pw" id="newPassInput" placeholder="New password (8 digits)" autocomplete="off">
+              <input type="password" class="sett-inp sett-inp-pw" id="confirmNewPassInput" placeholder="Confirm new password" autocomplete="off">
+              <button class="sett-save sett-save-pur" onclick="processPasswordModification()" id="updatePassBtn">Update Password</button>
+            </div>
+          </div>
+        </div><!-- /sett-layout -->
+
+        <!-- ══ Device Manager (Task 4) ══════════════════════════════════ -->
+        <div class="sett-card sett-card-mt-lg" id="deviceManagerSection">
+          <div class="sett-sec">📱 Device Manager</div>
+          <p style="font-size:10px;color:var(--g500);margin:0 0 10px;line-height:1.5;">
+            All devices registered to this workspace.
+            <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+              <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;"></span>Online (&lt;2 min)
+            </span>
+            <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+              <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>Recent (&lt;10 min)
+            </span>
+            <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+              <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>Offline
+            </span>
+            — Double-click a card for full details.
+          </p>
+          <div id="settDeviceGrid" class="dev-card-grid">
+            <div style="font-size:11px;color:var(--g400);padding:10px 0;">Loading devices…</div>
+          </div>
+          <button class="sett-save" style="margin-top:10px;background:var(--g200);color:var(--g700);font-size:11px;" onclick="renderSettingsDeviceManager()">↺ Refresh Devices</button>
+          <button class="sett-save" style="margin-top:8px;background:#7c3aed;color:#fff;font-size:11px;" onclick="openMasterReclaimModal()">👑 Master Reclaim</button>
+        </div>
+
+        <!-- Device Detail Drawer (Task 4) -->
+        <div id="devDetailDrawer" class="dev-detail-drawer" role="dialog" aria-modal="true" aria-label="Device Details">
+          <div class="dev-detail-inner">
+            <div class="dev-detail-header">
+              <span class="dev-detail-title" id="devDetailTitle">Device Details</span>
+              <button class="dev-detail-close" onclick="closeDevDetailDrawer()" aria-label="Close">✕</button>
+            </div>
+            <div id="devDetailBody" class="dev-detail-body"></div>
+          </div>
+        </div>
+
+        <!-- Live Receipt Preview -->
+        <div class="sett-card sett-card-mt-lg">
+          <div class="live-preview-hdr">
+            <div>
+              <div class="sett-sec sett-sec-preview">🖨️ Live Receipt Preview</div>
+              <div class="live-preview-subtitle">Reflects your current printer settings.</div>
+            </div>
+            <button class="live-preview-refresh" onclick="_renderReceiptPreview()">↺ Refresh</button>
+          </div>
+          <div id="receiptPreviewStage" class="receipt-preview-stage">
+            <div id="receiptPreviewPaper" class="receipt-preview-paper"></div>
+          </div>
+        </div>
+      </div><!-- /settingsView -->
+
+      <!-- ═══ SYNC HUB VIEW (F10) ═══════════════════════════════════════════
+           Content is fully injected by renderSyncHubView() in syncHub.js.
+           The shell div must be present so _doSwitchTab can activate it.
+      ════════════════════════════════════════════════════════════════════════ -->
+      <div id="syncHubView" class="view"></div>
+
+      <!-- ═══ REPORTING VIEW ════════════════════════════════════════════════
+           Content injected by renderReportingView() in reporting.js.
+      ════════════════════════════════════════════════════════════════════════ -->
+      <div id="reportingView" class="view"></div>
+
+    </div><!-- /leftContent -->
+  </div><!-- /leftPanel -->
+
+  <!-- ─── RIGHT PANEL — BILLING TERMINAL ─── -->
+  <div id="rightPanel">
+    <div class="rp-header">
+      <span class="rp-inv-id">Invoice: <span id="rpInvLabel">—</span></span>
+      <span id="rpStaffTag" class="rp-staff-tag"></span>
+    </div>
+
+    <!-- Discount -->
+    <div class="rp-section">
+      <div class="disc-row">
+        <span class="disc-lbl">Discount</span>
+        <div class="disc-wrap">
+          <input type="number" id="globalDiscountPercent" value="0" min="0" max="100" step="0.5" inputmode="decimal">
+          <span class="disc-sym">%</span>
+        </div>
+      </div>
+      <div class="preset-row-lbl">Quick Discount</div>
+      <div class="preset-row" id="discountPresetRow">
+        <button class="disc-preset-btn" onclick="applyPresetDiscount(0)">5%</button>
+        <button class="disc-preset-btn" onclick="applyPresetDiscount(1)">10%</button>
+        <button class="disc-preset-btn" onclick="applyPresetDiscount(2)">15%</button>
+        <button class="disc-preset-btn" onclick="applyPresetDiscount(3)">20%</button>
+        <button class="disc-preset-btn" onclick="applyPresetDiscount(4)">25%</button>
+      </div>
+      <div class="print-row">
+        <span class="print-lbl">🖨 Auto-print receipt</span>
+        <input type="checkbox" id="printReceiptOnSave">
+        <button id="printSwitch" class="tog-sw" onclick="togglePrint()"></button>
+      </div>
+    </div>
+
+    <!-- Totals -->
+    <div class="rp-section" id="billSummaryCard" style="display:none;">
+      <div class="sum-row">
+        <span class="sum-lbl">Gross Subtotal</span>
+        <span class="sum-val"><span class="cur-lbl">Rs.</span><span id="subtotalDisplay">0.00</span></span>
+      </div>
+      <div class="sum-row">
+        <span class="sum-lbl">Discount (<span id="discPctLabel">0</span>%)</span>
+        <span class="sum-val sum-disc-val">−<span class="cur-lbl">Rs.</span><span id="discountDeductionDisplay">0.00</span></span>
+      </div>
+      <hr class="sum-div">
+      <div class="sum-total-row net-payable-block">
+        <span class="sum-total-lbl">NET PAYABLE</span>
+        <span class="sum-total-val"><span class="cur-lbl cur-lbl-sm">Rs.</span><span id="netPayableDisplay">0.00</span></span>
+      </div>
+      <div id="roundOffRow">
+        <hr class="sum-div">
+        <div class="sum-row">
+          <span class="sum-lbl">Round-off</span>
+          <span class="sum-val" id="roundOffDisplay">0.00</span>
+        </div>
+        <div class="sum-row">
+          <span class="sum-lbl sum-lbl-strong">Rounded Total</span>
+          <span class="sum-val"><span class="cur-lbl">Rs.</span><span id="roundedTotalDisplay">0.00</span></span>
+        </div>
+      </div>
+      <button class="roundoff-toggle-btn" id="roundOffToggleBtn" onclick="cycleRoundOff()">⟳ Round-Off: OFF</button>
+    </div>
+
+    <!-- Payment Method + Cash Received / Change -->
+    <div class="rp-section" id="cashSection" style="display:none;">
+      <div class="rp-lbl">Payment</div>
+      <!-- Phase 5: payment mode selector — value tracked by billing.js _activePaymentMethod -->
+      <div class="pay-mode-row" id="payModeRow">
+        <button class="pay-mode-btn active" id="payModeCash"   onclick="setPaymentMode('cash')"  >💵 Cash</button>
+        <button class="pay-mode-btn"        id="payModeCard"   onclick="setPaymentMode('card')"  >💳 Card</button>
+        <button class="pay-mode-btn"        id="payModeOnline" onclick="setPaymentMode('online')">📲 Online</button>
+      </div>
+      <!-- Cash received row — shown only when mode = cash -->
+      <div class="cash-row" id="cashReceivedRow">
+        <span class="cash-lbl">Cash Received</span>
+        <input type="number" id="cashReceivedInput" placeholder="0.00" min="0" step="0.01" inputmode="decimal">
+      </div>
+      <div class="sum-row change-row-inner" id="changeRow" style="display:none;">
+        <span class="sum-lbl sum-lbl-teal">Change Due</span>
+        <span class="change-val"><span class="cur-lbl">Rs.</span><span id="changeDisplay">0.00</span></span>
+      </div>
+    </div>
+
+    <!-- Action Bar -->
+    <div id="cartActionBar">
+      <div class="act-row">
+        <button class="act-btn act-new"    onclick="clearActiveInvoiceForm()" title="New Invoice (Esc)">New Bill<kbd>Esc</kbd></button>
+        <button class="act-btn act-hold"   onclick="holdCurrentBill()"        title="Hold (F4)">Hold<kbd>F4</kbd></button>
+        <button class="act-btn act-recall" onclick="recallLastSaved()"        title="Last (Ctrl+L)">Last<kbd>Ctrl+L</kbd></button>
+        <button class="act-btn act-manual" onclick="openQuickAdd()"           title="Manual (F3)">Manual<kbd>F3</kbd></button>
+      </div>
+      <button class="act-save" onclick="promptAndSaveInvoice()" title="Save Bill (Ctrl+S)">
+        💾 SAVE BILL <kbd>Ctrl+S</kbd>
+      </button>
+    </div>
+  </div><!-- /rightPanel -->
+
+</div><!-- /appBody -->
+
+<!-- ═══ STATUS BAR ═══ -->
+<div id="statusBar">
+  <div class="sb-hint"><kbd>F2</kbd> Search</div>
+  <div class="sb-hint"><kbd>F4</kbd> Hold</div>
+  <div class="sb-hint"><kbd>F8</kbd> Inventory</div>
+  <div class="sb-hint"><kbd>F9</kbd> Row Edit</div>
+  <div class="sb-hint"><kbd>F10</kbd> Sync Hub</div>
+  <div class="sb-hint"><kbd>Ctrl+D</kbd> Data Hub</div>
+  <div class="sb-hint"><kbd>Ctrl+M</kbd> Manual</div>
+  <div class="sb-sp"></div>
+  <div id="f9StatusHint"></div>
+  <div class="sb-hint" id="statusClock"></div>
+</div>
+
+</div><!-- /appRoot -->
+
+<!-- ════ THERMAL RECEIPT PRINT WRAPPER ════ -->
+<div id="thermalReceiptPrintWrapper">
+  <div class="receipt-header">
+    <h2 id="printBranchName">PHARMA POS</h2>
+    <p id="printReceiptAddress">Community Pharmacy</p>
+    <p id="printReceiptPhone">Lahore, Pakistan</p>
+  </div>
+  <div class="receipt-divider"></div>
+  <table class="receipt-meta-table">
+    <tr><td>Invoice#</td><td id="printInvId" style="text-align:right;"></td></tr>
+    <tr><td>Date</td><td id="printDate" style="text-align:right;"></td></tr>
+    <tr id="printCustomerRow" style="display:none">
+      <td>Customer</td>
+      <td style="text-align:right;"><span id="printCustomerName"></span><br><span id="printCustomerPhone"></span></td>
+    </tr>
+    <tr id="printTerminalRow"><td>Terminal</td><td id="printTerminalId" style="text-align:right;"></td></tr>
+    <tr id="printOperatorRow"><td>Operator</td><td id="printOperatorId" style="text-align:right;"></td></tr>
+  </table>
+  <div class="receipt-divider"></div>
+  <div id="printReceiptItemsContainer"></div>
+  <div class="receipt-divider"></div>
+  <div class="receipt-summary-block">
+    <div id="printSubtotalRow" class="receipt-summary-row"><span>Gross Subtotal</span><span id="printSubtotal"></span></div>
+    <div id="printDiscountRow" class="receipt-summary-row"><span>Discount (<span id="printDiscPerc"></span>%)</span><span id="printDiscValue"></span></div>
+    <div id="printRoundOffRow" style="display:none" class="receipt-summary-row"><span>Round-off</span><span id="printRoundOffAmt"></span></div>
+    <div class="receipt-summary-row grand-total"><span>TOTAL PAID</span><span id="printNetPayable"></span></div>
+  </div>
+  <div class="receipt-footer-msg" id="printReceiptFooter">*** THANK YOU FOR YOUR VISIT ***<br>Medicines once sold will not be exchanged<br>or returned without a valid digital token.</div>
+  <div class="printer-tail-spacer"></div>
+</div>
+
+<!-- ════ MODALS ════ -->
+
+<!-- Staff PIN Change -->
+<div id="staffPinChangeModal" class="spc-overlay" style="display:none;">
+  <div class="spc-box">
+    <div class="spc-title">🔑 Change User ID</div>
+    <div class="spc-sub">for <strong id="staffPinChangeName">Staff</strong></div>
+    <label class="spc-label">New User ID (4 digits)</label>
+    <input id="staffNewPinInput" type="text" inputmode="numeric" maxlength="4" placeholder="••••" class="spc-inp">
+    <label class="spc-label">Confirm New User ID</label>
+    <input id="staffConfirmPinInput" type="text" inputmode="numeric" maxlength="4" placeholder="••••" class="spc-inp" style="margin-bottom:16px;">
+    <div class="spc-btns">
+      <button class="spc-cancel" onclick="closeStaffPinChangeModal()">Cancel</button>
+      <button class="spc-save" onclick="saveStaffPinChange()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bill Save PIN — 4-dot pad -->
+<div id="billSavePinModal" class="bsp-overlay" style="display:none;">
+  <div id="billPinSection" class="bsp-box">
+    <div id="billConfirmAvatar" class="bsp-avatar">🔐</div>
+    <div class="bsp-title">Confirm it's you</div>
+    <div class="bsp-sub"><span id="billConfirmName">Staff</span> — enter your User ID to save</div>
+    <div class="pin-display bsp-pin-display">
+      <span class="pin-dot" id="bPinDot0"></span><span class="pin-dot" id="bPinDot1"></span>
+      <span class="pin-dot" id="bPinDot2"></span><span class="pin-dot" id="bPinDot3"></span>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-btn" onclick="billPinKey('1')">1</button><button class="pin-btn" onclick="billPinKey('2')">2</button><button class="pin-btn" onclick="billPinKey('3')">3</button>
+      <button class="pin-btn" onclick="billPinKey('4')">4</button><button class="pin-btn" onclick="billPinKey('5')">5</button><button class="pin-btn" onclick="billPinKey('6')">6</button>
+      <button class="pin-btn" onclick="billPinKey('7')">7</button><button class="pin-btn" onclick="billPinKey('8')">8</button><button class="pin-btn" onclick="billPinKey('9')">9</button>
+      <button class="pin-btn pin-back" onclick="billPinBack()">⌫</button><button class="pin-btn" onclick="billPinKey('0')">0</button>
+      <button class="pin-btn bsp-cancel-btn" onclick="closeBillSavePinModal()">✕ Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Staff Sales Report -->
+<div id="staffReportModal" class="srm-overlay" style="display:none;">
+  <div class="srm-box">
+    <div class="srm-hdr">
+      <div class="srm-hdr-left">
+        <div class="srm-title">👥 Staff Sales Report</div>
+        <div class="srm-date" id="staffReportDateLabel">Today</div>
+      </div>
+      <div class="srm-hdr-btns">
+        <button class="srm-print-btn" onclick="_printStaffReport()">🖨️ Print</button>
+        <button class="srm-close-btn" onclick="closeStaffSalesReport()">✕</button>
+      </div>
+    </div>
+    <div class="srm-filter">
+      <div class="srm-presets">
+        <button onclick="_setStaffReportPreset('today')" id="srp-today" class="srp-btn">Today</button>
+        <button onclick="_setStaffReportPreset('week')"  id="srp-week"  class="srp-btn">This Week</button>
+        <button onclick="_setStaffReportPreset('month')" id="srp-month" class="srp-btn">This Month</button>
+        <button onclick="_setStaffReportPreset('all')"   id="srp-all"   class="srp-btn">All Time</button>
+      </div>
+      <div class="srm-date-row">
+        <label class="srm-flbl">From</label><input type="date" id="srFromDate" class="srm-date-inp">
+        <label class="srm-flbl">To</label><input type="date" id="srToDate" class="srm-date-inp">
+        <button class="srm-apply-btn" onclick="_applyStaffReportFilter()">Apply</button>
+      </div>
+    </div>
+    <div class="srm-body" id="staffReportBody"><p class="srm-loading">Loading…</p></div>
+  </div>
+</div>
+
+<!-- Owner PIN Change -->
+<div id="ownerPinChangeModal" class="opc-overlay" style="display:none;">
+  <div class="opc-box">
+    <div class="opc-title">🔐 Change Owner PIN</div>
+    <div class="opc-sub">Owner account PIN only.</div>
+    <label class="opc-label">New 4-Digit PIN</label>
+    <input type="password" id="ownerNewPin1" maxlength="4" inputmode="numeric" placeholder="Enter new PIN" class="opc-inp">
+    <label class="opc-label">Confirm New PIN</label>
+    <input type="password" id="ownerNewPin2" maxlength="4" inputmode="numeric" placeholder="Repeat new PIN" class="opc-inp" style="margin-bottom:16px;">
+    <div class="opc-btns">
+      <button class="opc-cancel" onclick="_closeOwnerPinChangeModal()">Cancel</button>
+      <button class="opc-save" onclick="_saveOwnerPinChange()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hold Label Modal -->
+<div id="holdLabelModal">
+  <div class="hlm-box">
+    <div class="hlm-title">📋 Label this bill</div>
+    <div class="hlm-sub">Give this held bill a name (e.g. patient name or counter number)</div>
+    <input type="text" id="holdLabelInput" class="hlm-inp" placeholder="e.g. Ahmed, Counter 2…" maxlength="40" autocomplete="off">
+    <div class="hlm-btns">
+      <button class="hlm-cancel" onclick="cancelHoldBill()">Cancel</button>
+      <button class="hlm-save" onclick="confirmHoldBill()">Hold Bill</button>
+    </div>
+  </div>
+</div>
+
+<!-- Quick Add (Manual Item) Modal -->
+<div id="quickAddModal">
+  <div class="qa-box">
+    <div class="qa-title">✏️ Manual Item</div>
+    <div class="qa-sub">Add an item not in the inventory catalogue</div>
+    <label class="qa-lbl">Medicine / Item Name</label>
+    <input type="text" id="qaName" class="qa-inp" placeholder="e.g. Dettol Soap, Vitamin C 500mg" maxlength="80" autocomplete="off">
+    <label class="qa-lbl">Unit Price</label>
+    <input type="number" id="qaPrice" class="qa-inp" placeholder="e.g. 120.50" min="0.01" step="0.01" inputmode="decimal">
+    <label class="qa-lbl">Quantity</label>
+    <input type="number" id="qaQty" class="qa-inp" value="1" min="1" step="1" inputmode="numeric">
+    <div class="qa-btns">
+      <button class="qa-cancel" onclick="closeQuickAdd()">Cancel</button>
+      <button class="qa-add" onclick="confirmQuickAdd()">➕ Add to Bill</button>
+    </div>
+  </div>
+</div>
+
+<!-- Auth Modal (Admin Access) -->
+<div id="authModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:340px;">
+    <div class="modal-title" id="authModalTitle">🔐 Admin Access</div>
+    <div class="modal-subtitle" id="authActionText">Enter admin password to continue.</div>
+    <input type="password" id="masterPasswordInput" style="position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;" autocomplete="off" tabindex="-1">
+    <div class="pin-display" style="margin:12px auto 0;">
+      <span class="pin-dot" id="pinDot0"></span><span class="pin-dot" id="pinDot1"></span>
+      <span class="pin-dot" id="pinDot2"></span><span class="pin-dot" id="pinDot3"></span>
+      <span class="pin-dot" id="pinDot4"></span><span class="pin-dot" id="pinDot5"></span>
+      <span class="pin-dot" id="pinDot6"></span><span class="pin-dot" id="pinDot7"></span>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-btn" onclick="authPinKey('1')">1</button><button class="pin-btn" onclick="authPinKey('2')">2</button><button class="pin-btn" onclick="authPinKey('3')">3</button>
+      <button class="pin-btn" onclick="authPinKey('4')">4</button><button class="pin-btn" onclick="authPinKey('5')">5</button><button class="pin-btn" onclick="authPinKey('6')">6</button>
+      <button class="pin-btn" onclick="authPinKey('7')">7</button><button class="pin-btn" onclick="authPinKey('8')">8</button><button class="pin-btn" onclick="authPinKey('9')">9</button>
+      <button class="pin-btn pin-back" onclick="authPinBack()">⌫</button><button class="pin-btn" onclick="authPinKey('0')">0</button>
+      <button class="pin-btn" onclick="cancelAuthModal()" style="background:var(--g200);color:var(--g700);">✕</button>
+    </div>
+    <div id="authPinError" style="font-size:11px;color:var(--red);text-align:center;margin-top:6px;min-height:16px;"></div>
+    <div style="text-align:center;margin-top:6px;">
+      <button onclick="openPasswordResetFlow()" style="background:none;border:none;font-size:11px;color:var(--g400);text-decoration:underline;cursor:pointer;">Forgot password?</button>
+    </div>
+  </div>
+</div>
+
+<!-- Purge Old Data Modal -->
+<div id="purgeOldModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:420px;">
+    <div class="modal-title">🗑 Purge Old Invoices</div>
+    <div class="modal-subtitle">Remove historical invoice records older than a certain date to free up storage space.</div>
+    <label style="font-size:12px;font-weight:700;display:block;margin:14px 0 5px;">Purge invoices older than:</label>
+    <input type="date" id="purgeBeforeDate" class="sett-inp" style="width:100%;margin-bottom:10px;">
+    <div id="purgePreviewCount" style="font-size:12px;color:var(--g600);margin-bottom:14px;min-height:18px;"></div>
+    <div class="modal-btn-row">
+      <button class="btn-cancel" onclick="closePurgeOldModal()">Cancel</button>
+      <button class="btn-danger" onclick="executePurgeOldInvoices()">🗑 Purge Invoices</button>
+    </div>
+  </div>
+</div>
+
+<!-- Admin Gate Modal — passkey challenge before destructive or privileged actions -->
+<div id="adminGateModal" class="modal-overlay" style="display:none;z-index:10200;">
+  <div class="modal-box" style="max-width:360px;text-align:center;">
+    <div class="modal-title" style="margin-bottom:4px;">🔐 Admin Authentication</div>
+    <div class="modal-subtitle" id="adminGateSubtitle" style="margin-bottom:14px;">Enter the admin passkey to proceed.</div>
+    <input type="password" id="adminGateInput" class="sett-inp"
+      placeholder="Admin passkey" maxlength="32" autocomplete="off"
+      style="width:100%;font-size:18px;letter-spacing:3px;text-align:center;margin-bottom:6px;"
+      onkeydown="if(event.key==='Enter')_confirmAdminGate()">
+    <div id="adminGateError"
+      style="font-size:12px;color:var(--red,#dc2626);min-height:18px;margin-bottom:10px;font-weight:700;"></div>
+    <div class="modal-btn-row">
+      <button class="btn-cancel" onclick="_cancelAdminGate()">Cancel</button>
+      <button class="btn-danger" onclick="_confirmAdminGate()" style="background:var(--teal,#0d9488);">Verify &amp; Proceed</button>
+    </div>
+    <div style="text-align:center;margin-top:8px;">
+      <button onclick="_cancelAdminGate();openPasswordResetFlow();" style="background:none;border:none;font-size:11px;color:var(--g400);text-decoration:underline;cursor:pointer;">Forgot password?</button>
+    </div>
+  </div>
+</div>
+
+<!-- Purge Confirm -->
+<div id="purgeConfirmModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:380px;">
+    <div class="modal-title" style="color:var(--red);">⚠️ Confirm Full Data Purge</div>
+    <div class="modal-subtitle">This will permanently delete ALL invoices and held bills. This action cannot be undone.</div>
+    <p style="font-size:13px;font-weight:700;text-align:center;margin:14px 0;color:var(--red);">Are you absolutely sure?</p>
+    <p style="font-size:12px;text-align:center;color:var(--g600);margin-bottom:8px;">Type <strong>PURGE</strong> to confirm:</p>
+    <input type="text" id="purgeConfirmInput" class="sett-inp" placeholder="Type PURGE"
+      autocomplete="off" style="width:100%;text-align:center;letter-spacing:2px;margin-bottom:12px;"
+      onkeydown="if(event.key==='Enter')confirmPurgeAction();if(event.key==='Escape')cancelPurgeConfirm();">
+    <div class="modal-btn-row">
+      <button class="btn-cancel" id="purgeConfirmCancelBtn" onclick="cancelPurgeConfirm()">Cancel</button>
+      <button class="btn-danger" id="purgeConfirmOkBtn" onclick="confirmPurgeAction()">Yes, Delete Everything</button>
+    </div>
+  </div>
+</div>
+
+<!-- Receipt View Modal -->
+<div id="receiptViewModal" class="modal-overlay" style="align-items:flex-start;padding-top:40px;">
+  <div class="modal-box" style="max-width:520px;max-height:80vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <div class="modal-title" style="margin:0;" id="receiptViewTitle">Invoice Details</div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="printReceiptFromModal()" style="padding:5px 12px;background:var(--teal);color:#fff;border:none;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;">🖨 Print</button>
+        <button onclick="closeReceiptModal()" style="padding:5px 10px;background:var(--g200);color:var(--g700);border:none;border-radius:5px;font-size:12px;cursor:pointer;">✕ Close</button>
+      </div>
+    </div>
+    <div id="receiptViewBody"></div>
+  </div>
+</div>
+
+<!-- Data Hub Modal -->
+<div id="dataHubModal" class="modal-overlay">
+  <div class="dh-box">
+
+    <!-- 1. HERO HEADER -->
+    <div class="dh-hero">
+      <div class="dh-hero-top">
+        <div class="dh-hero-left">
+          <div class="dh-hero-icon-wrap">
+            <span class="dh-hero-icon">📦</span>
+          </div>
+          <div class="dh-hero-title-block">
+            <div class="dh-hero-title">Data Hub</div>
+            <div class="dh-hero-sub" id="dataHubSubtitle">Manage inventory, backups &amp; exports</div>
+          </div>
+        </div>
+        <button class="dh-close" onclick="closeDataHub(false)">✕</button>
+      </div>
+      <!-- Live Status Strip -->
+      <div class="dh-status-strip">
+        <span class="dh-status-pill" id="dhActiveDevicesBadge">🟢 — Active</span>
+        <span class="dh-status-pill" id="dhSupabaseBadge">☁️ Checking…</span>
+        <span class="dh-status-pill" id="dhLastSyncBadge">🕐 Last sync: —</span>
+        <button class="dh-push-sync-btn" id="dhPushSyncBtn" onclick="forceSyncNow()">⬆ Sync Now</button>
+      </div>
+      <!-- Hidden legacy status bar kept for JS compat -->
+      <div id="dataHubStatusBar" style="display:none;"></div>
+    </div>
+
+    <!-- 2. ACTION CARDS GRID -->
+    <div class="dh-grid">
+      <div class="dh-card dh-card-blue" onclick="closeDataHub(false);setTimeout(()=>requestAdminAccess('CSV_IMPORT'),350);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#EFF6FF;">📥</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Import Inventory CSV</div>
+          <div class="dh-card-desc">Load products from .csv (Name, Code, Price, Stock, Generic, Company, Pack)</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+      <div class="dh-card dh-card-green" onclick="exportFullBackup();closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#F0FDF4;">💾</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Export Full Backup</div>
+          <div class="dh-card-desc">Download all invoices, inventory &amp; settings as .json</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+      <div class="dh-card dh-card-amber" onclick="document.getElementById('restoreFileInputHeader').click();closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#FFFBEB;">🔄</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Restore from Backup</div>
+          <div class="dh-card-desc">Load a previously exported .json backup</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+      <div class="dh-card dh-card-purple" onclick="openSyncDashboard();closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#FAF5FF;">🔬</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Sync Diagnostics</div>
+          <div class="dh-card-desc">Run connectivity, queue &amp; data integrity checks</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+    </div>
+
+    <!-- 3. DEVICE SYNC STATUS PANEL -->
+    <div class="dh-device-panel">
+      <div class="dh-panel-heading">
+        <span>Network Devices</span>
+        <button class="dh-panel-refresh-btn" id="dhDeviceRefreshBtn" onclick="dhRefreshDevicePanel()" title="Refresh device list">↻</button>
+      </div>
+      <div id="dhDeviceList">
+        <div style="font-size:11px;color:var(--g400);padding:8px 0;">⟳ Loading devices…</div>
+      </div>
+    </div>
+
+    <!-- 4. INDEXEDDB & STORAGE PANEL -->
+    <div class="dh-storage-panel">
+      <div class="dh-panel-heading">
+        <span>Local Storage</span>
+      </div>
+      <div class="dh-storage-chips">
+        <span class="dh-chip dh-chip-ok" id="dhIDBStatus">🗄 IndexedDB: OK</span>
+        <span class="dh-chip" id="dhStorageLabel">💽 Used: — MB</span>
+        <span class="dh-chip" id="dhLastSyncStatus">🕐 Last sync: —</span>
+      </div>
+      <div class="dh-storage-track">
+        <div class="dh-storage-fill" id="dhStorageBar" style="width:0%;"></div>
+      </div>
+      <button class="dh-purge-btn" id="dhPurgeIDBBtn" onclick="openPurgeOldModal()" style="display:none;">🗑 Purge Old Data</button>
+    </div>
+
+    <!-- 5. FOOTER -->
+    <div class="dh-footer">
+      <div class="dh-fn" id="dataHubFooterNote">Regular backups protect against data loss.</div>
+      <button class="dh-skip" id="dataHubSkipBtn" onclick="closeDataHub(true)">Skip for now</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- Keyboard Shortcuts -->
+<div id="shortcutsModal">
+  <div id="shortcutsBox">
+    <div class="sc-title">⌨️ Keyboard Shortcuts</div>
+    <div class="sc-sec">Navigation</div>
+    <div class="sc-grid">
+      <div class="sc-key"><kbd>F5</kbd></div><div class="sc-desc">Billing tab</div>
+      <div class="sc-key"><kbd>F6</kbd></div><div class="sc-desc">Held bills tab</div>
+      <div class="sc-key"><kbd>F7</kbd></div><div class="sc-desc">History tab</div>
+      <div class="sc-key"><kbd>F12</kbd></div><div class="sc-desc">Settings tab</div>
+    </div>
+    <div class="sc-sec">Billing</div>
+    <div class="sc-grid">
+      <div class="sc-key"><kbd>F2</kbd> / <kbd>/</kbd></div><div class="sc-desc">Focus search box</div>
+      <div class="sc-key"><kbd>F3</kbd> / <kbd>Ctrl+M</kbd></div><div class="sc-desc">Manual/quick add item</div>
+      <div class="sc-key"><kbd>F4</kbd></div><div class="sc-desc">Hold current bill</div>
+      <div class="sc-key"><kbd>F9</kbd></div><div class="sc-desc">F9 row-edit mode</div>
+      <div class="sc-key"><kbd>Ctrl+S</kbd></div><div class="sc-desc">Save / finalize bill</div>
+      <div class="sc-key"><kbd>F10</kbd></div><div class="sc-desc">Open Cloud Sync Hub</div>
+      <div class="sc-key"><kbd>Esc</kbd></div><div class="sc-desc">New invoice / clear form</div>
+    </div>
+    <div class="sc-sec">Discounts</div>
+    <div class="sc-grid">
+      <div class="sc-key"><kbd>Ctrl+1</kbd>–<kbd>5</kbd></div><div class="sc-desc">Apply discount preset 1–5</div>
+    </div>
+    <div class="sc-sec">Data</div>
+    <div class="sc-grid">
+      <div class="sc-key"><kbd>Ctrl+D</kbd></div><div class="sc-desc">Open Data Hub</div>
+      <div class="sc-key"><kbd>Ctrl+B</kbd></div><div class="sc-desc">Export full backup</div>
+    </div>
+    <button class="sc-close" onclick="toggleShortcutsModal()">Close</button>
+  </div>
+</div>
+
+<!-- Password Reset Modal — Task 3: Full OTP flow (3 steps) -->
+<div class="modal-overlay" id="passwordResetModal" style="z-index:10100;">
+  <div class="modal-box" style="max-width:380px;">
+
+    <!-- Step 1: Send OTP -->
+    <div id="prm-step1">
+      <div class="modal-title">🔑 Reset Admin Password</div>
+      <div class="modal-subtitle">An 8-digit OTP will be sent to your registered email address.</div>
+      <div style="background:var(--g100);border-radius:8px;padding:10px 14px;margin:10px 0 14px;font-size:12px;">
+        <span style="color:var(--g500);">📧 Reset email:</span>
+        <strong id="prm-email-display" style="margin-left:6px;color:var(--g800);word-break:break-all;"></strong>
+      </div>
+      <button id="prm-send-btn" onclick="sendResetOtp()"
+        style="width:100%;padding:10px;background:var(--teal);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:8px;">
+        📧 Send OTP to Email
+      </button>
+      <div id="prm-status" style="font-size:11px;min-height:16px;text-align:center;"></div>
+      <div class="modal-btn-row" style="margin-top:12px;">
+        <button class="btn-cancel" onclick="closePasswordResetFlow()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Enter OTP -->
+    <div id="prm-step2" style="display:none;">
+      <div class="modal-title">📲 Enter OTP</div>
+      <div class="modal-subtitle">Enter the 8-digit code sent to your email. It expires in 10 minutes.</div>
+      <div class="pin-display" style="margin:14px auto;">
+        <span class="pin-dot" id="otpDot0"></span><span class="pin-dot" id="otpDot1"></span>
+        <span class="pin-dot" id="otpDot2"></span><span class="pin-dot" id="otpDot3"></span>
+        <span class="pin-dot" id="otpDot4"></span><span class="pin-dot" id="otpDot5"></span>
+        <span class="pin-dot" id="otpDot6"></span><span class="pin-dot" id="otpDot7"></span>
+      </div>
+      <div class="pin-pad">
+        <button class="pin-btn" onclick="otpPinKey('1')">1</button><button class="pin-btn" onclick="otpPinKey('2')">2</button><button class="pin-btn" onclick="otpPinKey('3')">3</button>
+        <button class="pin-btn" onclick="otpPinKey('4')">4</button><button class="pin-btn" onclick="otpPinKey('5')">5</button><button class="pin-btn" onclick="otpPinKey('6')">6</button>
+        <button class="pin-btn" onclick="otpPinKey('7')">7</button><button class="pin-btn" onclick="otpPinKey('8')">8</button><button class="pin-btn" onclick="otpPinKey('9')">9</button>
+        <button class="pin-btn pin-back" onclick="otpPinBack()">⌫</button>
+        <button class="pin-btn" onclick="otpPinKey('0')">0</button>
+        <button class="pin-btn pin-ok" onclick="verifyResetOtp()">✓</button>
+      </div>
+      <div id="prm-otp-status" style="font-size:11px;min-height:16px;text-align:center;margin-top:6px;"></div>
+      <div style="text-align:center;margin-top:8px;">
+        <button onclick="_showResetStep(1);sendResetOtp();"
+          style="background:none;border:none;color:var(--g500);font-size:11px;cursor:pointer;text-decoration:underline;">
+          ↩ Resend OTP
+        </button>
+      </div>
+      <div class="modal-btn-row" style="margin-top:10px;">
+        <button class="btn-cancel" onclick="closePasswordResetFlow()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Set new password -->
+    <div id="prm-step3" style="display:none;">
+      <div class="modal-title">🔐 Set New Password</div>
+      <div class="modal-subtitle">OTP verified! Enter your new 8-digit admin password.</div>
+      <label style="font-size:12px;font-weight:700;color:#444;display:block;margin:12px 0 4px;">New Password <span style="color:#e53;font-size:10px;">(exactly 8 digits)</span></label>
+      <input type="password" id="prm-newpass1" class="sett-inp" placeholder="Enter 8-digit password"
+        autocomplete="new-password" inputmode="numeric" maxlength="8"
+        style="width:100%;margin-bottom:10px;">
+      <label style="font-size:12px;font-weight:700;color:#444;display:block;margin-bottom:4px;">Confirm Password</label>
+      <input type="password" id="prm-newpass2" class="sett-inp" placeholder="Repeat password"
+        autocomplete="new-password" inputmode="numeric" maxlength="8"
+        style="width:100%;margin-bottom:12px;">
+      <div id="prm-newpass-status" style="font-size:11px;min-height:16px;text-align:center;margin-bottom:8px;"></div>
+      <button onclick="saveResetNewPassword()"
+        style="width:100%;padding:10px;background:var(--grn);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;margin-bottom:8px;">
+        ✅ Save New Password
+      </button>
+      <div class="modal-btn-row">
+        <button class="btn-cancel" onclick="closePasswordResetFlow()">Cancel</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Staff Login -->
+<div id="staffLoginModal" class="slm-overlay" style="display:none;">
+  <div class="slm-box">
+    <div id="staffSelectBox">
+      <div class="slm-title">👤 Staff Login</div>
+      <div class="slm-sub">Select your account</div>
+      <div class="staff-list-inner" id="staffPickerList"></div>
+      <button id="staffLoginCancelBtn" class="slm-cancel-btn" onclick="closeStaffLogin()">Cancel</button>
+    </div>
+    <div id="staffPinBox">
+      <div class="sett-inp-tc">
+        <div class="slm-pin-title">Enter Your User ID</div>
+        <div class="slm-pin-sub" id="staffPinNameLabel">Staff</div>
+        <div class="pin-display slm-pin-display">
+          <span class="pin-dot" id="sPinDot0"></span><span class="pin-dot" id="sPinDot1"></span>
+          <span class="pin-dot" id="sPinDot2"></span><span class="pin-dot" id="sPinDot3"></span>
+        </div>
+        <div id="staffPinSection">
+          <div class="pin-pad">
+            <button class="pin-btn" onclick="staffPinKey('1')">1</button><button class="pin-btn" onclick="staffPinKey('2')">2</button><button class="pin-btn" onclick="staffPinKey('3')">3</button>
+            <button class="pin-btn" onclick="staffPinKey('4')">4</button><button class="pin-btn" onclick="staffPinKey('5')">5</button><button class="pin-btn" onclick="staffPinKey('6')">6</button>
+            <button class="pin-btn" onclick="staffPinKey('7')">7</button><button class="pin-btn" onclick="staffPinKey('8')">8</button><button class="pin-btn" onclick="staffPinKey('9')">9</button>
+            <button class="pin-btn pin-back" onclick="staffPinBack()">⌫</button><button class="pin-btn" onclick="staffPinKey('0')">0</button>
+            <button class="pin-btn slm-back-btn" onclick="backToStaffList()">← Back</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Partial Refund Modal -->
+<div id="partialRefundModal">
+  <div id="prfBox">
+    <div class="prf-hdr">
+      <div class="prf-hdr-left">
+        <div class="prf-title">↩ Refund / Return</div>
+        <div class="prf-inv" id="prfInvLabel">Invoice —</div>
+      </div>
+      <button class="prf-hdr-close" onclick="closePartialRefundModal()">✕</button>
+    </div>
+    <div class="prf-meta">
+      <div class="prf-meta-cell"><div class="prf-meta-lbl">Customer</div><div class="prf-meta-val" id="prfCustName">—</div></div>
+      <div class="prf-meta-cell"><div class="prf-meta-lbl">Original Total</div><div class="prf-meta-val" id="prfOrigTotal">—</div></div>
+      <div class="prf-meta-cell"><div class="prf-meta-lbl">Date</div><div class="prf-meta-val" id="prfDate">—</div></div>
+    </div>
+    <div class="prf-mode-bar">
+      <button class="prf-mode-btn active" id="prfModePartial" onclick="setPrfMode('partial')">⚖️ Partial Refund</button>
+      <button class="prf-mode-btn" id="prfModeFull" onclick="setPrfMode('full')">↩ Full Refund</button>
+    </div>
+    <label class="prf-selall" id="prfSelAllRow">
+      <input type="checkbox" class="prf-selall-cb" id="prfSelAllCb" onchange="prfToggleAll(this.checked)">
+      Select / deselect all items
+    </label>
+    <div class="prf-items-hdr">
+      <span>Item</span>
+      <span style="text-align:right">Unit Price</span>
+      <span style="text-align:right">Orig Qty</span>
+      <span style="text-align:right">Return Qty</span>
+      <span style="text-align:right">Refund Amt</span>
+    </div>
+    <div class="prf-items-wrap" id="prfItemsWrap"></div>
+    <div class="prf-reason-row">
+      <span class="prf-reason-lbl">Reason</span>
+      <select class="prf-reason-sel" id="prfReason">
+        <option value="customer_return">Customer Return</option>
+        <option value="wrong_medicine">Wrong Medicine Dispensed</option>
+        <option value="expired">Expired / Near-Expiry Product</option>
+        <option value="damaged">Damaged Packaging</option>
+        <option value="billing_error">Billing Error</option>
+        <option value="doctor_change">Doctor Changed Prescription</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="prf-footer">
+      <div class="prf-warn" id="prfWarn">⚠ <span id="prfWarnMsg"></span></div>
+      <div class="prf-totals">
+        <div class="prf-tot-cell"><div class="prf-tot-lbl">Items Returning</div><div class="prf-tot-val teal" id="prfSumItems">0</div></div>
+        <div class="prf-tot-cell"><div class="prf-tot-lbl">Stock Restored</div><div class="prf-tot-val green" id="prfSumUnits">0 units</div></div>
+        <div class="prf-tot-cell"><div class="prf-tot-lbl">Refund Amount</div><div class="prf-tot-val red" id="prfSumAmt">Rs.0.00</div></div>
+      </div>
+      <div class="prf-act-row">
+        <button class="prf-cancel-btn" onclick="closePartialRefundModal()">Cancel</button>
+        <button class="prf-submit-btn" id="prfSubmitBtn" onclick="submitPartialRefund()" disabled>↩ Process Refund</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ RULE 3: ADD / EDIT PRODUCT MODAL ════
+     prodOpeningStockInput — "Opening Stock (Baseline)" field per Rule 3A.
+     On new product creation, saveProductFormData() uses this value (or falls
+     back to prodStockInput) to commit the OPENING movement record into
+     inventory_movements, establishing the accounting baseline.
+     On edit, this field is left blank (editing an existing product does not
+     re-baseline unless explicitly set). -->
+<div id="productModal" class="modal-overlay">
+  <div class="modal-box" style="max-width:480px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div class="modal-title" id="productModalTitle" style="margin:0;">Add New Product</div>
+      <button onclick="closeProductModal()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--g500);line-height:1;">✕</button>
+    </div>
+
+    <!-- Product Name -->
+    <label style="font-size:11px;font-weight:800;color:var(--g600);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px;">Product Name *</label>
+    <input type="text" id="prodNameInput" class="sett-inp" placeholder="e.g. Panadol CF 500mg" maxlength="100" autocomplete="off" style="width:100%;margin-bottom:10px;">
+
+    <!-- Code + Price row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+      <div>
+        <label style="font-size:11px;font-weight:800;color:var(--g600);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px;">Product Code *</label>
+        <input type="text" id="prodCodeInput" class="sett-inp" placeholder="e.g. P-1001" maxlength="30" autocomplete="off" style="width:100%;text-transform:uppercase;">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:800;color:var(--g600);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px;">Unit Price *</label>
+        <input type="number" id="prodPriceInput" class="sett-inp" placeholder="e.g. 150.00" min="0.01" step="0.01" inputmode="decimal" style="width:100%;">
+      </div>
+    </div>
+
+    <!-- Current Stock + Opening Stock (Baseline) row — RULE 3 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+      <div>
+        <label style="font-size:11px;font-weight:800;color:var(--g600);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px;">Current Stock</label>
+        <input type="number" id="prodStockInput" class="sett-inp" placeholder="e.g. 100" min="0" step="1" inputmode="numeric" style="width:100%;">
+      </div>
+      <div>
+        <!-- RULE 3A: Opening Stock (Baseline) field.
+             On ADD: used to commit an OPENING movement record into inventory_movements.
+             On EDIT: leave blank to skip re-baselining. -->
+        <label style="font-size:11px;font-weight:800;color:var(--teal);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px;">Opening Stock (Baseline)</label>
+        <input type="number" id="prodOpeningStockInput" class="sett-inp" placeholder="Baseline qty (new only)"
+          min="0" step="1" inputmode="numeric" style="width:100%;border-color:var(--teal);"
+          title="For new products: this quantity is recorded as the OPENING movement entry in the audit ledger. Leave blank on edits.">
+        <div style="font-size:9px;color:var(--g400);margin-top:2px;line-height:1.3;">New products only — commits OPENING ledger entry</div>
+      </div>
+    </div>
+
+    <!-- Generic + Company row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+      <div>
+        <label style="font-size:11px;font-weight:800;color:var(--g600);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px;">Generic Name</label>
+        <input type="text" id="prodGenericInput" class="sett-inp" placeholder="e.g. Paracetamol" maxlength="80" autocomplete="off" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:800;color:var(--g600);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px;">Company</label>
+        <input type="text" id="prodCompanyInput" class="sett-inp" placeholder="e.g. GSK" maxlength="60" autocomplete="off" style="width:100%;">
+      </div>
+    </div>
+
+    <!-- Supplier + Pack row -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+      <div>
+        <label style="font-size:11px;font-weight:800;color:var(--g600);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px;">Supplier</label>
+        <input type="text" id="prodSupplierInput" class="sett-inp" placeholder="e.g. Standard Dist." maxlength="60" autocomplete="off" style="width:100%;">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:800;color:var(--g600);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px;">Pack Details</label>
+        <input type="text" id="prodPackInput" class="sett-inp" placeholder="e.g. 10×10" maxlength="40" autocomplete="off" style="width:100%;">
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button onclick="closeProductModal()" class="btn-cancel" style="padding:8px 20px;">Cancel</button>
+      <button onclick="saveProductFormData()" style="padding:8px 24px;background:var(--teal);color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:800;cursor:pointer;">💾 Save Product</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="alertToast">
+  <span class="toast-icon" id="toastIcon">✓</span>
+  <span id="toastMsg"></span>
+</div>
+
+<!-- Custom Confirm Modal -->
+<div id="customConfirmModal">
+  <div id="customConfirmBox">
+    <div class="ccm-title" id="ccmTitle" style="display:none;"></div>
+    <div class="ccm-sub"   id="ccmSub"   style="display:none;"></div>
+    <p class="ccm-msg" id="ccmMsg"></p>
+    <div class="ccm-actions">
+      <button class="ccm-cancel" id="ccmCancelBtn" onclick="ccmCancel()">Cancel</button>
+      <button class="ccm-ok"     id="ccmOkBtn"     onclick="ccmConfirm()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════ JAVASCRIPT — load order matters ════ -->
+<!-- 1. Config (constants, device UUID, Supabase, EmailJS keys) -->
+<script src="js/config.js?v=2"></script>
+<!-- 1b. Initialize EmailJS v4 (must run after config.js defines EMAILJS_PUBLIC_KEY) -->
+<script>
+  if (typeof emailjs !== "undefined" && typeof EMAILJS_PUBLIC_KEY !== "undefined") {
+    emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+  }
+</script>
+<!-- 2. Storage (IndexedDB + localStorage module) -->
+<script src="js/storage.js?v=2"></script>
+<!-- 3. Auth (8-digit PIN, password hash, EmailJS reset) -->
+<script src="js/auth.js?v=2"></script>
+<!-- 4. UI helpers (toast, confirm modal, tab switch, etc.) -->
+<script src="js/ui.js?v=2"></script>
+<!-- 5. Billing (cart, invoice engine, keyboard shortcuts) -->
+<script src="js/billing.js?v=2"></script>
+<!-- 6. Inventory (search, CSV import, movements) -->
+<script src="js/inventory.js?v=2"></script>
+<!-- 7. History (ledger table, filters, receipt viewer, hold view) -->
+<script src="js/history.js?v=2"></script>
+<!-- 8. Settings (branch, staff, backup, thermal, round-off, etc.) -->
+<script src="js/settings.js?v=2"></script>
+<!-- 9. Reporting (staff sales report) -->
+<script src="js/reporting.js?v=2"></script>
+<!-- 10. Devices dashboard (Task 4) -->
+<script src="js/devices.js?v=2"></script>
+<!-- 11. Central Cloud Sync Hub (Phase 2 — Rule 5) -->
+<script src="js/syncHub.js?v=2"></script>
+<!-- Service Worker registration (Task 5) -->
+<script>
+// ============================================================================
+// FIX 3 — DEFERRED SERVICE WORKER TAKEOVER (Idle-Safe PWA Update)
+//
+// Problem: the original code called skipWaiting unconditionally on
+//   updatefound → installed, meaning a background SW upgrade could reload
+//   the page mid-sale or while a cloud sync was running — corrupting
+//   in-flight data and leaving the offline queue in a split state.
+//
+// Fix: before calling skipWaiting, verify both:
+//   (a) _forceSyncRunning === false  — no Supabase sync cycle is in progress
+//   (b) activeCartItems.length === 0 — billing cart is empty
+//
+// If either condition is true the waiting worker is held in _pendingSwWorker
+// and a persistent #swUpdateToast banner is shown with a "Relaunch now" button.
+// A setInterval polls _tryApplySwUpdate() every 5 s so the update is applied
+// automatically the moment the app goes idle — no user action required.
+// ============================================================================
+// ============================================================================
+// ADMIN GATE — requestAdminAccess(action, subtitle?)
+//
+// Part 4 fix: before any destructive or privileged action (PURGE_DATABASE,
+// CSV_IMPORT) the operator must supply the admin passkey stored in localStorage
+// under 'pharma_admin_pw'.  Incorrect passkey logs a warning and blocks the
+// action entirely.  Three consecutive failures lock the gate for 60 s.
+//
+// Dispatched actions:
+//   'PURGE_DATABASE'  — opens the purgeConfirmModal after verification
+//   'CSV_IMPORT'      — triggers the hidden #csvFile input after verification
+// ============================================================================
+(function _initAdminGate() {
+  var _pendingAdminAction  = null;
+  var _adminFailCount      = 0;
+  var _adminLockedUntilMs  = 0;
+
+  // Preserve the auth.js requestAdminAccess (8-digit PIN modal) for all
+  // settings/toggle actions. This inline gate only handles PURGE_DATABASE
+  // and CSV_IMPORT which use the simpler adminGateModal.
+  var _authJsRequestAdminAccess = window.requestAdminAccess || null;
+
+  window.requestAdminAccess = function(action, subtitle) {
+    // Delegate all actions except PURGE_DATABASE and CSV_IMPORT to the
+    // proper auth.js 8-digit PIN flow so TOGGLE_REQUIRE_STAFF_PIN,
+    // TOGGLE_OVERSTOCK, SAVE_ALL_SETTINGS, etc. work correctly.
+    if (action !== 'PURGE_DATABASE' && action !== 'CSV_IMPORT') {
+      if (typeof _authJsRequestAdminAccess === 'function') {
+        return _authJsRequestAdminAccess(action, subtitle);
+      }
+    }
+    var now = Date.now();
+    if (now < _adminLockedUntilMs) {
+      var secsLeft = Math.ceil((_adminLockedUntilMs - now) / 1000);
+      showToast('⏳ Admin gate locked. Try again in ' + secsLeft + 's.', true);
+      return;
+    }
+    _pendingAdminAction = action;
+    var subtitleEl = document.getElementById('adminGateSubtitle');
+    if (subtitleEl) {
+      subtitleEl.textContent = subtitle ||
+        (action === 'PURGE_DATABASE'
+          ? 'Authentication required to purge all pharmacy data.'
+          : action === 'CSV_IMPORT'
+            ? 'Authentication required to replace inventory from CSV.'
+            : 'Enter the admin passkey to proceed.');
+    }
+    var inputEl = document.getElementById('adminGateInput');
+    var errEl   = document.getElementById('adminGateError');
+    if (inputEl) inputEl.value = '';
+    if (errEl)   errEl.textContent = '';
+    var modal = document.getElementById('adminGateModal');
+    if (modal) { modal.style.display = 'flex'; setTimeout(function() { if (inputEl) inputEl.focus(); }, 80); }
+  };
+
+  window._cancelAdminGate = function() {
+    _pendingAdminAction = null;
+    var modal = document.getElementById('adminGateModal');
+    if (modal) modal.style.display = 'none';
+  };
+
+    window._confirmAdminGate = async function() {
+    var inputEl = document.getElementById('adminGateInput');
+    var errEl   = document.getElementById('adminGateError');
+    var entered = inputEl ? inputEl.value.trim() : '';
+    if (!entered) {
+      if (errEl) errEl.textContent = '⚠️ Enter the admin passkey.';
+      return;
+    }
+
+    // --- FIXED VALIDATION ENGINE ---
+    // Connects the CSV gate to your secure 8-digit auth sync framework
+    let isValid = false;
+    if (typeof _verifyPassword === 'function') {
+      isValid = await _verifyPassword(entered);
+    } else {
+      var stored = localStorage.getItem('pharma_admin_pw') || '00000000';
+      isValid = (entered === stored);
+    }
+
+    if (!isValid) {
+      _adminFailCount++;
+      if (_adminFailCount >= 3) {
+        _adminLockedUntilMs = Date.now() + 60000; // 60-second lockout
+        _adminFailCount = 0;
+        if (errEl) errEl.textContent = '🔒 3 failed attempts — gate locked for 60 seconds.';
+        console.warn('[AdminGate] 3 consecutive failures — locked for 60 s. Action:', _pendingAdminAction);
+      } else {
+        if (errEl) errEl.textContent = '❌ Incorrect passkey. ' + (3 - _adminFailCount) + ' attempt(s) remaining.';
+      }
+      if (inputEl) inputEl.value = '';
+      return;
+    }
+
+    // Passkey correct — reset failure counter and dispatch action
+    _adminFailCount = 0;
+    var action = _pendingAdminAction;
+    _pendingAdminAction = null;
+    var modal = document.getElementById('adminGateModal');
+    if (modal) modal.style.display = 'none';
+
+    if (action === 'PURGE_DATABASE') {
+      var purgeModal = document.getElementById('purgeConfirmModal');
+      if (purgeModal) purgeModal.classList.add('visible');
+    } else if (action === 'CSV_IMPORT') {
+      var csvEl = document.getElementById('csvFile');
+      if (csvEl) csvEl.click();
+    } else if (typeof action === 'function') {
+      try { action(); } catch(e) { console.error('[AdminGate] Action threw:', e); }
+    } else if (typeof action === 'string') {
+      // Delegate all other named actions to auth.js executeProtectedAction via
+      // the proper requestAdminAccess / _pendingActionQueue mechanism.
+      if (typeof _pendingActionQueue !== 'undefined' && typeof executeProtectedAction === 'function') {
+        _pendingActionQueue.push({ type: action, targetId: null, extraData: null });
+        try { executeProtectedAction(); } catch(e) { console.error('[AdminGate] executeProtectedAction threw:', e); }
+      }
+    }
+  };
+
+})();
+
+if ('serviceWorker' in navigator) {
+  let _pendingSwWorker = null;
+  let _swRefreshing    = false;
+
+  function _tryApplySwUpdate() {
+    if (!_pendingSwWorker) return;
+    const syncBusy = (typeof _forceSyncRunning !== 'undefined' && _forceSyncRunning === true);
+    const cartBusy = (typeof activeCartItems   !== 'undefined' && activeCartItems.length > 0);
+    if (!syncBusy && !cartBusy) {
+      _pendingSwWorker.postMessage({ type: 'SKIP_WAITING' });
+      _pendingSwWorker = null; // controllerchange fires → page will reload
+    }
+  }
+
+  function _showSwUpdateToast() {
+    let el = document.getElementById('swUpdateToast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'swUpdateToast';
+      el.setAttribute('role', 'status');
+      el.style.cssText = [
+        'position:fixed', 'bottom:80px', 'left:50%', 'transform:translateX(-50%)',
+        'background:#1e293b', 'color:#fff', 'padding:10px 18px', 'border-radius:8px',
+        'font-size:13px', 'font-weight:700', 'z-index:99999',
+        'display:flex', 'align-items:center', 'gap:12px',
+        'box-shadow:0 4px 20px rgba(0,0,0,.4)', 'white-space:nowrap'
+      ].join(';');
+      el.innerHTML =
+        '<span>🔄 App update ready — will apply automatically when idle</span>' +
+        '<button id="swRelaunchBtn" style="background:var(--teal,#0d9488);color:#fff;' +
+        'border:none;border-radius:5px;padding:5px 14px;font-size:12px;' +
+        'font-weight:800;cursor:pointer;white-space:nowrap;">Relaunch now</button>';
+      document.body.appendChild(el);
+      document.getElementById('swRelaunchBtn').addEventListener('click', function() {
+        if (_pendingSwWorker) {
+          _pendingSwWorker.postMessage({ type: 'SKIP_WAITING' });
+          _pendingSwWorker = null;
+        }
+      });
+    }
+    el.style.display = 'flex';
+  }
+
+  function _hideSwUpdateToast() {
+    const el = document.getElementById('swUpdateToast');
+    if (el) el.style.display = 'none';
+  }
+
+  function _handlePendingWorker(worker) {
+    _pendingSwWorker = worker;
+    _tryApplySwUpdate();
+    // If still pending after the idle check the app is busy — show toast
+    if (_pendingSwWorker) _showSwUpdateToast();
+  }
+
+  navigator.serviceWorker
+    .register('sw.js')
+    .then(function(reg) {
+      console.log('[PWA] Service worker registered');
+      // Handle a worker that was already waiting when the page loaded
+      if (reg.waiting) _handlePendingWorker(reg.waiting);
+
+      reg.addEventListener('updatefound', function() {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', function() {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            _handlePendingWorker(newWorker);
+          }
+        });
+      });
+    })
+    .catch(function(err) { console.warn('[PWA] SW registration failed:', err); });
+
+  // Reload once the newly-activated SW takes control so latest assets load
+  navigator.serviceWorker.addEventListener('controllerchange', function() {
+    if (_swRefreshing) return;
+    _swRefreshing = true;
+    _hideSwUpdateToast();
+    window.location.reload();
+  });
+
+  // Poll every 5 s — auto-applies any deferred update the moment app is idle
+  setInterval(_tryApplySwUpdate, 5000);
+}
+</script>
 </body>
 </html>
