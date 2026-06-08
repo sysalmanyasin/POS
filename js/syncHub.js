@@ -1912,8 +1912,8 @@ async function _gpExecuteNetworkPurge() {
     ];
     // Use confirmed PK column names per table (avoids 42703 "column does not exist" errors).
     const tableFilterMap = {
-        'invoice_items':       'uuid=not.is.null',
-        'invoices':            'uuid=not.is.null',
+        'invoice_items':       'invoice_number=not.is.null',
+        'invoices':            'invoice_number=not.is.null',
         'inventory_movements': 'movement_id=not.is.null',
         'inventory':           'code=not.is.null',
         'sync_log':            'device_uuid=not.is.null',
@@ -2302,8 +2302,8 @@ async function _cpExecute() {
 
     // 2. Delete relational table rows (keep: devices, settings auth)
     const relTableMap = {
-        'invoice_items':       'uuid=not.is.null',
-        'invoices':            'uuid=not.is.null',
+        'invoice_items':       'invoice_number=not.is.null',
+        'invoices':            'invoice_number=not.is.null',
         'inventory_movements': 'movement_id=not.is.null',
         'inventory':           'code=not.is.null',
         'sync_log':            'device_uuid=not.is.null'
