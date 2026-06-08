@@ -1013,19 +1013,12 @@ async function finalizeAndPrintBill() {
     let originalTimestamp = null, originalDeviceCode = null;
 
     if (isEdit) {
+        // Stock was already restored (EDIT_RESTORE) when the invoice was loaded
+        // into edit mode (_doRecallLastSaved / _doLoad / _doUpdateBill).
+        // Do NOT restore again here — that caused a double-restore bug where
+        // every edit permanently inflated stock by the original invoice qty.
         const orig = savedInvoicesLedger.find(inv => inv.id === currentlyEditingInvoiceId);
         if (orig) { originalTimestamp = orig.timestamp; originalDeviceCode = orig.deviceCode; }
-        (orig ? orig.details : []).forEach(origLine => {
-            const prod = masterInventoryDB.find(p => p.code === origLine.code);
-            if (prod) {
-                const restoredQty = parseInt(origLine.qty, 10) || 0;
-                prod.stock = Number(prod.stock) + restoredQty;
-                _recordInvMovement(origLine.code, +restoredQty, 'EDIT_RESTORE', invoiceID,
-                    'Stock restored — invoice edit replaced original line');
-                _atomicStockWriteBack(origLine.code, prod.stock);
-            }
-        });
-        try { saveInventoryToDB(masterInventoryDB); } catch(e) {}
         savedInvoicesLedger = savedInvoicesLedger.filter(inv => inv.id !== invoiceID);
         currentlyEditingInvoiceId = null;
     } else { invoiceID = getNextInvoiceNumber(); }
