@@ -1605,7 +1605,7 @@
     // TOGGLE_OVERSTOCK, SAVE_ALL_SETTINGS, ADD_STAFF_MEMBER, etc. work correctly.
     // FIX: forward all three arguments (action, targetId, extraData) so that
     // extraData (e.g. {name, pin} for ADD_STAFF_MEMBER) is not silently dropped.
-    if (action !== 'PURGE_DATABASE' && action !== 'CSV_IMPORT') {
+    if (action !== 'PURGE_DATABASE' && action !== 'CSV_IMPORT' && action !== 'IDB_NUKE') {
       if (typeof _authJsRequestAdminAccess === 'function') {
         return _authJsRequestAdminAccess(action, targetId, extraData);
       }
@@ -1686,6 +1686,10 @@
     } else if (action === 'CSV_IMPORT') {
       var csvEl = document.getElementById('csvFile');
       if (csvEl) csvEl.click();
+    } else if (action === 'IDB_NUKE') {
+      if (typeof _executeIDBNukeBroadcast === 'function') {
+        _executeIDBNukeBroadcast().catch(function(e) { console.error('[IDB_NUKE]', e); });
+      }
     } else if (typeof action === 'function') {
       try { action(); } catch(e) { console.error('[AdminGate] Action threw:', e); }
     } else if (typeof action === 'string') {
