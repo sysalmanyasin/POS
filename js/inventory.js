@@ -439,9 +439,12 @@ window.PharmaInventoryEngine = {
 let _invSortCol  = 'name';
 let _invSortDir  = 1;
 let _invReady    = false;
-let _invFilters  = { code:'', name:'', generic:'', company:'', pack:'', price:'', stock:'' };
+let _invFilters  = { code:'', name:'', generic:'', company:'', supplier:'', pack:'', price:'', stock:'' };
 let _invStockFilter = 'all';
 let _invSearchProduct = null;
+let _invGroupBy = 'none';
+
+function _invSetGroupBy(val) { _invGroupBy = val; if (_invReady) renderInventoryView(); }
 
 function sortInvBy(col) {
     if (_invSortCol === col) _invSortDir = -_invSortDir;
@@ -606,6 +609,7 @@ function renderInventoryView() {
         if (_invFilters.name    && !(it.name        ||'').toLowerCase().includes(_invFilters.name))    return false;
         if (_invFilters.generic && !(it.generic     ||'').toLowerCase().includes(_invFilters.generic)) return false;
         if (_invFilters.company && !(it.company     ||'').toLowerCase().includes(_invFilters.company)) return false;
+        if (_invFilters.supplier && !(it.supplier   ||'').toLowerCase().includes(_invFilters.supplier)) return false;
         if (_invFilters.pack    && !(it.packDetails ||'').toLowerCase().includes(_invFilters.pack))    return false;
         if (_invFilters.price)  { const pv = (Number(it.unitPrice)||0).toFixed(2); if (!pv.includes(_invFilters.price)) return false; }
         if (_invFilters.stock)  { const sv = String(Number(it.stock)||0); if (!sv.includes(_invFilters.stock)) return false; }
@@ -621,14 +625,23 @@ function renderInventoryView() {
     }
 
     filtered.sort((a, b) => {
+        // When grouping, primary sort is by the group key
+        if (_invGroupBy !== 'none') {
+            let gk = _invGroupBy === 'supplier' ? 'supplier' : _invGroupBy === 'generic' ? 'generic' : 'company';
+            const ga = (a[gk] || '—').toLowerCase();
+            const gb = (b[gk] || '—').toLowerCase();
+            if (ga < gb) return -1;
+            if (ga > gb) return 1;
+        }
         let av, bv;
-        if      (_invSortCol === 'code')    { av = a.code    || ''; bv = b.code    || ''; }
-        else if (_invSortCol === 'name')    { av = a.name    || ''; bv = b.name    || ''; }
-        else if (_invSortCol === 'generic') { av = a.generic || ''; bv = b.generic || ''; }
-        else if (_invSortCol === 'company') { av = a.company || ''; bv = b.company || ''; }
-        else if (_invSortCol === 'pack')    { av = a.packDetails || ''; bv = b.packDetails || ''; }
-        else if (_invSortCol === 'price')   { av = Number(a.unitPrice) || 0; bv = Number(b.unitPrice) || 0; }
-        else if (_invSortCol === 'stock')   { av = Number(a.stock) || 0;     bv = Number(b.stock) || 0; }
+        if      (_invSortCol === 'code')     { av = a.code    || ''; bv = b.code    || ''; }
+        else if (_invSortCol === 'name')     { av = a.name    || ''; bv = b.name    || ''; }
+        else if (_invSortCol === 'generic')  { av = a.generic || ''; bv = b.generic || ''; }
+        else if (_invSortCol === 'company')  { av = a.company || ''; bv = b.company || ''; }
+        else if (_invSortCol === 'supplier') { av = a.supplier || ''; bv = b.supplier || ''; }
+        else if (_invSortCol === 'pack')     { av = a.packDetails || ''; bv = b.packDetails || ''; }
+        else if (_invSortCol === 'price')    { av = Number(a.unitPrice) || 0; bv = Number(b.unitPrice) || 0; }
+        else if (_invSortCol === 'stock')    { av = Number(a.stock) || 0;     bv = Number(b.stock) || 0; }
         else { av = a.name || ''; bv = b.name || ''; }
         if (typeof av === 'number') return _invSortDir * (av - bv);
         return _invSortDir * String(av).localeCompare(String(bv));
@@ -672,7 +685,9 @@ function renderInventoryView() {
 
     const totalCount = items.length;
     const shownCount = filtered.length;
-    const rows = filtered.map(item => {
+
+    // Build rows with optional group headers
+    const _makeRow = (item) => {
         const s = Number(item.stock) || 0;
         const stockCls = s <= 0 ? 'inv-stock-zero' : s <= 10 ? 'inv-stock-low' : 'inv-stock-ok';
         const codeEsc = _escHtml(item.code);
@@ -681,6 +696,7 @@ function renderInventoryView() {
             <td class="inv-td inv-td-name">${_escHtml(item.name || '—')}</td>
             <td class="inv-td inv-td-generic">${_escHtml(item.generic || '—')}</td>
             <td class="inv-td inv-td-company">${_escHtml(item.company || '—')}</td>
+            <td class="inv-td inv-td-supplier">${_escHtml(item.supplier || '—')}</td>
             <td class="inv-td inv-td-pack">${_escHtml(item.packDetails || '—')}</td>
             <td class="inv-td inv-td-price">${_escHtml(cur)}${(Number(item.unitPrice) || 0).toFixed(2)}</td>
             <td class="inv-td inv-td-stock"><span class="inv-stock-badge ${stockCls}">${_escHtml(String(s))}</span></td>
@@ -689,7 +705,31 @@ function renderInventoryView() {
                 <button class="inv-hist-btn" style="margin-left:4px;color:var(--red);" onclick="requestDeleteProduct('${codeEsc}');event.stopPropagation();" title="Delete product">🗑</button>
             </td>
         </tr>`;
-    }).join('');
+    };
+
+    let rows = '';
+    if (_invGroupBy !== 'none') {
+        const gk = _invGroupBy === 'supplier' ? 'supplier' : _invGroupBy === 'generic' ? 'generic' : 'company';
+        const gLabel = _invGroupBy === 'supplier' ? '🚚 Supplier' : _invGroupBy === 'generic' ? '💊 Generic' : '🏭 Company';
+        let lastGroup = null;
+        filtered.forEach(item => {
+            const gval = item[gk] || '—';
+            if (gval !== lastGroup) {
+                const groupItems = filtered.filter(x => (x[gk] || '—') === gval);
+                const groupStock = groupItems.reduce((s, x) => s + (Number(x.stock)||0), 0);
+                rows += `<tr class="inv-group-header">
+                    <td colspan="9" class="inv-group-cell">
+                        <span class="inv-group-label">${gLabel}: <strong>${_escHtml(gval)}</strong></span>
+                        <span class="inv-group-meta">${groupItems.length} item${groupItems.length!==1?'s':''} · ${groupStock} units</span>
+                    </td>
+                </tr>`;
+                lastGroup = gval;
+            }
+            rows += _makeRow(item);
+        });
+    } else {
+        rows = filtered.map(_makeRow).join('');
+    }
 
     const activeFilters = Object.values(_invFilters).some(v=>v) || _invStockFilter !== 'all';
     const filterBar = activeFilters
@@ -700,12 +740,13 @@ function renderInventoryView() {
         <table class="inv-table inv-table-full">
             <thead>
                 <tr>
-                    ${_thSF('code',   'Code',    'code…')}
-                    ${_thSF('name',   'Name',    'name…')}
-                    ${_thSF('generic','Generic', 'generic…')}
-                    ${_thSF('company','Company', 'company…')}
-                    ${_thSF('pack',   'Pack',    'pack…')}
-                    ${_thSF('price',  'Price',   'price…')}
+                    ${_thSF('code',     'Code',     'code…')}
+                    ${_thSF('name',     'Name',     'name…')}
+                    ${_thSF('generic',  'Generic',  'generic…')}
+                    ${_thSF('company',  'Company',  'company…')}
+                    ${_thSF('supplier', 'Supplier', 'supplier…')}
+                    ${_thSF('pack',     'Pack',     'pack…')}
+                    ${_thSF('price',    'Price',    'price…')}
                     ${stockTh}
                     <th class="inv-th">Actions</th>
                 </tr>
@@ -717,7 +758,7 @@ function renderInventoryView() {
 function _invSetStockStatus(val) { _invStockFilter = val; if (_invReady) renderInventoryView(); }
 
 function _invClearAllFilters() {
-    _invFilters = { code:'', name:'', generic:'', company:'', pack:'', price:'', stock:'' };
+    _invFilters = { code:'', name:'', generic:'', company:'', supplier:'', pack:'', price:'', stock:'' };
     _invStockFilter = 'all';
     clearInvProductSearch();
     renderInventoryView();
@@ -762,6 +803,12 @@ function _compileLedgerForCurrentDrawer() {
     const productCode = _currentDrawerCode;
     const body = document.getElementById('itemHistoryDrawerBody');
     if (!productCode || !body) return;
+    // Hide export buttons while compiling
+    const csvBtn = document.getElementById('ledgerExportCSVBtn');
+    const pdfBtn = document.getElementById('ledgerExportPDFBtn');
+    if (csvBtn) { csvBtn.style.display = 'none'; }
+    if (pdfBtn) { pdfBtn.style.display = 'none'; }
+    window._lastCompiledLedger = null;
     if (!db) { body.innerHTML = '<p class="inv-err" style="padding:16px;color:var(--red);">Database unavailable.</p>'; return; }
     body.innerHTML = '<div class="inv-loading" style="padding:16px;text-align:center;color:var(--g500);font-size:12px;">⏳ Compiling ledger…</div>';
     try {
@@ -857,12 +904,284 @@ function _compileLedgerForCurrentDrawer() {
                     '</tr></thead>' +
                     '<tbody>' + rows + '</tbody>' +
                 '</table></div>';
+
+            // Store compiled ledger for export
+            window._lastCompiledLedger = {
+                productCode: productCode,
+                productName: item ? (item.name || productCode) : productCode,
+                generic:     item ? (item.generic || '—') : '—',
+                company:     item ? (item.company || '—') : '—',
+                supplier:    item ? (item.supplier || '—') : '—',
+                snapshotStock: item ? (item.stock != null ? item.stock : '—') : '—',
+                ledgerStock:   finalLedgerStock,
+                movements:     descending
+            };
+            // Show export buttons
+            const _csv = document.getElementById('ledgerExportCSVBtn');
+            const _pdf = document.getElementById('ledgerExportPDFBtn');
+            if (_csv) { _csv.style.display = 'inline-flex'; }
+            if (_pdf) { _pdf.style.display = 'inline-flex'; }
         };
         req.onerror = function() { body.innerHTML = '<p class="inv-err" style="padding:16px;color:var(--red);">Failed to load movement history.</p>'; };
         tx.onerror  = function() { body.innerHTML = '<p class="inv-err" style="padding:16px;color:var(--red);">Transaction error loading ledger.</p>'; };
     } catch(e) {
         body.innerHTML = '<p class="inv-err" style="padding:16px;color:var(--red);">Error: ' + _escHtml(String(e.message || e)) + '</p>';
     }
+}
+
+// =========================================================================
+// LEDGER EXPORT — CSV & PDF
+// =========================================================================
+
+function exportLedgerCSV() {
+    const L = window._lastCompiledLedger;
+    if (!L || !L.movements || L.movements.length === 0) { showToast('⚠️ Generate ledger first.', true); return; }
+    const bi = (typeof _getBranchIdentity === 'function') ? _getBranchIdentity() : {};
+    const storeName = bi.businessName || bi.branchName || 'Pharma POS';
+    const esc = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const header = ['Date/Time','Type','Qty Change','Balance After','Invoice ID','Device','Description'];
+    const typeLabel = { SALE:'Sale', REFUND:'Refund', PARTIAL_REFUND:'Partial Refund', OPENING:'Opening Stock', ADJUSTMENT:'Adjustment', EDIT_RESTORE:'Edit Restore' };
+    const dataRows = L.movements.map(m => {
+        const tsMs = typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime();
+        const ts = (tsMs && !m._isSynthetic) ? new Date(tsMs).toLocaleString() : 'Baseline estimate';
+        const type = typeLabel[m.movementType] || m.movementType || '—';
+        const sign = Number(m.quantityChange) >= 0 ? '+' : '';
+        return [
+            esc(ts), esc(type), esc(sign + String(Number(m.quantityChange))),
+            esc(Math.max(0, m._balanceAfter)),
+            esc(m.invoiceId || '—'),
+            esc(m.deviceCode || (m.deviceUUID ? m.deviceUUID.slice(0,8) : '—')),
+            esc(m.description || (m._isSynthetic ? 'Auto-estimated opening balance' : '—'))
+        ].join(',');
+    });
+    const infoRows = [
+        '# ' + storeName + ' — Product Ledger Export',
+        '# Product: ' + L.productName + ' (' + L.productCode + ')',
+        '# Generic: ' + L.generic + ' | Company: ' + L.company + ' | Supplier: ' + L.supplier,
+        '# Exported: ' + new Date().toLocaleString(),
+        '# Ledger Balance: ' + L.ledgerStock + ' | Snapshot Stock: ' + L.snapshotStock,
+        '',
+        header.join(','),
+        ...dataRows
+    ];
+    const csv = infoRows.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = 'ledger_' + (L.productCode || 'product').replace(/[^A-Z0-9]/gi,'_') + '_' + new Date().toISOString().slice(0,10) + '.csv';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    showToast('📥 Ledger CSV exported (' + L.movements.length + ' movements).');
+}
+
+function exportLedgerPDF() {
+    const L = window._lastCompiledLedger;
+    if (!L || !L.movements || L.movements.length === 0) { showToast('⚠️ Generate ledger first.', true); return; }
+    const bi = (typeof _getBranchIdentity === 'function') ? _getBranchIdentity() : {};
+    const storeName = bi.businessName || bi.branchName || 'Pharma POS';
+    const branchName = bi.branchName || '';
+    const counterId  = bi.counterId  || '';
+    const typeLabel = { SALE:'Sale', REFUND:'Refund', PARTIAL_REFUND:'Partial Refund', OPENING:'Opening Stock', ADJUSTMENT:'Adjustment', EDIT_RESTORE:'Edit Restore' };
+    const typeColor = { SALE:'#0f766e', REFUND:'#b91c1c', PARTIAL_REFUND:'#b91c1c', OPENING:'#1d4ed8', ADJUSTMENT:'#92400e', EDIT_RESTORE:'#6d28d9' };
+    const typeBg    = { SALE:'#f0fdf9', REFUND:'#fff1f2', PARTIAL_REFUND:'#fff1f2', OPENING:'#eff6ff', ADJUSTMENT:'#fffbeb', EDIT_RESTORE:'#f5f3ff' };
+
+    const rowsHTML = L.movements.map((m, i) => {
+        const tsMs = typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime();
+        const ts = (tsMs && !m._isSynthetic) ? new Date(tsMs).toLocaleString([], {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : 'Baseline estimate';
+        const type  = typeLabel[m.movementType] || m.movementType || '—';
+        const color = typeColor[m.movementType] || '#374151';
+        const bg    = typeBg[m.movementType]    || '#fff';
+        const qty   = Number(m.quantityChange);
+        const sign  = qty >= 0 ? '+' : '';
+        const qtyColor  = qty >= 0 ? '#15803d' : '#b91c1c';
+        const bal   = Math.max(0, m._balanceAfter);
+        const balColor  = bal <= 0 ? '#b91c1c' : bal <= 10 ? '#b45309' : '#15803d';
+        const dev   = _escHtml(String(m.deviceCode || (m.deviceUUID ? m.deviceUUID.slice(0,8) : '—')));
+        const desc  = m.description ? _escHtml(String(m.description)) : (m._isSynthetic ? '<em>Auto-estimated opening balance</em>' : '—');
+        const inv   = m.invoiceId ? _escHtml(String(m.invoiceId)) : '—';
+        const rowBg = i % 2 === 0 ? '#f9fafb' : '#ffffff';
+        const synthStyle = m._isSynthetic ? 'opacity:.75;font-style:italic;' : '';
+        return `<tr style="background:${rowBg};${synthStyle}">
+            <td style="padding:7px 10px;font-size:11px;color:#374151;white-space:nowrap;border-bottom:1px solid #e5e7eb;">${_escHtml(ts)}</td>
+            <td style="padding:7px 10px;border-bottom:1px solid #e5e7eb;">
+                <span style="display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;background:${bg};color:${color};">${_escHtml(type)}</span>
+            </td>
+            <td style="padding:7px 10px;font-size:12px;font-weight:700;color:${qtyColor};text-align:center;border-bottom:1px solid #e5e7eb;">${sign}${qty}</td>
+            <td style="padding:7px 10px;font-size:12px;font-weight:800;color:${balColor};text-align:center;border-bottom:1px solid #e5e7eb;">${bal}</td>
+            <td style="padding:7px 10px;font-size:10px;font-family:monospace;color:#6b7280;border-bottom:1px solid #e5e7eb;">${inv}</td>
+            <td style="padding:7px 10px;font-size:10px;font-weight:600;color:#4b5563;border-bottom:1px solid #e5e7eb;">${dev}</td>
+            <td style="padding:7px 10px;font-size:10px;color:#6b7280;border-bottom:1px solid #e5e7eb;max-width:200px;">${desc}</td>
+        </tr>`;
+    }).join('');
+
+    const totalSales   = L.movements.filter(m => m.movementType === 'SALE').reduce((s, m) => s + Math.abs(Number(m.quantityChange)||0), 0);
+    const totalRefunds = L.movements.filter(m => m.movementType === 'REFUND' || m.movementType === 'PARTIAL_REFUND').reduce((s, m) => s + Math.abs(Number(m.quantityChange)||0), 0);
+    const totalAdj     = L.movements.filter(m => m.movementType === 'ADJUSTMENT').reduce((s, m) => s + (Number(m.quantityChange)||0), 0);
+    const now = new Date().toLocaleString([], {year:'numeric',month:'long',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Product Ledger — ${_escHtml(L.productName)}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Inter',sans-serif;background:#f3f4f6;color:#111827;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  @page{size:A4 landscape;margin:14mm 12mm;}
+  @media print{body{background:#fff;}.no-print{display:none!important;}.page-break{page-break-before:always;}}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px;}
+  /* Header */
+  .header{background:linear-gradient(135deg,#0f766e 0%,#0d9488 60%,#14b8a6 100%);border-radius:14px;padding:28px 32px;margin-bottom:20px;color:#fff;display:flex;justify-content:space-between;align-items:flex-start;}
+  .header-left{}
+  .store-name{font-size:22px;font-weight:900;letter-spacing:-.3px;margin-bottom:2px;}
+  .store-branch{font-size:12px;opacity:.8;font-weight:600;letter-spacing:.3px;margin-bottom:16px;}
+  .doc-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;opacity:.7;margin-bottom:4px;}
+  .product-name{font-size:28px;font-weight:900;letter-spacing:-.5px;line-height:1.1;}
+  .product-code{font-size:13px;opacity:.75;font-weight:600;font-family:monospace;margin-top:4px;}
+  .header-right{text-align:right;flex-shrink:0;}
+  .export-date{font-size:10px;opacity:.7;margin-bottom:6px;}
+  .device-badge{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);border-radius:6px;padding:4px 12px;font-size:11px;font-weight:700;}
+  /* Meta pills */
+  .meta-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;}
+  .meta-pill{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 18px;flex:1;min-width:140px;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+  .meta-pill-label{font-size:9px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;}
+  .meta-pill-value{font-size:15px;font-weight:800;color:#111827;}
+  .meta-pill-sub{font-size:10px;color:#6b7280;margin-top:2px;}
+  /* Stats */
+  .stats-bar{display:flex;gap:10px;margin-bottom:20px;}
+  .stat-card{flex:1;border-radius:10px;padding:14px 18px;text-align:center;}
+  .stat-card.sold{background:#f0fdf9;border:1px solid #99f6e4;}
+  .stat-card.refund{background:#fff1f2;border:1px solid #fecdd3;}
+  .stat-card.adj{background:#fffbeb;border:1px solid #fde68a;}
+  .stat-card.balance{background:#eff6ff;border:1px solid #bfdbfe;}
+  .stat-label{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px;}
+  .stat-value{font-size:26px;font-weight:900;}
+  .stat-card.sold .stat-value{color:#0f766e;}
+  .stat-card.refund .stat-value{color:#b91c1c;}
+  .stat-card.adj .stat-value{color:#b45309;}
+  .stat-card.balance .stat-value{color:#1d4ed8;}
+  /* Table */
+  .table-wrap{background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.07);border:1px solid #e5e7eb;}
+  .table-header{padding:14px 20px;background:#f9fafb;border-bottom:2px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;}
+  .table-title{font-size:13px;font-weight:800;color:#374151;letter-spacing:.2px;}
+  .table-count{font-size:11px;color:#9ca3af;font-weight:600;}
+  table{width:100%;border-collapse:collapse;}
+  th{padding:9px 10px;font-size:9px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.8px;text-align:left;background:#f9fafb;border-bottom:2px solid #e5e7eb;}
+  th.center{text-align:center;}
+  /* Footer */
+  .footer{margin-top:20px;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#9ca3af;}
+  .footer-note{font-style:italic;}
+  .print-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 22px;background:#0f766e;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:20px;}
+  .print-btn:hover{background:#0d9488;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="no-print" style="margin-bottom:16px;">
+    <button class="print-btn" onclick="window.print()">🖨️ Print / Save as PDF</button>
+    <span style="font-size:11px;color:#6b7280;margin-left:10px;">Use browser Print → Save as PDF for best results</span>
+  </div>
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="store-name">${_escHtml(storeName)}</div>
+      <div class="store-branch">${_escHtml(branchName)}${branchName && counterId ? ' · ' : ''}${_escHtml(counterId)}</div>
+      <div class="doc-title">Product Movement Ledger</div>
+      <div class="product-name">${_escHtml(L.productName)}</div>
+      <div class="product-code">${_escHtml(L.productCode)}</div>
+    </div>
+    <div class="header-right">
+      <div class="export-date">Exported: ${_escHtml(now)}</div>
+      <div class="device-badge">📱 ${_escHtml(counterId || 'Master Device')}</div>
+    </div>
+  </div>
+
+  <!-- META PILLS -->
+  <div class="meta-bar">
+    <div class="meta-pill">
+      <div class="meta-pill-label">Generic / Salt</div>
+      <div class="meta-pill-value">${_escHtml(L.generic)}</div>
+    </div>
+    <div class="meta-pill">
+      <div class="meta-pill-label">Company / Manufacturer</div>
+      <div class="meta-pill-value">${_escHtml(L.company)}</div>
+    </div>
+    <div class="meta-pill">
+      <div class="meta-pill-label">Supplier</div>
+      <div class="meta-pill-value">${_escHtml(L.supplier)}</div>
+    </div>
+    <div class="meta-pill">
+      <div class="meta-pill-label">Snapshot Stock</div>
+      <div class="meta-pill-value">${_escHtml(String(L.snapshotStock))}</div>
+      <div class="meta-pill-sub">units in database</div>
+    </div>
+    <div class="meta-pill">
+      <div class="meta-pill-label">Ledger Balance</div>
+      <div class="meta-pill-value" style="color:#0f766e;">${_escHtml(String(L.ledgerStock))}</div>
+      <div class="meta-pill-sub">computed from movements</div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats-bar">
+    <div class="stat-card sold">
+      <div class="stat-label">Total Units Sold</div>
+      <div class="stat-value">${totalSales}</div>
+    </div>
+    <div class="stat-card refund">
+      <div class="stat-label">Units Refunded</div>
+      <div class="stat-value">${totalRefunds}</div>
+    </div>
+    <div class="stat-card adj">
+      <div class="stat-label">Net Adjustments</div>
+      <div class="stat-value">${totalAdj >= 0 ? '+' : ''}${totalAdj}</div>
+    </div>
+    <div class="stat-card balance">
+      <div class="stat-label">Total Movements</div>
+      <div class="stat-value">${L.movements.length}</div>
+    </div>
+  </div>
+
+  <!-- TABLE -->
+  <div class="table-wrap">
+    <div class="table-header">
+      <div class="table-title">📋 Movement History (Newest First)</div>
+      <div class="table-count">${L.movements.length} record${L.movements.length !== 1 ? 's' : ''}</div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Date &amp; Time</th>
+          <th>Type</th>
+          <th class="center">Qty Δ</th>
+          <th class="center">Balance</th>
+          <th>Invoice ID</th>
+          <th>Device</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHTML}</tbody>
+    </table>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <div class="footer-note">* Baseline entries are auto-estimated and may not reflect a real recorded event.</div>
+    <div>${_escHtml(storeName)} · Generated ${_escHtml(now)}</div>
+  </div>
+</div>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) { showToast('⚠️ Popup blocked — please allow popups for this site.', true); return; }
+    win.document.write(html);
+    win.document.close();
+    showToast('🖨️ PDF preview opened — use Print → Save as PDF.');
 }
 
 // =========================================================================
