@@ -529,6 +529,20 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   .s2r-row .s2r-generic{display:none;}
   .s2r-row{padding:5px 6px;}
 
+  /* ── History toolbar: wrap filters on mobile ── */
+  .hist-toolbar{flex-direction:column;align-items:stretch;gap:6px;}
+  .hist-filter{width:100%;}
+  .hist-factions{margin-left:0;justify-content:flex-start;flex-wrap:wrap;}
+  .hist-finput{min-width:0;flex:1;}
+
+  /* ── History table: horizontal scroll on mobile ── */
+  .hist-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .hist-table{min-width:580px;}
+
+  /* ── Inventory table: horizontal scroll on mobile ── */
+  .inv-view-content{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .inv-table{min-width:820px;}
+
   /* ── Status bar: hide keyboard shortcuts on touch ── */
   #statusBar .sb-hint{display:none;}
   /* Keep only the clock and f9 hint */

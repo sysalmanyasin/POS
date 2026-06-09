@@ -151,7 +151,8 @@
 .gbar-lbl{font-size:11px;font-weight:700;color:var(--g600);}
 .gbar-count{font-size:9px;font-weight:600;color:var(--g400);}
 .gbar-amt{font-size:18px;font-weight:900;color:var(--blu);}
-.hist-table-wrap{background:white;border:1px solid var(--g200);border-radius:8px;overflow:hidden;margin-bottom:14px;}
+.hist-table-wrap{background:white;border:1px solid var(--g200);border-radius:8px;overflow-x:auto;overflow-y:hidden;margin-bottom:14px;-webkit-overflow-scrolling:touch;}
+.hist-table{min-width:600px;}
 .hist-table{width:100%;border-collapse:collapse;}
 .hist-table th{text-align:left;padding:6px 10px;font-size:9px;font-weight:700;color:var(--g500);
   text-transform:uppercase;letter-spacing:.4px;background:var(--g50);border-bottom:1px solid var(--g200);white-space:nowrap;}
@@ -1293,6 +1294,17 @@
     font-size: 11px;
 }
 .inv-stock-ok   { background: #dcfce7; color: #15803d; }
+
+/* ── Supplier column ─────────────────────────────────────────────────────── */
+.inv-td-supplier { font-size: 11px; color: var(--g600); }
+
+/* ── Group header rows ───────────────────────────────────────────────────── */
+.inv-group-header { background: var(--g100); border-top: 2px solid var(--g200); }
+.inv-group-cell { padding: 6px 10px; }
+.inv-group-label { font-size: 11px; font-weight: 800; color: var(--g700); }
+.inv-group-meta { font-size: 10px; color: var(--g500); margin-left: 10px; font-weight: 600; }
+[data-theme="dark"] .inv-group-header { background: var(--g150); }
+[data-theme="dark"] .inv-group-label { color: var(--g800); }
 .inv-stock-low  { background: #fef9c3; color: #92400e; }
 .inv-stock-zero { background: #fee2e2; color: #991b1b; }
 
