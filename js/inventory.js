@@ -163,9 +163,9 @@ async function _pushUnsyncedMovements() {
                         if (error) { allOk = false; break; }
                     }
                     if (allOk) {
-                        // Also keep legacy KV blob for backward-compat with older clients
-                        const supaKey = 'pharma_cloud_inv_movements_' + _getDeviceCode() + '_' + _DEVICE_UUID.slice(0, 8);
-                        _supaSet(supaKey, JSON.stringify(all)).catch(() => {});
+                        // M2 FIX: removed legacy KV blob write — all devices now read from
+                        // the relational inventory_movements table. The KV blob was vestigial
+                        // dead code that only wasted Supabase KV storage.
                         // Mark movements as synced in IDB
                         const tx2 = db.transaction(['inventory_movements'], 'readwrite');
                         const st2  = tx2.objectStore('inventory_movements');
@@ -204,12 +204,14 @@ async function _pullRemoteMovements() {
 
     try {
         if (typeof _dbSelect !== 'function') return false;
-        const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+        // M1 FIX: extended from 48 h to 7 days so devices offline up to a week
+        // still receive all missed movements on reconnect.
+        const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
         const { data: remoteMovs, error } = await _dbSelect(
             'inventory_movements',
             'moved_at=gt.' + encodeURIComponent(cutoff) +
             '&device_uuid=neq.' + encodeURIComponent(_DEVICE_UUID) +
-            '&order=moved_at.asc&limit=2000',
+            '&order=moved_at.asc&limit=5000',
             '*'
         );
 
@@ -266,7 +268,8 @@ async function _pullRemoteMovements() {
 
     if (newlyAppliedIds.length > 0) {
         newlyAppliedIds.forEach(id => appliedIds.add(id));
-        try { StorageModule.set(_appliedKey, JSON.stringify([...appliedIds].slice(-5000))); } catch(e) {}
+        // M3 FIX: raised cap from 5000 to 20000 to prevent re-applying old movements
+        try { StorageModule.set(_appliedKey, JSON.stringify([...appliedIds].slice(-20000))); } catch(e) {}
     }
     if (applied) { try { saveInventoryToDB(masterInventoryDB); } catch(e) {} }
     return applied;
@@ -315,7 +318,7 @@ async function _pullRemoteMovementsLegacyKV(appliedIds, newlyAppliedIds) {
     }
     if (newlyAppliedIds.length > 0) {
         newlyAppliedIds.forEach(id => appliedIds.add(id));
-        try { StorageModule.set('pharma_applied_mov_ids', JSON.stringify([...appliedIds].slice(-5000))); } catch(e) {}
+        try { StorageModule.set('pharma_applied_mov_ids', JSON.stringify([...appliedIds].slice(-20000))); } catch(e) {}
         if (applied) { try { saveInventoryToDB(masterInventoryDB); } catch(e) {} }
     }
     return applied;
@@ -358,16 +361,68 @@ function loadInventoryFromDB() {
             if (demoBanner) demoBanner.classList.add('visible');
         }
         updateHdrStats();
-        // Phase 4: client devices always overwrite local IDB with Supabase inventory
-        // on startup. This ensures a clean state after global purge or first registration.
-        // Master devices skip this — they are the source of truth.
-        const _p4role = (typeof StorageModule !== 'undefined')
-            ? StorageModule.get('pharma_device_role') : null;
-        if (_p4role === 'client') {
-            _pullInventoryFromSupabase().catch(function(e) {
-                console.warn('[Phase4] Startup inventory pull failed:', e);
-            });
-        }
+        // Startup full cloud sync — runs for ALL devices (master and client).
+        // Ensures every counter is up-to-date with all movements, invoices,
+        // and inventory from the cloud on each page load.
+        (async function _startupFullCloudSync() {
+            try {
+                const _startRole = (typeof StorageModule !== 'undefined')
+                    ? StorageModule.get('pharma_device_role') : null;
+
+                // Step 1: Pull inventory snapshot (clients only)
+                // Master is the inventory source of truth — it pushes, not pulls.
+                if (_startRole !== 'master') {
+                    try {
+                        await _pullInventoryFromSupabase();
+                    } catch(e) {
+                        console.warn('[Startup] Inventory pull failed:', e);
+                    }
+                }
+
+                // Step 2: Pull remote invoices from all other devices
+                // Small delay to let the Supabase client initialise fully
+                await new Promise(r => setTimeout(r, 1500));
+                try {
+                    if (typeof _dbSelect === 'function' && typeof _DEVICE_UUID !== 'undefined') {
+                        const { data: devRows } = await _dbSelect('devices', 'is_active=eq.true', 'uuid');
+                        const otherUUIDs = Array.isArray(devRows)
+                            ? devRows.map(r => r.uuid).filter(u => u && u !== _DEVICE_UUID)
+                            : [];
+                        for (const uuid of otherUUIDs) {
+                            try {
+                                const { data: remInvs } = await _dbSelect(
+                                    'invoices',
+                                    'device_uuid=eq.' + encodeURIComponent(uuid) +
+                                    '&order=billed_at.desc&limit=1000',
+                                    '*,invoice_items(*)'
+                                );
+                                if (Array.isArray(remInvs) &&
+                                    typeof StorageModule !== 'undefined' &&
+                                    typeof StorageModule.putRemoteInvoice === 'function') {
+                                    for (const inv of remInvs) {
+                                        await StorageModule.putRemoteInvoice(inv).catch(() => {});
+                                    }
+                                }
+                            } catch(_) {}
+                        }
+                    }
+                } catch(e) {
+                    console.warn('[Startup] Remote invoice pull failed:', e);
+                }
+
+                // Step 3: Pull remote inventory movements from all other devices
+                try {
+                    if (typeof _pullRemoteMovements === 'function') {
+                        await _pullRemoteMovements();
+                    }
+                } catch(e) {
+                    console.warn('[Startup] Remote movements pull failed:', e);
+                }
+
+            } catch(e) {
+                console.warn('[Startup] Full cloud sync failed:', e);
+            }
+        })();
     };
 }
 
@@ -1487,13 +1542,9 @@ function deleteProductFromCatalogue(productCode) {
             if (typeof updateHdrStats === 'function') updateHdrStats();
             const skipNote = skipped.length ? ' (' + skipped.length + ' rows skipped)' : '';
             showToast('✅ CSV imported: ' + _updCount + ' updated, ' + _newCount + ' new products.' + skipNote);
-            // Phase 4: push bootstrap to Supabase inventory table (master device only).
-            // Runs asynchronously so it never blocks the local import flow.
-            if (typeof _pushInventoryBootstrapToCloud === 'function') {
-                _pushInventoryBootstrapToCloud().catch(function(e) {
-                    showToast('⚠️ Cloud bootstrap push failed: ' + (e.message || e), true);
-                });
-            }
+            // Show "Push Inventory to Cloud" popup so the user can decide
+            // whether to replace the cloud catalogue with this import.
+            _showPostCsvPushPopup(_updCount + _newCount);
         } catch(e) {
             showToast('⚠️ Error saving imported inventory: ' + (typeof _escHtml === 'function' ? _escHtml(String(e.message || e)) : String(e.message || e)), true);
         }
@@ -1520,6 +1571,70 @@ function deleteProductFromCatalogue(productCode) {
     }
 
 })();
+// =========================================================================
+// POST-CSV IMPORT — Push Inventory to Cloud popup
+// =========================================================================
+function _showPostCsvPushPopup(itemCount) {
+    // Remove any existing popup
+    const _existing = document.getElementById('postCsvPushModal');
+    if (_existing) _existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'postCsvPushModal';
+    modal.innerHTML = \`
+<style>
+#postCsvPushModal .pcpm-overlay{position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:9990;display:flex;align-items:center;justify-content:center;padding:16px;}
+#postCsvPushModal .pcpm-card{background:#fff;width:100%;max-width:400px;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);overflow:hidden;animation:pcpm-in .2s ease;}
+@keyframes pcpm-in{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+#postCsvPushModal .pcpm-hdr{padding:16px 20px 14px;background:linear-gradient(135deg,#0f4c75,#1a6e9e);color:#fff;display:flex;align-items:center;gap:10px;}
+#postCsvPushModal .pcpm-hdr-icon{font-size:24px;line-height:1;}
+#postCsvPushModal .pcpm-hdr-title{font-size:15px;font-weight:900;line-height:1.2;}
+#postCsvPushModal .pcpm-hdr-sub{font-size:10px;color:rgba(255,255,255,.7);margin-top:2px;}
+#postCsvPushModal .pcpm-body{padding:18px 20px 14px;}
+#postCsvPushModal .pcpm-info{background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 13px;font-size:11px;color:#0369a1;line-height:1.6;margin-bottom:14px;}
+#postCsvPushModal .pcpm-warn{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 13px;font-size:11px;color:#92400e;line-height:1.6;margin-bottom:16px;}
+#postCsvPushModal .pcpm-actions{display:flex;flex-direction:column;gap:8px;}
+#postCsvPushModal .pcpm-btn-push{width:100%;padding:12px 16px;background:linear-gradient(135deg,#0f4c75,#1a6e9e);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;transition:opacity .15s;}
+#postCsvPushModal .pcpm-btn-push:hover{opacity:.88;}
+#postCsvPushModal .pcpm-btn-skip{width:100%;padding:9px 16px;background:#f1f5f9;color:#64748b;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:background .15s;}
+#postCsvPushModal .pcpm-btn-skip:hover{background:#e2e8f0;}
+</style>
+<div class="pcpm-overlay" onclick="if(event.target===this)document.getElementById('postCsvPushModal')?.remove()">
+  <div class="pcpm-card">
+    <div class="pcpm-hdr">
+      <span class="pcpm-hdr-icon">📦</span>
+      <div>
+        <div class="pcpm-hdr-title">CSV Imported Successfully</div>
+        <div class="pcpm-hdr-sub">\${itemCount} product\${itemCount !== 1 ? 's' : ''} loaded into local inventory</div>
+      </div>
+    </div>
+    <div class="pcpm-body">
+      <div class="pcpm-info">
+        Push this inventory to the cloud to make it available on <b>all devices</b> (Master &amp; Client). Every device syncs inventory from the cloud on startup.
+      </div>
+      <div class="pcpm-warn">
+        ⚠️ This will <b>replace</b> the cloud inventory catalogue for all counters. Current cloud stock will be overwritten.
+      </div>
+      <div class="pcpm-actions">
+        <button class="pcpm-btn-push" onclick="
+          document.getElementById('postCsvPushModal')?.remove();
+          if(typeof forcePushInventoryToCloud==='function') forcePushInventoryToCloud();
+          else if(typeof showToast==='function') showToast('❌ Push function not loaded yet.', true);
+        ">
+          ☁️ Push Inventory to Cloud
+        </button>
+        <button class="pcpm-btn-skip" onclick="document.getElementById('postCsvPushModal')?.remove()">
+          Skip for now — push later via Force Sync
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+\`;
+    document.body.appendChild(modal);
+}
+window._showPostCsvPushPopup = _showPostCsvPushPopup;
+
 // Note: CSV file input listener is registered in settings.js (_handleCSVImport).
 // The _attachCsvListener inside this module is intentionally not auto-invoked to
 // prevent double-processing when both modules are loaded on the same page.

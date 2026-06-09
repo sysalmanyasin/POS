@@ -45,7 +45,24 @@ const StorageModule = (() => {
             settings:  'pharma_cloud_settings'
         };
     }
+    // S8 FIX: SUPA_KEYS is computed at module-init time before pharma_branch_identity
+    // may be set — the heldBills key would default to '_DEV' and be orphaned when the
+    // real counterId is later registered. We expose a getSupaKey() getter that rebuilds
+    // the heldBills key fresh on each call so it always uses the current counterId.
     const SUPA_KEYS = _buildSupaKeys();
+    function getSupaKey(name) {
+        if (name === 'heldBills') {
+            // Always recompute so it picks up counterId even if registered after init
+            let dc = 'DEV';
+            try {
+                const bi = JSON.parse(localStorage.getItem('pharma_branch_identity') || '{}');
+                const raw = (bi.counterId || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+                if (raw) dc = raw.slice(0, 20);
+            } catch(_e) {}
+            return 'pharma_cloud_held_bills_' + dc;
+        }
+        return SUPA_KEYS[name] || null;
+    }
     let isSyncEnabled = false;
 
     const _req = indexedDB.open(IDB_NAME, IDB_VERSION);
@@ -468,7 +485,7 @@ const StorageModule = (() => {
             } catch(e) {}
         });
         try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(e) {}
-        if (isSyncEnabled) { _supaSet(SUPA_KEYS.heldBills, JSON.stringify(bills)).catch(() => {}); }
+        if (isSyncEnabled) { _supaSet(getSupaKey('heldBills'), JSON.stringify(bills)).catch(() => {}); }
     }
 
     function loadHeldBills() {
@@ -720,7 +737,7 @@ const StorageModule = (() => {
     async function syncFromCloudEngine() {
         const [invRaw, hbRaw, invDbRaw, settRaw] = await Promise.all([
             _supaGet(SUPA_KEYS.invoices),
-            _supaGet(SUPA_KEYS.heldBills),
+            _supaGet(getSupaKey('heldBills')),
             _supaGet(SUPA_KEYS.inventory),
             _supaGet(SUPA_KEYS.settings)
         ]);
@@ -763,7 +780,7 @@ const StorageModule = (() => {
         try {
         const [invRaw, hbRaw, settRaw, invDbRaw] = await Promise.all([
             _supaGet(SUPA_KEYS.invoices),
-            _supaGet(SUPA_KEYS.heldBills),
+            _supaGet(getSupaKey('heldBills')),
             _supaGet(SUPA_KEYS.settings),
             _supaGet(SUPA_KEYS.inventory)
         ]);
@@ -869,7 +886,7 @@ const StorageModule = (() => {
             await Promise.all([
                 (typeof savedInvoicesLedger !== 'undefined') ? _supaSet(SUPA_KEYS.invoices,  JSON.stringify(savedInvoicesLedger)) : Promise.resolve(),
                 (typeof masterInventoryDB   !== 'undefined') ? _supaSet(SUPA_KEYS.inventory, JSON.stringify(masterInventoryDB))   : Promise.resolve(),
-                (typeof temporaryHeldBills  !== 'undefined') ? _supaSet(SUPA_KEYS.heldBills, JSON.stringify(temporaryHeldBills))  : Promise.resolve(),
+                (typeof temporaryHeldBills  !== 'undefined') ? _supaSet(getSupaKey('heldBills'), JSON.stringify(temporaryHeldBills))  : Promise.resolve(),
                 Promise.resolve(),
                 _supaSet(SUPA_KEYS.settings, JSON.stringify(settPayload)),
                 (typeof _pushUnsyncedMovements === 'function') ? _pushUnsyncedMovements().catch(() => {}) : Promise.resolve()

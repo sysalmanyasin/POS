@@ -52,14 +52,24 @@ setInterval(() => {
         if (typeof _checkAndPullInventoryIfUpdated === 'function') {
             _checkAndPullInventoryIfUpdated().catch(() => {});
         }
-        // Auto-push any unsynced movements (background heartbeat)
+        // Auto-push any unsynced movements (background)
         if (typeof _pushUnsyncedMovements === 'function') {
-            _pushUnsyncedMovements().then(() => {
-                // Write a background sync log entry after movement flush
-                const _bgEntry = { invoices_pushed: 0, invoices_pulled: 0, movements_pushed: 0, movements_pulled: 0, note: 'Background Heartbeat' };
-                _writeSyncLogEntry(_bgEntry).catch(() => {});
-                _appendLocalSyncLog(_bgEntry);
-            }).catch(() => {});
+            _countUnsyncedMovements().catch(() => 0).then(prePending => {
+                _pushUnsyncedMovements().then(() => {
+                    _countUnsyncedMovements().catch(() => 0).then(postPending => {
+                        const flushed = Math.max(0, prePending - postPending);
+                        // S4 FIX: only update timestamp + write sync_log if movements
+                        // were actually flushed — was flooding sync_log with ~4300
+                        // zero-row heartbeat entries per day across 3 devices.
+                        if (flushed > 0) {
+                            try { localStorage.setItem('_pharma_last_push_ts', String(Date.now())); } catch(_e) {}
+                            const _bgEntry = { invoices_pushed: 0, invoices_pulled: 0, movements_pushed: flushed, movements_pulled: 0, note: 'Background Push' };
+                            _writeSyncLogEntry(_bgEntry).catch(() => {});
+                            _appendLocalSyncLog(_bgEntry);
+                        }
+                    });
+                }).catch(() => {});
+            });
         }
     }
 }, 60_000);
@@ -73,10 +83,13 @@ setInterval(() => {
  *
  * @param {string} deviceUuid  — _DEVICE_UUID from config.js
  */
-async function syncOfflineQueue(deviceUuid) {
+async function syncOfflineQueue(deviceUuid, _skipGuard = false) {
     // ── Execution guard ──────────────────────────────────────────────────
-    if (_forceSyncRunning) return;
-    _forceSyncRunning = true;
+    // S1 FIX: _skipGuard=true lets forceSyncNow call this while it still holds
+    // _forceSyncRunning — eliminates the race where the 60s background timer slips
+    // in between the guard release and re-acquire that existed before this fix.
+    if (!_skipGuard && _forceSyncRunning) return;
+    if (!_skipGuard) _forceSyncRunning = true;
 
     try {
         // ── B1: Pull queue oldest-first ──────────────────────────────────
@@ -103,12 +116,14 @@ async function syncOfflineQueue(deviceUuid) {
         }
 
     } finally {
-        _forceSyncRunning = false;
+        if (!_skipGuard) {
+            _forceSyncRunning = false;
 
-        // Refresh hub UI if it is currently visible
-        if (document.getElementById('syncHubView')?.classList.contains('active')) {
-            _renderPendingQueueWidget().catch(() => {});
-            _stampRefreshTime();
+            // Refresh hub UI if it is currently visible
+            if (document.getElementById('syncHubView')?.classList.contains('active')) {
+                _renderPendingQueueWidget().catch(() => {});
+                _stampRefreshTime();
+            }
         }
     }
 }
@@ -347,9 +362,10 @@ async function _processInvoiceItem(item, deviceUuid) {
             const _sk = 'pharma_synced_invoices';
             const _ss = new Set(JSON.parse(localStorage.getItem(_sk) || '[]'));
             _ss.add(invoice_number);
-            // Cap set size at 500 to avoid unbounded growth
+            // S7 FIX: raised cap from 500 to 2000 — at 500 entries oldest invoices
+        // were evicted and could be double-processed if their queue record survived.
             const _ssArr = [..._ss];
-            if (_ssArr.length > 500) _ssArr.splice(0, _ssArr.length - 500);
+            if (_ssArr.length > 2000) _ssArr.splice(0, _ssArr.length - 2000);
             localStorage.setItem(_sk, JSON.stringify(_ssArr));
         } catch(_) {}
         try {
@@ -816,6 +832,26 @@ async function renderSyncHubView() {
   .sh-metrics-row{grid-template-columns:1fr;}
   .sh-section-hdr{flex-direction:column;align-items:flex-start;}
 }
+
+/* ── Sync Status Overview table ───────────────────────────────────────── */
+.sh-sstbl{width:100%;border-collapse:collapse;}
+.sh-sstbl-th{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--g400,#94a3b8);padding:9px 14px;background:var(--g50,#f8fafc);border-bottom:2px solid var(--g100,#f1f5f9);text-align:left;white-space:nowrap;}
+.sh-sstbl-row:last-child .sh-sstbl-td{border-bottom:none;}
+.sh-sstbl-td{padding:13px 14px;font-size:12px;color:var(--g700,#334155);border-bottom:1px solid var(--g100,#f1f5f9);vertical-align:middle;}
+.sh-sstbl-dir{font-size:13px;font-weight:900;white-space:nowrap;}
+.sh-sstbl-inc{font-size:11px;color:var(--g500,#64748b);line-height:1.65;margin-top:3px;}
+.sh-sstbl-inc em{font-style:normal;opacity:.65;}
+.sh-sstbl-num{font-size:20px;font-weight:900;line-height:1;}
+.sh-sstbl-num.num-ok{color:#059669;}
+.sh-sstbl-num.num-warn{color:#dc2626;}
+.sh-sstbl-ago{font-size:11px;font-family:monospace;color:var(--g500,#64748b);}
+.sh-sbadge{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border-radius:20px;font-size:11px;font-weight:800;white-space:nowrap;}
+.sh-sbadge-sub{font-weight:500;opacity:.72;margin-left:2px;font-size:10px;}
+.sbadge-ok{background:#d1fae5;color:#065f46;}
+.sbadge-warn{background:#fef3c7;color:#92400e;}
+.sbadge-err{background:#fee2e2;color:#991b1b;}
+.sbadge-idle{background:var(--g100,#f1f5f9);color:var(--g500,#64748b);}
+.sbadge-running{background:rgba(13,148,136,.1);color:var(--teal,#0d9488);}
 </style>
 
 <div class="sh-root">
@@ -904,48 +940,29 @@ async function renderSyncHubView() {
         </div>
       </div>
 
-      <!-- Two-column body -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;padding:14px 14px 14px;">
-
-        <!-- PUSH column -->
-        <div style="padding-right:10px;border-right:1px solid var(--g200,#e5e7eb);">
-          <div style="font-size:10px;font-weight:700;color:#0f4c75;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">⬆️ Push to Cloud</div>
-          <div class="sh-card-hint" style="margin-bottom:8px;font-size:11px;line-height:1.5;">
-            Uploads your full local catalogue so all counters get the latest stock &amp; product list.
-          </div>
-          <button class="sh-btn sh-btn-teal" id="forcePushInvBtn"
-                  onclick="forcePushInventoryToCloud()" style="width:100%;justify-content:center;font-size:12px;padding:7px 10px;">
-            <span id="forcePushInvIcon">⬆️</span> Push Now
-          </button>
-          <div class="sh-progress-wrap" id="shPushInvProgressWrap" style="margin-top:6px;">
-            <div class="sh-progress-bar-track">
-              <div class="sh-progress-bar-fill" id="shPushInvProgressFill"></div>
-            </div>
-            <div class="sh-progress-label" id="shPushInvProgressLabel">Preparing…</div>
-          </div>
+      <!-- Info body — Push is done via CSV import popup; auto-pull on Force Sync & startup -->
+      <div style="padding:14px 16px 16px;">
+        <div class="sh-card-hint" style="font-size:11px;line-height:1.7;color:var(--g600,#475569);">
+          📥 <b>Push Inventory</b> — Import a CSV in the Data Hub. A prompt will appear to push the full catalogue to cloud (replacing the cloud copy on all devices).<br>
+          ⬇️ <b>Pull Inventory</b> — Handled automatically on every startup and during <b>Force Sync</b>. All movements, invoices &amp; ledger entries from every device are pulled.
         </div>
-
-        <!-- PULL column -->
-        <div style="padding-left:10px;">
-          <div style="font-size:10px;font-weight:700;color:#0f4c75;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">⬇️ Pull from Cloud</div>
-          <div class="sh-card-hint" style="margin-bottom:8px;font-size:11px;line-height:1.5;">
-            Merges the latest cloud snapshot into this device. Local invoice ledger is preserved.
-          </div>
-          <button class="sh-btn sh-btn-teal" id="forcePullBtn"
-                  onclick="forceInventoryPull()" style="width:100%;justify-content:center;font-size:12px;padding:7px 10px;">
-            <span id="forcePullIcon">⬇️</span> Pull Now
-          </button>
-          <div class="sh-progress-wrap" id="shPullProgressWrap" style="margin-top:6px;">
-            <div class="sh-progress-bar-track">
-              <div class="sh-progress-bar-fill" id="shPullProgressFill"></div>
-            </div>
-            <div class="sh-progress-label" id="shPullProgressLabel">Preparing…</div>
-          </div>
-        </div>
-
       </div>
     </div>
 
+  </div>
+
+  <!-- ── Sync Status Overview ──────────────────────────────────────────── -->
+  <div class="sh-section" style="margin-bottom:16px;">
+    <div class="sh-section-hdr">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="sh-section-title">🔄 Sync Status Overview</span>
+        <span class="sh-section-sub">Live queue depth &amp; last-completed timestamp for each direction</span>
+      </div>
+      <span class="sh-section-sub" id="shStatusTs" style="font-style:italic;opacity:.8;"></span>
+    </div>
+    <div id="shSyncStatusTableWrap" style="padding:0 2px;">
+      <div class="sh-loading">Calculating sync status…</div>
+    </div>
   </div>
 
   <!-- ── Multi-device network matrix (Rule 5C) ─────────────────────────── -->
@@ -1059,6 +1076,7 @@ async function renderSyncHubView() {
     // Kick off async data in parallel
     await Promise.all([
         _renderPendingQueueWidget(),
+        renderSyncStatusTable(),
         populateSyncHubNetworkGrid(),
         renderSyncLogPanel()
     ]);
@@ -1072,6 +1090,7 @@ async function renderSyncHubView() {
             // Don't disturb widgets mid-force-sync
             if (!_forceSyncRunning) {
                 _renderPendingQueueWidget();
+                renderSyncStatusTable().catch(() => {});
                 populateSyncHubNetworkGrid();
                 renderSyncLogPanel().catch(() => {});
                 _stampRefreshTime();
@@ -1092,6 +1111,7 @@ async function refreshSyncHub() {
     if (icon) icon.className = 'sh-btn-spin';
     await Promise.all([
         _renderPendingQueueWidget(),
+        renderSyncStatusTable(),
         populateSyncHubNetworkGrid(),
         renderSyncLogPanel()
     ]);
@@ -1294,6 +1314,146 @@ function _renderMyDeviceCard() {
 }
 
 // =========================================================================
+// SYNC STATUS OVERVIEW TABLE
+// =========================================================================
+// Two-row table: one PUSH row and one PULL row, each with a status badge.
+// "Complete" on PUSH means 0 pending items + synced within FRESH_MS.
+// "Complete" on PULL means last pull completed within FRESH_MS.
+// Timestamps stored in localStorage:
+//   _pharma_last_push_ts — set when push phase of Force Sync completes
+//   _pharma_last_pull_ts — set when pull phase of Force Sync completes
+// =========================================================================
+async function renderSyncStatusTable() {
+    const wrap = document.getElementById('shSyncStatusTableWrap');
+    const tsEl = document.getElementById('shStatusTs');
+    if (!wrap) return;
+
+    // ── Gather push metrics ───────────────────────────────────────────────
+    const pendingMovs = await _countUnsyncedMovements().catch(() => 0);
+    let pendingQueue = 0;
+    try {
+        const q = await StorageModule.getSyncQueueOrdered();
+        pendingQueue = Array.isArray(q) ? q.length : 0;
+    } catch(_) {}
+    const totalPending = pendingMovs + pendingQueue;
+
+    // ── Timestamps ───────────────────────────────────────────────────────
+    const now        = Date.now();
+    const lastPushTs = Number(localStorage.getItem('_pharma_last_push_ts') || '0') || null;
+    const lastPullTs = Number(localStorage.getItem('_pharma_last_pull_ts') || '0') || null;
+    const pushAgoMs  = lastPushTs ? now - lastPushTs : null;
+    const pullAgoMs  = lastPullTs ? now - lastPullTs : null;
+
+    function _fmtAgo(ms) {
+        if (ms === null || ms === undefined) return 'Never';
+        if (ms < 60000)    return Math.floor(ms / 1000) + 's ago';
+        if (ms < 3600000)  return Math.floor(ms / 60000) + 'm ago';
+        if (ms < 86400000) return Math.floor(ms / 3600000) + 'h ago';
+        return Math.floor(ms / 86400000) + 'd ago';
+    }
+
+    // ── Status logic ─────────────────────────────────────────────────────
+    const FRESH_MS     = 5 * 60 * 1000;   // ≤5 min → "Complete"
+    const STALE_MS     = 30 * 60 * 1000;  // 5–30 min → "Stale"
+    const pushFresh    = pushAgoMs !== null && pushAgoMs < FRESH_MS;
+    const pushComplete = totalPending === 0 && pushFresh;
+    const pullComplete = pullAgoMs !== null && pullAgoMs < FRESH_MS;
+
+    function _badge(cls, icon, label, sub) {
+        return `<span class="sh-sbadge ${cls}">`
+            + icon + ' ' + _escHtml(label)
+            + (sub ? `<span class="sh-sbadge-sub">${_escHtml(sub)}</span>` : '')
+            + '</span>';
+    }
+
+    let pushBadge, pullBadge;
+
+    if (_forceSyncRunning) {
+        pushBadge = _badge('sbadge-running', '⟳', 'In Progress', '');
+        pullBadge = _badge('sbadge-running', '⟳', 'In Progress', '');
+    } else {
+        // PUSH badge
+        if (pushComplete) {
+            pushBadge = _badge('sbadge-ok', '🟢', 'Complete', 'All synced');
+        } else if (totalPending > 0) {
+            pushBadge = _badge('sbadge-warn', '🟡', 'Pending',
+                totalPending + ' item' + (totalPending !== 1 ? 's' : '') + ' waiting');
+        } else if (pushAgoMs === null) {
+            pushBadge = _badge('sbadge-idle', '⚪', 'Never run', 'Use Force Sync');
+        } else {
+            // Nothing pending but last push is stale (> FRESH_MS) — queue is clear but timestamp old
+            pushBadge = _badge('sbadge-ok', '🟢', 'Queue clear', _fmtAgo(pushAgoMs));
+        }
+
+        // PULL badge
+        if (pullComplete) {
+            pullBadge = _badge('sbadge-ok', '🟢', 'Complete', 'Up to date');
+        } else if (pullAgoMs === null) {
+            pullBadge = _badge('sbadge-idle', '⚪', 'Never run', 'Use Force Sync');
+        } else if (pullAgoMs < STALE_MS) {
+            pullBadge = _badge('sbadge-warn', '🟡', 'Stale', _fmtAgo(pullAgoMs));
+        } else {
+            pullBadge = _badge('sbadge-err', '🔴', 'Overdue', _fmtAgo(pullAgoMs));
+        }
+    }
+
+    wrap.innerHTML = `
+<table class="sh-sstbl">
+  <thead>
+    <tr>
+      <th class="sh-sstbl-th" style="width:110px;">Direction</th>
+      <th class="sh-sstbl-th">Data Included</th>
+      <th class="sh-sstbl-th" style="width:88px;text-align:center;">Pending</th>
+      <th class="sh-sstbl-th" style="width:230px;">Status</th>
+      <th class="sh-sstbl-th" style="width:110px;text-align:right;">Last Completed</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="sh-sstbl-row">
+      <td class="sh-sstbl-td">
+        <div class="sh-sstbl-dir">⬆️ Push</div>
+      </td>
+      <td class="sh-sstbl-td">
+        <div class="sh-sstbl-inc">
+          Inventory movements &amp; ledger<br>
+          Invoice queue (INVOICE / INVOICE_UPDATE)<br>
+          Inventory catalogue <em>(master device only)</em>
+        </div>
+      </td>
+      <td class="sh-sstbl-td" style="text-align:center;">
+        <span class="sh-sstbl-num ${totalPending > 0 ? 'num-warn' : 'num-ok'}">${totalPending}</span>
+      </td>
+      <td class="sh-sstbl-td">${pushBadge}</td>
+      <td class="sh-sstbl-td" style="text-align:right;">
+        <span class="sh-sstbl-ago">${_escHtml(_fmtAgo(pushAgoMs))}</span>
+      </td>
+    </tr>
+    <tr class="sh-sstbl-row">
+      <td class="sh-sstbl-td">
+        <div class="sh-sstbl-dir">⬇️ Pull</div>
+      </td>
+      <td class="sh-sstbl-td">
+        <div class="sh-sstbl-inc">
+          Inventory snapshot from cloud<br>
+          Remote invoices from all active devices<br>
+          Remote movements (last 7 days, all devices)
+        </div>
+      </td>
+      <td class="sh-sstbl-td" style="text-align:center;">
+        <span class="sh-sstbl-num num-ok">—</span>
+      </td>
+      <td class="sh-sstbl-td">${pullBadge}</td>
+      <td class="sh-sstbl-td" style="text-align:right;">
+        <span class="sh-sstbl-ago">${_escHtml(_fmtAgo(pullAgoMs))}</span>
+      </td>
+    </tr>
+  </tbody>
+</table>`;
+
+    if (tsEl) tsEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+// =========================================================================
 // PENDING OUTBOUND QUEUE WIDGET (Rule 5B)
 // Source A: PharmaInventoryDB  inventory_movements / by_synced index
 // Source B: StorageModule.syncQueueMetrics()  (general Supabase queue)
@@ -1383,7 +1543,7 @@ async function forceSyncNow() {
     try {
 
         // ── STEP 1: Probe cloud reachability ──────────────────────────────
-        _setProgress(10, 'Step 1/4 — Checking cloud connectivity…');
+        _setProgress(10, 'Step 1/6 — Checking cloud connectivity…');
         if (typeof showToast === 'function') showToast('☁️ Sync started — checking connection…');
 
         if (typeof StorageModule !== 'undefined' &&
@@ -1400,7 +1560,7 @@ async function forceSyncNow() {
         }
 
         // ── STEP 2: Flush unsynced inventory movements ────────────────────
-        _setProgress(20, 'Step 2/4 — Pushing inventory movements…');
+        _setProgress(20, 'Step 2/6 — Pushing inventory movements…');
         if (typeof showToast === 'function') showToast('⬆️ Pushing unsynced inventory movements…');
 
         const preSyncCount = await _countUnsyncedMovements();
@@ -1411,7 +1571,7 @@ async function forceSyncNow() {
 
         const postSyncCount = await _countUnsyncedMovements();
         totalFlushed = Math.max(0, preSyncCount - postSyncCount);
-        _setProgress(40, 'Step 2/4 — ' + totalFlushed + ' movement' + (totalFlushed !== 1 ? 's' : '') + ' pushed.');
+        _setProgress(40, 'Step 2/6 — ' + totalFlushed + ' movement' + (totalFlushed !== 1 ? 's' : '') + ' pushed.');
         if (typeof showToast === 'function') {
             showToast('✅ ' + totalFlushed + ' inventory movement' + (totalFlushed !== 1 ? 's' : '') + ' pushed to Supabase.');
         }
@@ -1432,7 +1592,7 @@ async function forceSyncNow() {
                 console.warn('[ForceSyncNow] Inventory push failed (non-fatal):', _invPushErr);
             }
         }
-        _setProgress(50, 'Step 3/4 — Draining outbound queue…');
+        _setProgress(50, 'Step 3/6 — Draining outbound queue…');
         if (typeof showToast === 'function') showToast('⬆️ Draining outbound sync queue…');
 
         const preMetrics = (typeof StorageModule !== 'undefined' &&
@@ -1453,31 +1613,34 @@ async function forceSyncNow() {
         const postQueueTotal = Number(postMetrics.total) || 0;
         queueFlushed = Math.max(0, preQueueTotal - postQueueTotal);
 
-        _setProgress(65, 'Step 3/4 — ' + queueFlushed + ' queued item' + (queueFlushed !== 1 ? 's' : '') + ' sent.');
+        _setProgress(65, 'Step 3/6 — ' + queueFlushed + ' queued item' + (queueFlushed !== 1 ? 's' : '') + ' sent.');
         if (typeof showToast === 'function') {
             showToast('✅ ' + queueFlushed + ' queued item' + (queueFlushed !== 1 ? 's' : '') + ' sent to Supabase.');
         }
 
         // ── STEP 4: Drain structured offline_sync_queue (INVOICE records) ─
-        _setProgress(70, 'Step 4/4 — Syncing offline invoice queue…');
+        _setProgress(70, 'Step 4/6 — Syncing offline invoice queue…');
         if (typeof showToast === 'function') showToast('⬆️ Syncing offline invoice queue…');
 
         let preOfflineItems = [];
         try { preOfflineItems = await StorageModule.getSyncQueueOrdered(); } catch (_e) {}
         const preOfflineCount = preOfflineItems.length;
 
-        // Release the guard so syncOfflineQueue can run; we hold UI lock via btn.disabled
-        _forceSyncRunning = false;
+        // S1 FIX: call with _skipGuard=true — forceSyncNow keeps _forceSyncRunning=true
+        // throughout, so the 60s background timer cannot slip in between any steps.
         await syncOfflineQueue(
-            (typeof _DEVICE_UUID !== 'undefined') ? _DEVICE_UUID : 'UNKNOWN'
+            (typeof _DEVICE_UUID !== 'undefined') ? _DEVICE_UUID : 'UNKNOWN',
+            true
         );
-        _forceSyncRunning = true; // reclaim guard for the rest of forceSyncNow
 
         let postOfflineItems = [];
         try { postOfflineItems = await StorageModule.getSyncQueueOrdered(); } catch (_e) {}
         offlineFlushed = Math.max(0, preOfflineCount - postOfflineItems.length);
 
-        _setProgress(85, 'Step 4/4 — ' + offlineFlushed + ' offline item' + (offlineFlushed !== 1 ? 's' : '') + ' synced.');
+        _setProgress(85, 'Step 4/6 — ' + offlineFlushed + ' offline item' + (offlineFlushed !== 1 ? 's' : '') + ' synced.');
+
+        // Record push-complete timestamp for Sync Status Overview
+        try { localStorage.setItem('_pharma_last_push_ts', String(Date.now())); } catch(_e) {}
         if (typeof showToast === 'function') {
             showToast('✅ ' + offlineFlushed + ' offline invoice item' + (offlineFlushed !== 1 ? 's' : '') + ' synced.');
         }
@@ -1485,21 +1648,81 @@ async function forceSyncNow() {
         // Update the sync badge if it exists in the DOM
         if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('connected');
 
-        // ── STEP 5: Pull latest inventory from master (FIX 3) ─────────────
-        // forceSyncNow() previously skipped _checkAndPullInventoryIfUpdated() —
-        // it only ran in the 60-second background timer. This meant a Force Sync
-        // immediately after a CSV import on master would NOT update client inventory.
-        _setProgress(88, 'Step 5/5 — Checking for inventory updates…');
-        if (typeof showToast === 'function') showToast('⬇️ Checking for inventory updates from master…');
+        // ── STEP 5: Full bidirectional pull — inventory + invoices + movements ─
+        // Runs for ALL device roles (master AND client).
+        // Step 5a: Pull inventory snapshot (clients only — master is the source of truth)
+        _setProgress(83, 'Step 5/6 — Pulling inventory & invoices from cloud…');
+        if (typeof showToast === 'function') showToast('⬇️ Pulling inventory snapshot from cloud…');
         try {
-            if (typeof _checkAndPullInventoryIfUpdated === 'function') {
-                await _checkAndPullInventoryIfUpdated();
-                if (typeof showToast === 'function') showToast('✅ Inventory check complete.');
+            const _fsRolePull = (typeof StorageModule !== 'undefined')
+                ? StorageModule.get('pharma_device_role') : null;
+            if (_fsRolePull !== 'master') {
+                if (typeof _pullInventoryFromSupabase === 'function') {
+                    await _pullInventoryFromSupabase(true);
+                    if (typeof showToast === 'function') showToast('✅ Inventory snapshot pulled.');
+                }
+            } else {
+                // Master: push latest catalogue so clients get fresh data on their next pull
+                if (typeof _pushInventoryBootstrapToCloud === 'function') {
+                    await _pushInventoryBootstrapToCloud().catch(() => {});
+                }
+                if (typeof showToast === 'function') showToast('✅ Inventory catalogue pushed (master).');
             }
-        } catch (_invErr) {
-            // Non-fatal — inventory pull failure should not abort the sync summary
-            console.warn('[ForceSyncNow] Inventory pull failed:', _invErr);
+        } catch (_invPullErr) {
+            console.warn('[ForceSyncNow] Inventory pull failed (non-fatal):', _invPullErr);
         }
+
+        // Step 5b: Pull remote invoices from ALL other devices into local IDB
+        _setProgress(88, 'Step 5/6 — Pulling remote invoices from all devices…');
+        if (typeof showToast === 'function') showToast('⬇️ Pulling invoices from all devices…');
+        let invoicesPulledCount = 0;
+        try {
+            if (typeof _dbSelect === 'function') {
+                const { data: devRows } = await _dbSelect('devices', 'is_active=eq.true', 'uuid');
+                const otherUUIDs = Array.isArray(devRows)
+                    ? devRows.map(r => r.uuid).filter(u => u && u !== (typeof _DEVICE_UUID !== 'undefined' ? _DEVICE_UUID : ''))
+                    : [];
+                for (const uuid of otherUUIDs) {
+                    try {
+                        const { data: remoteInvs } = await _dbSelect(
+                            'invoices',
+                            // S2 FIX: raised from 500 to 1000 — busy counters (50+ bills/day)
+                            // hit 500 in under a week, silently missing older cross-device invoices.
+                            'device_uuid=eq.' + encodeURIComponent(uuid) + '&order=billed_at.desc&limit=1000',
+                            '*,invoice_items(*)'
+                        );
+                        if (Array.isArray(remoteInvs)) {
+                            for (const inv of remoteInvs) {
+                                if (typeof StorageModule !== 'undefined' &&
+                                    typeof StorageModule.putRemoteInvoice === 'function') {
+                                    await StorageModule.putRemoteInvoice(inv).catch(() => {});
+                                    invoicesPulledCount++;
+                                }
+                            }
+                        }
+                    } catch (_devErr) { /* skip single-device failure */ }
+                }
+                if (typeof showToast === 'function')
+                    showToast('✅ ' + invoicesPulledCount + ' remote invoice' + (invoicesPulledCount !== 1 ? 's' : '') + ' pulled.');
+            }
+        } catch (_invFetchErr) {
+            console.warn('[ForceSyncNow] Remote invoice pull failed (non-fatal):', _invFetchErr);
+        }
+
+        // Step 5c: Pull remote inventory movements from all other devices
+        _setProgress(93, 'Step 6/6 — Pulling remote movements…');
+        if (typeof showToast === 'function') showToast('⬇️ Pulling inventory movements from all devices…');
+        try {
+            if (typeof _pullRemoteMovements === 'function') {
+                await _pullRemoteMovements();
+                if (typeof showToast === 'function') showToast('✅ Remote movements pulled.');
+            }
+        } catch (_movErr) {
+            console.warn('[ForceSyncNow] Remote movements pull failed (non-fatal):', _movErr);
+        }
+
+        // Record pull-complete timestamp for Sync Status Overview
+        try { localStorage.setItem('_pharma_last_pull_ts', String(Date.now())); } catch(_e) {}
 
     } catch (err) {
         errorOccurred = true;
@@ -1513,6 +1736,7 @@ async function forceSyncNow() {
     // ── STEP 6: Refresh widget counts ─────────────────────────────────────
     _setProgress(95, 'Refreshing metrics…');
     await _renderPendingQueueWidget();
+    await renderSyncStatusTable().catch(() => {});
     await populateSyncHubNetworkGrid();
     await renderSyncLogPanel().catch(() => {});
     _stampRefreshTime();
@@ -1526,7 +1750,7 @@ async function forceSyncNow() {
     if (!errorOccurred) {
         const _logEntry = {
             invoices_pushed:  offlineFlushed,
-            invoices_pulled:  0,
+            invoices_pulled:  invoicesPulledCount || 0,
             movements_pushed: totalFlushed,
             movements_pulled: 0,
             note:             'Force Sync'
@@ -1603,7 +1827,8 @@ async function forceInventoryPull() {
                 try {
                     const { data: invoices } = await _dbSelect(
                         'invoices',
-                        'device_uuid=eq.' + encodeURIComponent(uuid) + '&order=billed_at.desc&limit=200',
+                        // S2 FIX: raised from 200 to 1000 per device
+                        'device_uuid=eq.' + encodeURIComponent(uuid) + '&order=billed_at.desc&limit=1000',
                         '*,invoice_items(*)'
                     );
                     if (!Array.isArray(invoices)) continue;
@@ -1692,6 +1917,11 @@ async function forceInventoryPull() {
         }
     }
 
+    // Record pull timestamp even when triggered via Force Pull button
+    if (!errorOccurred) {
+        try { localStorage.setItem('_pharma_last_pull_ts', String(Date.now())); } catch(_e) {}
+    }
+
     _setProg(100, errorOccurred ? '❌ Pull incomplete — see toasts above'
                                 : '✅ Pull complete.');
 
@@ -1699,6 +1929,7 @@ async function forceInventoryPull() {
         if (icon)    { icon.className = ''; icon.textContent = '⬇️'; }
         if (btn)     { btn.disabled = false; }
         if (progWrap){ progWrap.classList.remove('visible'); }
+        renderSyncStatusTable().catch(() => {});
         _forceSyncRunning = false;
     }, 2500);
 }
