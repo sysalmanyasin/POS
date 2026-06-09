@@ -1619,7 +1619,7 @@
     _pendingAdminAction = action;
     var subtitleEl = document.getElementById('adminGateSubtitle');
     if (subtitleEl) {
-      subtitleEl.textContent = subtitle ||
+      subtitleEl.textContent = targetId ||
         (action === 'PURGE_DATABASE'
           ? 'Authentication required to purge all pharmacy data.'
           : action === 'CSV_IMPORT'
