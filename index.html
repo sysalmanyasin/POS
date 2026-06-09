@@ -1578,13 +1578,15 @@
   // and CSV_IMPORT which use the simpler adminGateModal.
   var _authJsRequestAdminAccess = window.requestAdminAccess || null;
 
-  window.requestAdminAccess = function(action, subtitle) {
+  window.requestAdminAccess = function(action, targetId, extraData) {
     // Delegate all actions except PURGE_DATABASE and CSV_IMPORT to the
     // proper auth.js 8-digit PIN flow so TOGGLE_REQUIRE_STAFF_PIN,
-    // TOGGLE_OVERSTOCK, SAVE_ALL_SETTINGS, etc. work correctly.
+    // TOGGLE_OVERSTOCK, SAVE_ALL_SETTINGS, ADD_STAFF_MEMBER, etc. work correctly.
+    // FIX: forward all three arguments (action, targetId, extraData) so that
+    // extraData (e.g. {name, pin} for ADD_STAFF_MEMBER) is not silently dropped.
     if (action !== 'PURGE_DATABASE' && action !== 'CSV_IMPORT') {
       if (typeof _authJsRequestAdminAccess === 'function') {
-        return _authJsRequestAdminAccess(action, subtitle);
+        return _authJsRequestAdminAccess(action, targetId, extraData);
       }
     }
     var now = Date.now();
