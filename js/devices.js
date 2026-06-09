@@ -372,10 +372,17 @@ const DevicesModule = (() => {
     }
 
     function _getActiveStaffName() {
+        // FIX: Read from the authoritative `activeStaff` global set by settings.js,
+        // not from the DOM label (which may not exist yet at page-load time).
+        // Falls back to localStorage key set on login so reload sessions persist it.
         try {
-            const label = document.getElementById('activeStaffLabel');
-            const text  = label ? label.textContent : '';
-            return (text && text !== 'Login') ? text : '';
+            if (typeof activeStaff !== 'undefined' && activeStaff && activeStaff.name) {
+                return activeStaff.name;
+            }
+        } catch(e) {}
+        try {
+            const stored = StorageModule.get('pharma_active_staff_name');
+            return stored || '';
         } catch(e) { return ''; }
     }
 

@@ -120,7 +120,13 @@ async function _dbInsert(table, rows) {
  */
 async function _dbUpsert(table, rows, onConflict = 'uuid') {
     try {
-        const r = await fetch(_SUPA_URL + '/rest/v1/' + table, {
+        // FIX: PostgREST requires ?on_conflict=<column> in the URL to know which
+        // column to use for the "merge-duplicates" upsert. Without it, PostgREST
+        // on some Supabase versions silently falls back to INSERT-only, creating
+        // duplicate rows instead of updating existing ones.
+        const url = _SUPA_URL + '/rest/v1/' + table +
+                    (onConflict ? '?on_conflict=' + encodeURIComponent(onConflict) : '');
+        const r = await fetch(url, {
             method:  'POST',
             headers: {
                 ..._SUPA_HEADERS,

@@ -588,16 +588,24 @@ async function _handleOversell(productCode, quantity, deviceUuid, invoiceNumber,
     try {
         // F1.23: sync_conflicts may not exist in schema — wrapped in try/catch,
         // errors are logged but do not block the oversell resolution flow.
+        // FIX: sync_conflicts schema columns are:
+        //   conflict_id (auto), device_uuid, table_name, record_key,
+        //   local_version, server_version, local_payload, resolution, detected_at
         await _dbInsert('sync_conflicts', {
-            product_code:      productCode,
-            invoice_number:    invoiceNumber,
-            device_uuid:       deviceUuid,
-            requested_qty:     quantity,
-            available_qty:     availableQty,
-            shortfall:         shortfall,
-            resolution_state:  'MANUAL_REVIEW',
-            conflict_reason:   originalMessage || 'Insufficient stock',
-            created_at:        new Date().toISOString()
+            device_uuid:    deviceUuid,
+            table_name:     'inventory',
+            record_key:     productCode,
+            local_version:  expectedVersion || 0,
+            server_version: 0,
+            local_payload:  JSON.stringify({
+                invoice_number: invoiceNumber,
+                requested_qty:  quantity,
+                available_qty:  availableQty,
+                shortfall:      shortfall,
+                conflict_reason: originalMessage || 'Insufficient stock'
+            }),
+            resolution:     'MANUAL_REVIEW',
+            detected_at:    new Date().toISOString()
         });
     } catch (e) {
         console.error('[SyncEngine] Failed to insert sync_conflicts record:', e);

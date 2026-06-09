@@ -24,7 +24,7 @@
 // =========================================================================
 const StorageModule = (() => {
     const IDB_NAME    = 'PharmaDataDB';
-    const IDB_VERSION = 5;
+    const IDB_VERSION = 6;  // v6: adds 'audit_log' store for AuditLog module
     let _idb  = null;
     let _ready = false;
     const _pending = [];
@@ -68,6 +68,14 @@ const StorageModule = (() => {
         //     Shape: { id (auto), queueId, type, payload, errorContext, failedAt, retryCount }
         if (!d.objectStoreNames.contains('failed_sync_logs'))
             d.createObjectStore('failed_sync_logs', { keyPath: 'id', autoIncrement: true });
+        // v6: audit_log — immutable append-only event log
+        //     Shape: { id (string: ts_random), action, detail, staff, device, ts, extra }
+        //     Indexed by 'ts' for chronological reads and 'action' for category filter.
+        if (!d.objectStoreNames.contains('audit_log')) {
+            const auditSt = d.createObjectStore('audit_log', { keyPath: 'id' });
+            auditSt.createIndex('by_ts',     'ts',     { unique: false });
+            auditSt.createIndex('by_action', 'action', { unique: false });
+        }
     };
     _req.onsuccess = function(e) {
         _idb = e.target.result;
@@ -527,13 +535,30 @@ const StorageModule = (() => {
     }
 
     function clearAllPrimaryStores() {
+        // Clear PharmaDataDB primary stores
         _whenReady(idb => {
             if (!idb) return;
-            ['invoices','heldBills','cart'].forEach(store => {
+            ['invoices', 'heldBills', 'cart'].forEach(store => {
                 try { idb.transaction([store], 'readwrite').objectStore(store).clear(); } catch(e) {}
             });
         });
-        ['pharma_saved_ledger','pharma_held_bills','pharma_active_cart'].forEach(k => {
+        // FIX: Also clear the separate PharmaInventoryDB opened by inventory.js.
+        // Without this, Global Purge / Data Wipe leaves all product stock intact.
+        try {
+            const invReq = indexedDB.open('PharmaInventoryDB');
+            invReq.onsuccess = function(ev) {
+                const invDb = ev.target.result;
+                ['inventory', 'inventory_movements'].forEach(store => {
+                    try {
+                        if (invDb.objectStoreNames.contains(store)) {
+                            invDb.transaction([store], 'readwrite').objectStore(store).clear();
+                        }
+                    } catch(e) {}
+                });
+            };
+        } catch(e) {}
+        ['pharma_saved_ledger', 'pharma_held_bills', 'pharma_active_cart',
+         '_pharma_inv_fingerprint', 'pharma_applied_mov_ids'].forEach(k => {
             try { localStorage.removeItem(k); } catch(e) {}
         });
     }
@@ -557,6 +582,73 @@ const StorageModule = (() => {
                     }
                 } catch(e) {}
             });
+        });
+    }
+
+    // ── Audit Log (v6 store) ──────────────────────────────────────────────────
+    /**
+     * Append one entry to the 'audit_log' IDB store.
+     * Non-blocking — errors are silently swallowed so audit writes
+     * never interrupt normal billing flow.
+     * @param {Object} entry — { id, action, detail, staff, device, ts, extra }
+     */
+    function writeAuditLog(entry) {
+        if (!entry || !entry.id) return;
+        _whenReady(idb => {
+            if (!idb || !idb.objectStoreNames.contains('audit_log')) return;
+            try {
+                idb.transaction(['audit_log'], 'readwrite')
+                   .objectStore('audit_log')
+                   .put(entry);
+            } catch(e) {}
+        });
+    }
+
+    /**
+     * Read up to `limit` audit entries, newest-first.
+     * Returns a Promise that resolves to an array (may be empty on IDB error).
+     * @param {number} [limit=5000]
+     * @returns {Promise<Array>}
+     */
+    function getAuditLogs(limit = 5000) {
+        return new Promise(resolve => {
+            _whenReady(idb => {
+                if (!idb || !idb.objectStoreNames.contains('audit_log')) {
+                    resolve([]); return;
+                }
+                try {
+                    const tx  = idb.transaction(['audit_log'], 'readonly');
+                    const req = tx.objectStore('audit_log')
+                                  .index('by_ts')
+                                  .getAll(null, limit);
+                    req.onsuccess = () => {
+                        const rows = req.result || [];
+                        resolve(rows.sort((a, b) => b.ts.localeCompare(a.ts)));
+                    };
+                    req.onerror = () => resolve([]);
+                } catch(e) { resolve([]); }
+            });
+        });
+    }
+
+    /**
+     * Purge audit entries older than `days` days from the local IDB store.
+     * Called during Data Wipe / Global Purge to avoid stale audit data.
+     * @param {number} [days=90]
+     */
+    function pruneAuditLog(days = 90) {
+        _whenReady(idb => {
+            if (!idb || !idb.objectStoreNames.contains('audit_log')) return;
+            const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+            try {
+                const tx    = idb.transaction(['audit_log'], 'readwrite');
+                const store = tx.objectStore('audit_log');
+                const range = IDBKeyRange.upperBound(cutoff);
+                store.index('by_ts').openCursor(range).onsuccess = function(ev) {
+                    const cursor = ev.target.result;
+                    if (cursor) { cursor.delete(); cursor.continue(); }
+                };
+            } catch(e) {}
         });
     }
 
@@ -904,7 +996,11 @@ const StorageModule = (() => {
         // ── Dead-letter queue ────────────────────────────────────────────────
         writeToFailedSyncLogs,
         // ── Phase 7: remote invoice persistence ─────────────────────────────
-        putRemoteInvoice
+        putRemoteInvoice,
+        // ── Audit Log (v6) ──────────────────────────────────────────────────
+        writeAuditLog,
+        getAuditLogs,
+        pruneAuditLog
     };
 })();
 

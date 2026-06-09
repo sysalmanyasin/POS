@@ -1261,6 +1261,10 @@ async function finalizeAndPrintBill() {
         setTimeout(() => window.print(), 120);
     }
     showToast('✅ Bill ' + _escHtml(invoiceID) + ' saved!');
+    // Audit trail
+    if (typeof _auditWrite === 'function') {
+        _auditWrite('SALE', 'Invoice ' + invoiceID + ' · Total PKR ' + (typeof netTotal !== 'undefined' ? netTotal : ''));
+    }
     } catch (checkoutErr) {
         console.error('[Checkout] Failed:', checkoutErr);
         showToast('❌ Checkout failed: ' + (checkoutErr && checkoutErr.message ? checkoutErr.message : 'Unknown error'), true);
@@ -1469,14 +1473,9 @@ function processFullRefund(invoiceId) {
                 subtotal:         Number(original.netTotal) || 0,
                 net_total:        Number(original.netTotal) || 0,
                 round_off_amt:    original.roundOffAmt   || 0,
-                payment_method:   null,
+                payment_method:   original.paymentMethod || 'cash',  // FIX: NOT NULL in schema
                 cash_received:    null,
                 change_amount:    null,
-                is_refund:        true,
-                is_partial_refund: false,
-                is_manual:        original.isManual || false,
-                original_invoice_id: invoiceId,
-                refund_reason:    'full_refund',
                 line_items:       refLineItems
             };
             StorageModule.pushToSyncQueue('INVOICE', refPayload, maxVer).catch(e => {
@@ -1498,6 +1497,9 @@ function processFullRefund(invoiceId) {
 
     updateHdrStats(); renderHistoryCards(_refLedger);
     showToast('↩ Refund ' + _escHtml(refId) + ' created. Stock restored.');
+    if (typeof _auditWrite === 'function') {
+        _auditWrite('REFUND', 'Full refund ' + refId + ' for invoice ' + invoiceId);
+    }
 }
 
 function updateStatsCounters() {
@@ -2055,10 +2057,9 @@ function submitPartialRefund() {
                 subtotal:            Number(refAmt.toFixed(2)),
                 net_total:           Number(refAmt.toFixed(2)),
                 round_off_amt:       0,
-                payment_method:      null,
+                payment_method:      inv.paymentMethod || 'cash',  // FIX: NOT NULL in schema
                 cash_received:       null,
                 change_amount:       null,
-                is_refund:           isFullViaModal,
                 is_partial_refund:   !isFullViaModal,
                 is_manual:           inv.isManual || false,
                 original_invoice_id: _prfInvoiceId,

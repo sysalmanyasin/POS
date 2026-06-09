@@ -405,7 +405,11 @@ function staffPinSubmit() {
         else { match = _staffPinBuffer === _staffPinTarget.pin; }
         if (match) {
             _clearPinFailures('staffLogin');
-            activeStaff = _staffPinTarget; _updateStaffBadge(); closeStaffLogin(); showToast('✅ Welcome, ' + activeStaff.name + '!');
+            activeStaff = _staffPinTarget;
+            // FIX: persist staff name for AuditLog.write() fallback and heartbeat
+            StorageModule.set('pharma_active_staff_name', activeStaff.name || '');
+            _updateStaffBadge(); closeStaffLogin(); showToast('✅ Welcome, ' + activeStaff.name + '!');
+            if (typeof _auditWrite === 'function') _auditWrite('LOGIN', 'Staff logged in: ' + activeStaff.name, activeStaff.name);
         } else {
             const locked = _recordPinFailure('staffLogin');
             const pinSec = document.getElementById('staffPinSection');
@@ -552,7 +556,10 @@ function _submitBillPin() {
         }
         if (matched) {
             _clearPinFailures('billSave');
-            activeStaff = matched; _updateStaffBadge(); closeBillSavePinModal(); finalizeAndPrintBill();
+            activeStaff = matched;
+            // FIX: persist staff name for AuditLog.write() fallback and heartbeat
+            StorageModule.set('pharma_active_staff_name', activeStaff.name || '');
+            _updateStaffBadge(); closeBillSavePinModal(); finalizeAndPrintBill();
         } else {
             const locked = _recordPinFailure('billSave');
             const sec = document.getElementById('billPinSection');
