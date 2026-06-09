@@ -34,7 +34,10 @@ dbRequest.onupgradeneeded = function(e) {
     if (!movSt.indexNames.contains('by_synced')) movSt.createIndex('by_synced', 'synced',       { unique: false });
 };
 dbRequest.onsuccess = function(e) { db = e.target.result; loadInventoryFromDB(); };
-dbRequest.onerror   = function()  { showToast('⚠️ Database initialization failed.', true); };
+dbRequest.onerror   = function(e)  {
+    console.error('[IDB] Open failed:', e.target && e.target.error);
+    showToast('⚠️ Database initialization failed. Billing and inventory will not work. Go to browser Site Settings → Clear storage, then reload.', true);
+};
 
 let _invSaveLock    = false;
 let _invSavePending = null;
@@ -2066,3 +2069,6 @@ window.pullInventoryFromCloud   = pullInventoryFromCloud;
 // Phase 4 — relational table bootstrap (master push / client pull)
 window._pushInventoryBootstrapToCloud = _pushInventoryBootstrapToCloud;
 window._pullInventoryFromSupabase     = _pullInventoryFromSupabase;
+// FIX: expose _recordInvMovement globally so billing.js can call it safely
+// even if inventory.js had a delayed or partial initialisation.
+window._recordInvMovement = _recordInvMovement;

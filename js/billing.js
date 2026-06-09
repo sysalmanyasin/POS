@@ -791,7 +791,7 @@ function _doCancelEditBill() {
                 const prod = masterInventoryDB.find(p => p.code === item.code);
                 if (prod) {
                     prod.stock = Number(prod.stock) + parseInt(item.qty, 10);
-                    _recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', currentlyEditingInvoiceId, null, Number(prod.stock));
+                    if (typeof window._recordInvMovement === 'function') window._recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', currentlyEditingInvoiceId, null, Number(prod.stock));
                     _atomicStockWriteBack(item.code, Number(prod.stock));
                 }
             });
@@ -1198,7 +1198,7 @@ async function finalizeAndPrintBill() {
             const newStock = Math.max(0, Number(prod.stock) - soldQty);
             const deducted = Number(prod.stock) - newStock;
             prod.stock = newStock;
-            _recordInvMovement(item.code, -deducted, 'SALE', invoiceID, null, newStock);
+            if (typeof window._recordInvMovement === 'function') window._recordInvMovement(item.code, -deducted, 'SALE', invoiceID, null, newStock);
             _atomicStockWriteBack(item.code, newStock);
         }
     });
@@ -1290,7 +1290,7 @@ function _doRecallLastSaved(inv) {
         const prod = masterInventoryDB.find(p => p.code === item.code);
         if (prod) {
             prod.stock = Number(prod.stock) + parseInt(item.qty, 10);
-            _recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', inv.id, null, Number(prod.stock));
+            if (typeof window._recordInvMovement === 'function') window._recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', inv.id, null, Number(prod.stock));
             _atomicStockWriteBack(item.code, prod.stock);
         }
     });
@@ -1360,7 +1360,7 @@ async function _doUpdateBill(invoiceId) {
             const prod = masterInventoryDB.find(p => p.code === item.code);
             if (prod) {
                 prod.stock = Number(prod.stock) + parseInt(item.qty, 10);
-                _recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', inv.id, null, Number(prod.stock));
+                if (typeof window._recordInvMovement === 'function') window._recordInvMovement(item.code, parseInt(item.qty, 10), 'EDIT_RESTORE', inv.id, null, Number(prod.stock));
                 _atomicStockWriteBack(item.code, prod.stock);
             }
         });
@@ -1400,7 +1400,7 @@ function processFullRefund(invoiceId) {
         const prod = masterInventoryDB.find(p => p.code === item.code);
         const returnQty = parseInt(item.qty, 10) || 0;
         if (prod) {
-            _recordInvMovement(item.code, returnQty, 'REFUND', invoiceId, null, Number(prod.stock) + returnQty);
+            if (typeof window._recordInvMovement === 'function') window._recordInvMovement(item.code, returnQty, 'REFUND', invoiceId, null, Number(prod.stock) + returnQty);
             prod.stock = Number(prod.stock) + returnQty;
             _atomicStockWriteBack(item.code, prod.stock);
         }
@@ -1967,7 +1967,7 @@ function submitPartialRefund() {
         const prod      = masterInventoryDB.find(p => p.code === line.code);
         const returnQty = parseInt(line.returnQty, 10) || 0;
         if (prod) {
-            _recordInvMovement(line.code, returnQty, 'PARTIAL_REFUND', refId, null, Number(prod.stock) + returnQty);
+            if (typeof window._recordInvMovement === 'function') window._recordInvMovement(line.code, returnQty, 'PARTIAL_REFUND', refId, null, Number(prod.stock) + returnQty);
             prod.stock = Number(prod.stock) + returnQty;
             _atomicStockWriteBack(line.code, prod.stock);
         }
