@@ -397,6 +397,13 @@
               <div id="invSearchResults" class="inv-sr-panel" style="display:none;"></div>
             </div>
             <button class="inv-apply-btn" onclick="applyInvProductSearch()" title="Search in table">🔍 Search</button>
+            <!-- Group by dropdown -->
+            <select id="invGroupBy" class="inv-refresh-btn" onchange="_invSetGroupBy(this.value)" title="Group inventory by attribute" style="cursor:pointer;">
+              <option value="none">📋 No Grouping</option>
+              <option value="company">🏭 By Company</option>
+              <option value="supplier">🚚 By Supplier</option>
+              <option value="generic">💊 By Generic</option>
+            </select>
             <button class="inv-refresh-btn" onclick="generateInventoryReport()" title="Generate / Refresh full report">📊 Report</button>
             <button class="inv-refresh-btn" onclick="exportInventoryCSV()" title="Export inventory as CSV" style="margin-left:0;">📥 CSV</button>
             <button class="inv-add-btn" onclick="openAddProductModal()" title="Add New Product">+ Add</button>
@@ -417,13 +424,25 @@
 
             <!-- RULE 2B: Control pane — ledger is NOT loaded on drawer open.
                  It is compiled only when the user explicitly clicks this button. -->
-            <div class="item-hist-drawer-ctrl" style="flex-shrink:0;display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--g200);background:var(--g50);">
+            <div class="item-hist-drawer-ctrl" style="flex-shrink:0;display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--g200);background:var(--g50);flex-wrap:wrap;">
               <button id="generateLedgerBtn"
                 style="padding:6px 18px;background:var(--teal);color:#fff;border:none;border-radius:5px;font-size:12px;font-weight:800;cursor:pointer;display:flex;align-items:center;gap:6px;letter-spacing:.3px;"
                 title="Compile the full movement audit trail for this product">
                 📊 Generate Ledger
               </button>
               <span style="font-size:11px;color:var(--g500);">Click to compile the audit trail for this product</span>
+              <div style="margin-left:auto;display:flex;gap:6px;">
+                <button id="ledgerExportCSVBtn" onclick="exportLedgerCSV()"
+                  style="display:none;padding:6px 14px;background:#16a34a;color:#fff;border:none;border-radius:5px;font-size:11px;font-weight:800;cursor:pointer;gap:5px;align-items:center;"
+                  title="Export ledger as CSV">
+                  📥 CSV
+                </button>
+                <button id="ledgerExportPDFBtn" onclick="exportLedgerPDF()"
+                  style="display:none;padding:6px 14px;background:#dc2626;color:#fff;border:none;border-radius:5px;font-size:11px;font-weight:800;cursor:pointer;gap:5px;align-items:center;"
+                  title="Export ledger as printable PDF">
+                  🖨️ PDF
+                </button>
+              </div>
             </div>
 
             <!-- flex:1 + min-height:0 lets this div fill the remaining height and scroll -->
