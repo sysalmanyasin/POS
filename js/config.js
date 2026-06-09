@@ -224,3 +224,15 @@ function _getCurrency() {
         ? StorageModule.get('pharma_currency', 'Rs.')
         : localStorage.getItem('pharma_currency') || 'Rs.') || 'Rs.';
 }
+
+// ── _getDeviceCode (moved from billing.js so inventory.js can use it) ────
+// Returns a short counter ID read from branch identity settings.
+// Depends only on BRANCH_DEFAULTS and StorageModule — both defined above.
+function _getDeviceCode() {
+    try {
+        const s = StorageModule.get('pharma_branch_identity');
+        const bi = s ? Object.assign({}, BRANCH_DEFAULTS, JSON.parse(s)) : Object.assign({}, BRANCH_DEFAULTS);
+        const raw = (bi.counterId || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        return raw.slice(0, 6) || 'DEV';
+    } catch(e) { return 'DEV'; }
+}

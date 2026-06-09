@@ -340,13 +340,7 @@ function _getDiscountPresets() {
     return [1, 2, 3, 4, 5];
 }
 function _getInvPrefix() { return StorageModule.get('pharma_inv_prefix', 'Inv-'); }
-function _getDeviceCode() {
-    try {
-        const bi = _getBranchIdentity();
-        const raw = (bi.counterId || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
-        return raw.slice(0, 6) || 'DEV';
-    } catch(e) { return 'DEV'; }
-}
+// _getDeviceCode() is now defined in config.js (loads before both billing.js and inventory.js)
 function _getMaxDiscount() { const v = parseInt(StorageModule.get('pharma_max_disc', '0'), 10); return isNaN(v) ? 0 : v; }
 function _getAllowOverstock() { return StorageModule.get('pharma_allow_overstock') === 'true'; }
 
@@ -1536,8 +1530,8 @@ function _doSwitchTab(tabId, btn) {
         if (typeof _invReady !== 'undefined' && _invReady) {
             if (typeof renderInventoryView === 'function') renderInventoryView();
         } else {
-            if (typeof generateInventoryReport === 'function') generateInventoryReport();
-            else if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
+            if (typeof loadInventoryFromDB === 'function' && typeof db !== 'undefined' && db) loadInventoryFromDB();
+            if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
         }
     }
     if (tabId === 'syncHubView')   { if (typeof renderSyncHubView     === 'function') renderSyncHubView();  }
