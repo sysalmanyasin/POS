@@ -184,19 +184,13 @@ async function _pushUnsyncedMovements() {
 
 async function _pullRemoteMovements() {
     if (!db || typeof masterInventoryDB === 'undefined') return false;
-    let applied = false;
 
-    let knownDevices = [];
-    try {
-        const reg = await _supaGet('pharma_cloud_device_registry');
-        if (reg) { const arr = JSON.parse(reg); if (Array.isArray(arr)) knownDevices = arr; }
-    } catch(e) {}
-
-    const myKey = _getDeviceCode() + '_' + _DEVICE_UUID.slice(0, 8);
-    if (!knownDevices.includes(myKey)) {
-        knownDevices = [...new Set([...knownDevices, myKey])];
-        _supaSet('pharma_cloud_device_registry', JSON.stringify(knownDevices)).catch(() => {});
-    }
+    // ── FIX: Query the relational inventory_movements table directly ─────
+    // The old approach read per-device KV blobs which fell behind quickly.
+    // Every device now writes to the relational table via _pushUnsyncedMovements.
+    // We pull movements from OTHER devices (last 48 h) and apply their stock
+    // deltas to our local masterInventoryDB, then upsert into local IDB so
+    // the full audit trail is available offline.
 
     const _appliedKey = 'pharma_applied_mov_ids';
     let appliedIds = new Set();
@@ -205,62 +199,128 @@ async function _pullRemoteMovements() {
         if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr)) appliedIds = new Set(arr); }
     } catch(e) {}
 
-    const remotes = knownDevices.filter(k => k !== myKey);
     const newlyAppliedIds = [];
+    let applied = false;
 
-    for (const remoteKey of remotes) {
-        const supaKey = 'pharma_cloud_inv_movements_' + remoteKey;
+    try {
+        if (typeof _dbSelect !== 'function') return false;
+        const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+        const { data: remoteMovs, error } = await _dbSelect(
+            'inventory_movements',
+            'moved_at=gt.' + encodeURIComponent(cutoff) +
+            '&device_uuid=neq.' + encodeURIComponent(_DEVICE_UUID) +
+            '&order=moved_at.asc&limit=2000',
+            '*'
+        );
+
+        if (error || !Array.isArray(remoteMovs) || remoteMovs.length === 0) {
+            // Fallback to legacy KV blobs for older clients
+            return await _pullRemoteMovementsLegacyKV(appliedIds, newlyAppliedIds);
+        }
+
+        const fresh = remoteMovs.filter(m => m.movement_id && !appliedIds.has(m.movement_id));
+        if (fresh.length === 0) return false;
+
+        let clampedCount = 0;
         try {
-            const raw = await _supaGet(supaKey);
+            const idbTx = db.transaction(['inventory_movements'], 'readwrite');
+            const idbSt = idbTx.objectStore('inventory_movements');
+            fresh.forEach(m => {
+                const qtyChange = Number(m.quantity_change) || 0;
+                const prod = masterInventoryDB.find(p => p.code === m.product_code);
+                if (prod && qtyChange !== 0) {
+                    const rawStock = (Number(prod.stock) || 0) + qtyChange;
+                    if (rawStock < 0) clampedCount++;
+                    prod.stock = Math.max(0, rawStock);
+                    prod.version = (typeof prod.version === 'number' && prod.version >= 1)
+                        ? prod.version + 1 : 1;
+                }
+                newlyAppliedIds.push(m.movement_id);
+                try {
+                    idbSt.put({
+                        movementId:     m.movement_id,
+                        productCode:    m.product_code     || '',
+                        quantityChange: qtyChange,
+                        stockAfter:     Number(m.stock_after)     || 0,
+                        movementType:   m.movement_type    || 'ADJUSTMENT',
+                        invoiceId:      m.invoice_number   || null,
+                        description:    m.description      || null,
+                        timestamp:      m.moved_at ? new Date(m.moved_at).getTime() : Date.now(),
+                        deviceCode:     m.counter_id       || '',
+                        deviceUUID:     m.device_uuid      || '',
+                        synced:         true
+                    });
+                } catch(_e) {}
+            });
+        } catch(_idbErr) {}
+
+        if (clampedCount > 0 && typeof showToast === 'function') {
+            showToast('\u26a0\ufe0f ' + clampedCount + ' remote movement(s) clamped stock at 0.', false);
+        }
+        applied = fresh.length > 0;
+
+    } catch(e) {
+        console.warn('[DeltaSync] Relational pull failed — trying legacy KV:', e);
+        return await _pullRemoteMovementsLegacyKV(appliedIds, newlyAppliedIds);
+    }
+
+    if (newlyAppliedIds.length > 0) {
+        newlyAppliedIds.forEach(id => appliedIds.add(id));
+        try { StorageModule.set(_appliedKey, JSON.stringify([...appliedIds].slice(-5000))); } catch(e) {}
+    }
+    if (applied) { try { saveInventoryToDB(masterInventoryDB); } catch(e) {} }
+    return applied;
+}
+
+// ── Legacy KV fallback (backward-compat for older client builds) ───────────
+async function _pullRemoteMovementsLegacyKV(appliedIds, newlyAppliedIds) {
+    let applied = false;
+    let knownDevices = [];
+    try {
+        const reg = await _supaGet('pharma_cloud_device_registry');
+        if (reg) { const arr = JSON.parse(reg); if (Array.isArray(arr)) knownDevices = arr; }
+    } catch(e) {}
+    const myKey = _getDeviceCode() + '_' + _DEVICE_UUID.slice(0, 8);
+    if (!knownDevices.includes(myKey)) {
+        knownDevices = [...new Set([...knownDevices, myKey])];
+        _supaSet('pharma_cloud_device_registry', JSON.stringify(knownDevices)).catch(() => {});
+    }
+    for (const remoteKey of knownDevices.filter(k => k !== myKey)) {
+        try {
+            const raw = await _supaGet('pharma_cloud_inv_movements_' + remoteKey);
             if (!raw) continue;
             const movements = JSON.parse(raw);
             if (!Array.isArray(movements) || movements.length === 0) continue;
-
             const fresh = movements
-                .filter(m =>
-                    m.movementId &&
-                    !appliedIds.has(m.movementId) &&
-                    typeof m.timestamp === 'number'
-                )
+                .filter(m => m.movementId && !appliedIds.has(m.movementId) && typeof m.timestamp === 'number')
                 .sort((a, b) => a.timestamp - b.timestamp);
-            if (fresh.length === 0) continue;
-
-            let _clampedCount = 0;
+            let clampedCount = 0;
             fresh.forEach(m => {
                 if (!m.productCode || typeof m.quantityChange !== 'number') return;
                 const prod = masterInventoryDB.find(p => p.code === m.productCode);
                 if (prod) {
                     const rawStock = (Number(prod.stock) || 0) + Number(m.quantityChange);
-                    if (rawStock < 0) {
-                        _clampedCount++;
-                        console.warn('[DeltaSync] Stock clamp for ' + m.productCode + ': ' + prod.stock + ' + (' + m.quantityChange + ') → clamped to 0 (raw: ' + rawStock + ').');
-                    }
+                    if (rawStock < 0) clampedCount++;
                     prod.stock = Math.max(0, rawStock);
-                    // Bump version on remote-applied delta so subsequent captures
-                    // reflect that the stock state has changed
                     prod.version = (typeof prod.version === 'number' && prod.version >= 1)
                         ? prod.version + 1 : 1;
                 }
                 newlyAppliedIds.push(m.movementId);
             });
-            if (_clampedCount > 0) {
-                showToast('⚠️ ' + _clampedCount + ' remote sale(s) clamped stock at 0. Check inventory for ' + remoteKey + '.', false);
+            if (clampedCount > 0 && typeof showToast === 'function') {
+                showToast('\u26a0\ufe0f ' + clampedCount + ' legacy move(s) clamped at 0 from ' + remoteKey + '.', false);
             }
             applied = true;
         } catch(e) {}
     }
-
     if (newlyAppliedIds.length > 0) {
         newlyAppliedIds.forEach(id => appliedIds.add(id));
-        const trimmed = [...appliedIds].slice(-5000);
-        try { StorageModule.set(_appliedKey, JSON.stringify(trimmed)); } catch(e) {}
-    }
-
-    if (applied) {
-        try { saveInventoryToDB(masterInventoryDB); } catch(e) {}
+        try { StorageModule.set('pharma_applied_mov_ids', JSON.stringify([...appliedIds].slice(-5000))); } catch(e) {}
+        if (applied) { try { saveInventoryToDB(masterInventoryDB); } catch(e) {} }
     }
     return applied;
 }
+
 
 function loadInventoryFromDB() {
     if (!db) return;

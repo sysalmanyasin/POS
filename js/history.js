@@ -86,56 +86,69 @@ async function _loadLedgerCloud() {
 
     if (navigator.onLine && typeof _dbSelect === 'function') {
         try {
-            const { data, error } = await _dbSelect('invoices', 'order=billed_at.desc', '*,invoice_items(*)');
+            // Limit to 500 most-recent invoices to avoid PostgREST default cap (1 000).
+            // A pharmacy doing 100 bills/day can see 5 days of history; Force-Sync
+            // keeps the relational table complete for reporting.
+            const { data, error } = await _dbSelect(
+                'invoices',
+                'order=billed_at.desc&limit=500',
+                '*,invoice_items(*)'
+            );
             if (!error && Array.isArray(data) && data.length > 0) {
-                // F15: Cloud replace hides unsynced local invoices.
-                // Merge any local-only invoices (not yet in cloud) into the cloud set
-                // so pending bills remain visible until they flush to Supabase.
-                const _cloudIds = new Set(data.map(r => r.invoice_number));
+                // Merge any local-only invoices (not yet flushed to cloud) so
+                // pending bills stay visible until they appear in Supabase.
+                const _cloudIds  = new Set(data.map(r => r.invoice_number));
                 const _localOnly = (Array.isArray(savedInvoicesLedger) ? savedInvoicesLedger : [])
                     .filter(inv => !inv._fromCloud && !_cloudIds.has(inv.id));
+
                 savedInvoicesLedger = data.map(row => ({
                     id:                row.invoice_number,
                     invoiceNumber:     row.invoice_number,
-                    deviceUuid:        row.device_uuid        || '',
-                    deviceCode:        row.counter_id         || '',
-                    customerName:      row.customer_name      || '',
-                    customerPhone:     row.customer_phone     || '',
-                    staffName:         row.staff_name         || '',
-                    subtotal:          Number(row.subtotal)       || 0,
-                    discountPct:       Number(row.discount_pct)   || 0,
-                    discountAmount:    Number(row.discount_amount) || 0,
-                    roundOffAmt:       Number(row.round_off_amt)  || 0,
-                    netTotal:          Number(row.net_total)      || 0,
-                    paymentMethod:     row.payment_method     || '',
-                    cashReceived:      Number(row.cash_received)  || 0,
-                    changeAmount:      Number(row.change_amount)  || 0,
+                    deviceUuid:        row.device_uuid         || '',
+                    deviceCode:        row.counter_id          || '',
+                    customerName:      row.customer_name       || '',
+                    customerPhone:     row.customer_phone      || '',
+                    staffName:         row.staff_name          || '',
+                    subtotal:          Number(row.subtotal)         || 0,
+                    discountPct:       Number(row.discount_pct)     || 0,
+                    discountAmount:    Number(row.discount_amount)  || 0,
+                    roundOffAmt:       Number(row.round_off_amt)    || 0,
+                    netTotal:          Number(row.net_total)        || 0,
+                    paymentMethod:     row.payment_method       || '',
+                    cashReceived:      Number(row.cash_received)    || 0,
+                    changeAmount:      Number(row.change_amount)    || 0,
                     isRefund:          !!row.is_refund,
                     isPartialRefund:   !!row.is_partial_refund,
+                    isEdit:            !!row.is_edit,
                     isManual:          !!row.is_manual,
                     isFullyRefunded:   !!row.is_fully_refunded,
                     refunded:          !!row.is_fully_refunded,
-                    originalInvoiceId: row.original_invoice_id || '',
-                    refundReason:      row.refund_reason       || '',
-                    billedAt:          row.billed_at           || '',
-                    timestamp:         row.billed_at           || '',
-                    date:              row.billed_at ? row.billed_at.slice(0,10) : '',
-                    createdAt:         row.created_at          || '',
+                    originalId:        row.original_invoice_id  || null,
+                    originalInvoiceId: row.original_invoice_id  || '',
+                    refundReason:      row.refund_reason         || '',
+                    billedAt:          row.billed_at             || '',
+                    timestamp:         row.billed_at             || '',
+                    date:              row.billed_at ? row.billed_at.slice(0, 10) : '',
+                    createdAt:         row.created_at            || '',
                     details:           Array.isArray(row.invoice_items)
                         ? row.invoice_items.map(li => ({
-                            code:        li.product_code  || '',
-                            name:        li.product_name  || '',
-                            packDetails: li.pack_size     || '',
+                            code:        li.product_code   || '',
+                            name:        li.product_name   || '',
+                            packDetails: li.pack_size      || '',
                             unitPrice:   Number(li.unit_price) || 0,
                             qty:         Number(li.qty)        || 0,
                             total:       Number(li.total)      || 0
                         }))
                         : [],
-                    _fromRemote:       true,
-                    _fromCloud:        true
+                    _fromRemote: true,
+                    _fromCloud:  true
                 })).concat(_localOnly);
+
                 if (_localOnly.length > 0) {
-                    console.log('[history] Preserved', _localOnly.length, 'unsynced local invoice(s) not yet in cloud.');
+                    console.log('[history] Preserved', _localOnly.length, 'unsynced local invoice(s).');
+                }
+                if (data.length >= 500 && typeof showToast === 'function') {
+                    showToast('ℹ️ Showing latest 500 invoices. Use date filters or Reporting for older records.', false);
                 }
                 cloudOk = true;
             }
@@ -296,9 +309,12 @@ function _renderHistPageData() {
         tr.ondblclick = () => launchInvoiceIsolatedWindow(inv.id);
         tr.title = 'Double-click to view receipt';
         const tdId = document.createElement('td'); tdId.className = 'ht-id'; tdId.textContent = inv.id;
-        if (inv.isManual) { const mb = document.createElement('span'); mb.className = 'ht-badge ht-badge-manual'; mb.textContent = 'MANUAL'; tdId.appendChild(mb); }
-        if (inv.editedAt)  { const eb = document.createElement('span'); eb.className = 'ht-badge ht-badge-edited'; eb.textContent = 'EDITED'; tdId.appendChild(eb); }
-        if (inv.isRefund) tdId.style.color = 'var(--red)';
+        if (inv.isManual)       { const mb = document.createElement('span'); mb.className = 'ht-badge ht-badge-manual';  mb.textContent = 'MANUAL';  tdId.appendChild(mb); }
+        if (inv.isEdit || inv.editedAt) { const eb = document.createElement('span'); eb.className = 'ht-badge ht-badge-edited'; eb.textContent = 'EDITED'; tdId.appendChild(eb); }
+        if (inv.isRefund)       { const rb = document.createElement('span'); rb.className = 'ht-badge ht-badge-refund';  rb.textContent = 'REFUND';  tdId.appendChild(rb); }
+        if (inv.isPartialRefund){ const pb = document.createElement('span'); pb.className = 'ht-badge ht-badge-refund';  pb.textContent = 'PART-REF'; tdId.appendChild(pb); }
+        if (inv.refunded)       { const fb = document.createElement('span'); fb.className = 'ht-badge ht-badge-manual';  fb.textContent = 'REFUNDED'; tdId.appendChild(fb); }
+        if (inv.isRefund || inv.isPartialRefund) tdId.style.color = 'var(--red)';
         const tdTs  = document.createElement('td'); tdTs.className = 'ht-ts'; tdTs.textContent = inv.timestamp;
         const tdCu  = document.createElement('td');
         if (inv.customerName) { tdCu.className = 'ht-cust'; tdCu.textContent = '👤 ' + inv.customerName; }
@@ -632,14 +648,31 @@ function exportMasterLedgerToCSV() {
 async function launchInvoiceIsolatedWindow(invoiceID) {
     let inv = savedInvoicesLedger.find(i => i.id === invoiceID);
 
-    // Case A: invoice found locally with full details — render immediately
+    // Case A: invoice found in memory with full details — render immediately
     if (inv && Array.isArray(inv.details) && inv.details.length > 0) {
         _renderReceiptModal(inv);
         return;
     }
 
-    // Case B: invoice found locally but details[] empty, OR not found at all
-    // → try to fetch from Supabase (needs invoice_items to be written)
+    // Case A2: not in memory — check IDB directly (covers invoices from other
+    // devices that were synced into IDB but not yet in savedInvoicesLedger)
+    if (!inv && db) {
+        try {
+            inv = await new Promise((resolve, reject) => {
+                const tx  = db.transaction(['invoices'], 'readonly');
+                const req = tx.objectStore('invoices').get(invoiceID);
+                req.onsuccess = () => resolve(req.result || null);
+                req.onerror   = () => reject(req.error);
+            });
+        } catch(_e) { inv = null; }
+        if (inv && Array.isArray(inv.details) && inv.details.length > 0) {
+            _renderReceiptModal(inv);
+            return;
+        }
+    }
+
+    // Case B: found locally but details[] empty, OR not found at all
+    // → fetch from Supabase on demand (needs invoice_items written)
     if (navigator.onLine && typeof _dbSelect === 'function') {
         try {
             if (typeof showToast === 'function') showToast('⏳ Loading receipt details…', false);
@@ -663,23 +696,34 @@ async function launchInvoiceIsolatedWindow(invoiceID) {
                     cashReceived:     Number(row.cash_received) || 0,
                     changeAmount:     Number(row.change_amount) || 0,
                     isRefund:         !!row.is_refund,
+                    isPartialRefund:  !!row.is_partial_refund,
+                    isEdit:           !!row.is_edit,
                     isManual:         !!row.is_manual,
+                    originalId:       row.original_invoice_id || null,
                     timestamp:        row.billed_at         || '',
                     date:             row.billed_at ? row.billed_at.slice(0, 10) : '',
                     details:          Array.isArray(row.invoice_items)
                         ? row.invoice_items.map(li => ({
-                            code:       li.product_code  || '',
-                            name:       li.product_name  || '',
-                            packDetails: li.pack_size    || '',
-                            unitPrice:  Number(li.unit_price) || 0,
-                            qty:        Number(li.qty)        || 0,
-                            total:      Number(li.total)      || 0
+                            code:        li.product_code  || '',
+                            name:        li.product_name  || '',
+                            packDetails: li.pack_size     || '',
+                            unitPrice:   Number(li.unit_price) || 0,
+                            qty:         Number(li.qty)        || 0,
+                            total:       Number(li.total)      || 0
                         }))
                         : (inv ? (inv.details || []) : [])
                 };
-                // Patch the local ledger entry so repeat opens are instant
+                // Patch memory + IDB so repeat opens are instant
                 if (inv) {
                     inv.details = cloudInv.details;
+                } else {
+                    savedInvoicesLedger.push(cloudInv);
+                    if (db) {
+                        try {
+                            const tx = db.transaction(['invoices'], 'readwrite');
+                            tx.objectStore('invoices').put(cloudInv);
+                        } catch(_e) {}
+                    }
                 }
                 _renderReceiptModal(cloudInv);
                 return;
@@ -689,11 +733,8 @@ async function launchInvoiceIsolatedWindow(invoiceID) {
         }
     }
 
-    // Case C: offline or fetch failed — render with whatever we have locally
-    if (inv) {
-        _renderReceiptModal(inv);
-        return;
-    }
+    // Case C: offline or fetch failed — render with whatever we have
+    if (inv) { _renderReceiptModal(inv); return; }
 
     // Case D: completely not found
     if (typeof showToast === 'function') showToast('⚠️ Invoice not found. Try syncing first.', true);

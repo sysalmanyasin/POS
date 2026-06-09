@@ -567,10 +567,15 @@ const StorageModule = (() => {
 
     // ── Settings sync helpers ─────────────────────────────────────────────────
     const SYNC_SETTINGS_KEYS = [
-        'pharma_branch_identity','pharma_currency',
-        'pharma_max_disc','pharma_discount_presets','pharma_thermal_settings',
-        'pharma_paper_mode','pharma_receipt_info','pharma_allow_overstock',
-        'pharma_staff_list','pharma_require_staff_pin'
+        'pharma_branch_identity', 'pharma_currency',
+        'pharma_max_disc', 'pharma_discount_presets', 'pharma_thermal_settings',
+        'pharma_paper_mode', 'pharma_receipt_info', 'pharma_allow_overstock',
+        'pharma_staff_list', 'pharma_require_staff_pin',
+        // FIX: Additional settings that were missing from sync — all must round-trip
+        'pharma_bill_save_pin', 'pharma_clock_offset', 'pharma_low_stock_threshold',
+        'pharma_show_zero_stock', 'pharma_default_payment', 'pharma_auto_round_off',
+        'pharma_partial_refund_reason', 'pharma_receipt_footer',
+        'pharma_require_customer_name', 'pharma_require_customer_phone'
     ];
 
     function _mergeInvoices(localArr, cloudArr) {

@@ -1536,9 +1536,21 @@ function _doSwitchTab(tabId, btn) {
 }
 function _restoreHistoryView() {
     _populateDeviceDropdown();
-    const startEl = document.getElementById('filterStartDate');
-    if (startEl && startEl.value) { applyDateLedgerFilters(); }
-    else { resetLedgerFilters(); }
+    // FIX: Always refresh from Supabase when history tab opens so invoices
+    // from other devices (and any new synced records) are always visible.
+    // _loadLedgerCloud is defined in history.js and merges cloud + local.
+    if (typeof _loadLedgerCloud === 'function') {
+        _loadLedgerCloud().catch(() => {
+            // Offline fallback: render what we have locally
+            const startEl = document.getElementById('filterStartDate');
+            if (startEl && startEl.value) { applyDateLedgerFilters(); }
+            else { resetLedgerFilters(); }
+        });
+    } else {
+        const startEl = document.getElementById('filterStartDate');
+        if (startEl && startEl.value) { applyDateLedgerFilters(); }
+        else { resetLedgerFilters(); }
+    }
 }
 
 function toggleShortcutsModal() { document.getElementById('shortcutsModal').classList.toggle('visible'); }

@@ -52,6 +52,15 @@ setInterval(() => {
         if (typeof _checkAndPullInventoryIfUpdated === 'function') {
             _checkAndPullInventoryIfUpdated().catch(() => {});
         }
+        // Auto-push any unsynced movements (background heartbeat)
+        if (typeof _pushUnsyncedMovements === 'function') {
+            _pushUnsyncedMovements().then(() => {
+                // Write a background sync log entry after movement flush
+                const _bgEntry = { invoices_pushed: 0, invoices_pulled: 0, movements_pushed: 0, movements_pulled: 0, note: 'Background Heartbeat' };
+                _writeSyncLogEntry(_bgEntry).catch(() => {});
+                _appendLocalSyncLog(_bgEntry);
+            }).catch(() => {});
+        }
     }
 }, 60_000);
 
@@ -287,19 +296,39 @@ async function _processInvoiceItem(item, deviceUuid) {
     }
 
     // ── B2: Loop line items sequentially ─────────────────────────────────
+    // EDIT GUARD: For edited invoices (is_edit=true), inventory was already
+    // adjusted locally via EDIT_RESTORE + SALE movements, which are pushed
+    // separately to Supabase inventory_movements via _pushUnsyncedMovements.
+    // Running deduct_inventory_atomic AGAIN here would double-deduct on cloud.
+    // For edits: only update the invoice row + invoice_items, then clean up.
+    const _isEditInvoice = !!(coreInvoiceFields.is_edit);
+    if (_isEditInvoice) {
+        console.log('[SyncEngine] is_edit=true for', invoice_number, '— skipping RPC deductions (stock handled via movements).');
+        try { await StorageModule.deleteFromSyncQueue(item.queueId); } catch(_e) {}
+        await _writeSyncLogEntry({ invoices_pushed: 1, movements_pushed: 0, invoices_pulled: 0, movements_pulled: 0 });
+        return;
+    }
+
     let allLineItemsHandled = true;
 
     for (const lineItem of line_items) {
         const { product_code, quantity, expected_version } = lineItem;
         if (!product_code || !quantity) continue;
 
-        // FIX: pass movement_type from line item (REFUND / PARTIAL_REFUND / SALE)
-        // so the RPC records the correct movement type in inventory_movements table.
+        // FIX (Refund Sync): deduct_inventory_atomic deducts stock by default.
+        // For REFUND / PARTIAL_REFUND line items the queue stores a POSITIVE qty
+        // (the amount being returned), but deducting a positive qty reduces stock
+        // further — the opposite of what a refund should do.
+        // Fix: negate the quantity for refund-type movements so the RPC does:
+        //   stock = stock - (-qty) = stock + qty  →  stock correctly restored.
         const _movementType = lineItem.movement_type || null;
+        const _isRefundLine = (_movementType === 'REFUND' || _movementType === 'PARTIAL_REFUND'
+                               || !!(coreInvoiceFields.is_refund) || !!(coreInvoiceFields.is_partial_refund));
+        const _effectiveQty = _isRefundLine ? -Math.abs(quantity) : quantity;
 
         const handled = await _processLineItem(
             product_code,
-            quantity,
+            _effectiveQty,
             expected_version ?? item.capturedVersion ?? 1,
             deviceUuid,
             invoice_number,
@@ -645,6 +674,53 @@ function _writeBackStockLocally(productCode, newQuantity, newVersion) {
 }
 
 // =========================================================================
+// SYNC LOG — writes a row to the Supabase `sync_log` table after each sync
+// Table: sync_log(device_uuid, synced_at, invoices_pushed, invoices_pulled,
+//                 movements_pushed, movements_pulled)
+// =========================================================================
+
+/**
+ * Write one sync summary row to the cloud sync_log table.
+ * Non-fatal: errors are logged but never propagated to the caller.
+ *
+ * @param {Object} stats - { invoices_pushed, invoices_pulled, movements_pushed, movements_pulled }
+ */
+async function _writeSyncLogEntry(stats) {
+    if (typeof _dbUpsert !== 'function') return;
+    try {
+        const row = {
+            device_uuid:       (typeof _DEVICE_UUID !== 'undefined') ? _DEVICE_UUID : 'UNKNOWN',
+            synced_at:         new Date().toISOString(),
+            invoices_pushed:   Number(stats.invoices_pushed)   || 0,
+            invoices_pulled:   Number(stats.invoices_pulled)   || 0,
+            movements_pushed:  Number(stats.movements_pushed)  || 0,
+            movements_pulled:  Number(stats.movements_pulled)  || 0
+        };
+        // sync_log has no PK / unique constraint we can upsert on, so INSERT
+        await _dbInsert('sync_log', row);
+    } catch(e) {
+        console.warn('[SyncLog] Could not write sync_log entry:', e);
+    }
+}
+
+// Also store a local IDB-backed log for the Sync Log tab (offline-readable).
+// Shape: { id (auto), deviceUuid, syncedAt, invoicesPushed, invoicesPulled,
+//           movementsPushed, movementsPulled, note }
+// Stored in localStorage as a capped ring-buffer of 200 entries.
+const _SYNC_LOG_LS_KEY = 'pharma_local_sync_log';
+const _SYNC_LOG_MAX    = 200;
+
+function _appendLocalSyncLog(entry) {
+    try {
+        const existing = JSON.parse(localStorage.getItem(_SYNC_LOG_LS_KEY) || '[]');
+        existing.push(Object.assign({ ts: Date.now() }, entry));
+        // Trim to last _SYNC_LOG_MAX entries
+        const trimmed = existing.slice(-_SYNC_LOG_MAX);
+        localStorage.setItem(_SYNC_LOG_LS_KEY, JSON.stringify(trimmed));
+    } catch(_e) {}
+}
+
+// =========================================================================
 // ENTRY POINT — called by _doSwitchTab when user enters Cloud Sync Hub tab
 // =========================================================================
 async function renderSyncHubView() {
@@ -862,6 +938,21 @@ async function renderSyncHubView() {
     </div>
   </div>
 
+  <!-- ── Sync Activity Log ──────────────────────────────────────────────── -->
+  <div class="sh-section" style="margin-top:16px;">
+    <div class="sh-section-hdr" style="justify-content:space-between;">
+      <span class="sh-section-title">📋 Sync Activity Log</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="sh-section-sub" id="syncLogSource">Loading…</span>
+        <button class="sh-btn sh-btn-teal" style="padding:5px 12px;font-size:11px;" onclick="renderSyncLogPanel()">↻ Refresh</button>
+        <button class="sh-btn" style="padding:5px 12px;font-size:11px;background:#e2e8f0;color:#475569;" onclick="_clearLocalSyncLog()">🗑 Clear Local</button>
+      </div>
+    </div>
+    <div id="syncLogPanel" class="sh-matrix-wrap" style="padding:0;">
+      <div class="sh-loading">Loading sync log…</div>
+    </div>
+  </div>
+
   <!-- ── Footer ─────────────────────────────────────────────────────────── -->
   <div class="sh-footer">
     Auto-refreshes every ${SYNC_HUB_REFRESH_MS / 1000} s &nbsp;·&nbsp;
@@ -876,7 +967,8 @@ async function renderSyncHubView() {
     // Kick off async data in parallel
     await Promise.all([
         _renderPendingQueueWidget(),
-        populateSyncHubNetworkGrid()
+        populateSyncHubNetworkGrid(),
+        renderSyncLogPanel()
     ]);
     _stampRefreshTime();
 
@@ -889,6 +981,7 @@ async function renderSyncHubView() {
             if (!_forceSyncRunning) {
                 _renderPendingQueueWidget();
                 populateSyncHubNetworkGrid();
+                renderSyncLogPanel().catch(() => {});
                 _stampRefreshTime();
             }
         } else {
@@ -907,11 +1000,135 @@ async function refreshSyncHub() {
     if (icon) icon.className = 'sh-btn-spin';
     await Promise.all([
         _renderPendingQueueWidget(),
-        populateSyncHubNetworkGrid()
+        populateSyncHubNetworkGrid(),
+        renderSyncLogPanel()
     ]);
     _stampRefreshTime();
     if (icon) icon.className = '';
     if (btn)  btn.disabled = false;
+}
+
+// =========================================================================
+// SYNC LOG PANEL
+// =========================================================================
+// Renders the Sync Activity Log section.
+// Source priority:
+//   1. Supabase sync_log table (all devices, last 7 days, 200 rows)
+//   2. Local localStorage ring-buffer (this device only, offline fallback)
+// =========================================================================
+async function renderSyncLogPanel() {
+    const panel   = document.getElementById('syncLogPanel');
+    const srcEl   = document.getElementById('syncLogSource');
+    if (!panel) return;
+
+    panel.innerHTML = '<div class="sh-loading">Loading sync log…</div>';
+    if (srcEl) srcEl.textContent = 'Loading…';
+
+    let rows = [];
+    let source = 'local';
+
+    // ── Try Supabase first ────────────────────────────────────────────────
+    if (navigator.onLine && typeof _dbSelect === 'function') {
+        try {
+            const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+            const { data, error } = await _dbSelect(
+                'sync_log',
+                'synced_at=gt.' + encodeURIComponent(cutoff) + '&order=synced_at.desc&limit=200',
+                '*'
+            );
+            if (!error && Array.isArray(data) && data.length > 0) {
+                rows = data.map(r => ({
+                    ts:               new Date(r.synced_at).getTime(),
+                    syncedAt:         r.synced_at,
+                    deviceUuid:       r.device_uuid || '',
+                    invoicesPushed:   r.invoices_pushed  || 0,
+                    invoicesPulled:   r.invoices_pulled  || 0,
+                    movementsPushed:  r.movements_pushed || 0,
+                    movementsPulled:  r.movements_pulled || 0,
+                    note:             r.note || ''
+                }));
+                source = 'cloud';
+            }
+        } catch(_e) {}
+    }
+
+    // ── Fallback to local log ─────────────────────────────────────────────
+    if (rows.length === 0) {
+        try {
+            const local = JSON.parse(localStorage.getItem(_SYNC_LOG_LS_KEY) || '[]');
+            rows = local.slice().reverse(); // newest first
+            source = 'local';
+        } catch(_e) { rows = []; }
+    }
+
+    if (srcEl) {
+        srcEl.textContent = source === 'cloud'
+            ? '☁️ Cloud (last 7 days)'
+            : '💾 Local cache only';
+    }
+
+    if (rows.length === 0) {
+        panel.innerHTML = '<div class="sh-empty" style="padding:24px;text-align:center;color:var(--g400);font-size:12px;">📋 No sync activity recorded yet. Perform a Force Sync to generate log entries.</div>';
+        return;
+    }
+
+    // ── Build device name lookup ──────────────────────────────────────────
+    let deviceNames = {};
+    try {
+        const { data: devs } = await _dbSelect('devices', 'is_active=eq.true', 'uuid,name,counter_id');
+        if (Array.isArray(devs)) devs.forEach(d => { deviceNames[d.uuid] = (d.name || d.counter_id || d.uuid.slice(0,8)); });
+    } catch(_e) {}
+    const myUUID = (typeof _DEVICE_UUID !== 'undefined') ? _DEVICE_UUID : '';
+
+    // ── Render table ──────────────────────────────────────────────────────
+    const _fmt = ts => {
+        if (!ts) return '—';
+        const d = new Date(typeof ts === 'number' ? ts : ts);
+        const pad = n => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' +
+               pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    };
+    const _pill = (n, label, colorClass) => {
+        const c = Number(n) || 0;
+        return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:8px;font-size:10px;font-weight:700;${colorClass}">${label} <b>${c}</b></span>`;
+    };
+
+    let html = `<table style="width:100%;border-collapse:collapse;min-width:540px;" aria-label="Sync Activity Log">
+<thead><tr style="border-bottom:2px solid var(--g100,#f1f5f9);">
+  <th class="sh-th">Time</th>
+  <th class="sh-th">Device</th>
+  <th class="sh-th">Bills ↑</th>
+  <th class="sh-th">Bills ↓</th>
+  <th class="sh-th">Moves ↑</th>
+  <th class="sh-th">Moves ↓</th>
+  <th class="sh-th">Note</th>
+</tr></thead><tbody>`;
+
+    rows.forEach(r => {
+        const dUuid   = r.deviceUuid || '';
+        const dName   = deviceNames[dUuid] || (dUuid ? dUuid.slice(0, 8) : '—');
+        const isMe    = dUuid === myUUID;
+        const nameTxt = isMe ? dName + ' ★' : dName;
+        const rowBg   = isMe ? 'background:rgba(13,148,136,.04);' : '';
+        html += `<tr style="border-bottom:1px solid var(--g100,#f1f5f9);${rowBg}">
+  <td class="sh-td" style="font-family:monospace;font-size:11px;white-space:nowrap;">${_escHtml(_fmt(r.ts || r.syncedAt))}</td>
+  <td class="sh-td" style="font-size:11px;font-weight:${isMe ? '800' : '500'};">${_escHtml(nameTxt)}</td>
+  <td class="sh-td">${_pill(r.invoicesPushed,  '↑', 'background:#d1fae5;color:#065f46;')}</td>
+  <td class="sh-td">${_pill(r.invoicesPulled,  '↓', 'background:#dbeafe;color:#1e40af;')}</td>
+  <td class="sh-td">${_pill(r.movementsPushed, '↑', 'background:#fef3c7;color:#92400e;')}</td>
+  <td class="sh-td">${_pill(r.movementsPulled, '↓', 'background:#ede9fe;color:#5b21b6;')}</td>
+  <td class="sh-td" style="font-size:10px;color:var(--g500);">${_escHtml(r.note || '—')}</td>
+</tr>`;
+    });
+
+    html += '</tbody></table>';
+    panel.innerHTML = '<div style="overflow-x:auto;">' + html + '</div>';
+}
+
+function _clearLocalSyncLog() {
+    try { localStorage.removeItem(_SYNC_LOG_LS_KEY); } catch(_e) {}
+    renderSyncLogPanel().catch(() => {});
+    if (typeof showToast === 'function') showToast('🗑 Local sync log cleared.');
 }
 
 // =========================================================================
@@ -1159,12 +1376,26 @@ async function forceSyncNow() {
     _setProgress(95, 'Refreshing metrics…');
     await _renderPendingQueueWidget();
     await populateSyncHubNetworkGrid();
+    await renderSyncLogPanel().catch(() => {});
     _stampRefreshTime();
     const grandTotal = totalFlushed + queueFlushed + offlineFlushed;
     _setProgress(100, errorOccurred
         ? '❌ Sync incomplete — see toasts above'
         : '✅ All done — ' + grandTotal + ' item' + (grandTotal !== 1 ? 's' : '') + ' synced.'
     );
+
+    // Write sync log entry (non-fatal)
+    if (!errorOccurred) {
+        const _logEntry = {
+            invoices_pushed:  offlineFlushed,
+            invoices_pulled:  0,
+            movements_pushed: totalFlushed,
+            movements_pulled: 0,
+            note:             'Force Sync'
+        };
+        _writeSyncLogEntry(_logEntry).catch(() => {});
+        _appendLocalSyncLog(_logEntry);
+    }
 
     // ── UI: restore button, hide progress bar after 3 s ───────────────────
     setTimeout(() => {
@@ -1303,6 +1534,17 @@ async function forceInventoryPull() {
                       ' invoices, ' + movementsMerged + ' movement record' +
                       (movementsMerged !== 1 ? 's' : '') + '.');
         }
+
+        // Write sync log entry (non-fatal)
+        const _pullLogEntry = {
+            invoices_pushed:  0,
+            invoices_pulled:  invoicesMerged,
+            movements_pushed: 0,
+            movements_pulled: movementsMerged,
+            note:             'Force Pull'
+        };
+        _writeSyncLogEntry(_pullLogEntry).catch(() => {});
+        _appendLocalSyncLog(_pullLogEntry);
     } catch (err) {
         errorOccurred = true;
         if (typeof showToast === 'function') {

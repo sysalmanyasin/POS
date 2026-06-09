@@ -339,19 +339,21 @@ const DevicesModule = (() => {
         try {
             const todayBills  = _countTodayBills();
             const activeStaff = _getActiveStaffName();
+            // FIX: Push today_bills and active_staff to the devices table on every heartbeat.
+            // The schema has both columns (today_bills integer, active_staff text) — they were
+            // previously commented out "no extra columns" in error.
             await _dbUpdate(
                 'devices',
                 'uuid=eq.' + encodeURIComponent(_DEVICE_UUID),
                 {
                     last_seen_at: new Date().toISOString(),
-                    // Store extra runtime fields as part of the name column is wrong,
-                    // so we persist them only locally — the table has no extra columns.
-                    // (today_bills & active_staff are display-only, kept in localStorage)
+                    today_bills:  todayBills,
+                    active_staff: activeStaff || null
                 }
             );
             // Keep local cache for dashboard display
             StorageModule.set('pharma_today_bills',  String(todayBills));
-            StorageModule.set('pharma_active_staff', activeStaff);
+            StorageModule.set('pharma_active_staff', activeStaff || '');
         } catch(e) {
             console.warn('[DevicesModule] Heartbeat failed:', e);
         }
@@ -408,6 +410,25 @@ const DevicesModule = (() => {
                 if (issuerOk && exp >= now && lastApplied !== issuedAt) {
                     try { localStorage.setItem('pharma_global_purge_applied_at', issuedAt); } catch(_e) {}
                     await _executeCommand({ type: 'GLOBAL_PURGE', sentBy: issuedBy });
+                    return;
+                }
+            }
+        } catch(_e) {}
+
+        // Cloud-wipe broadcast (DATA_WIPE) — wipes local data but keeps device registration
+        try {
+            const cwRaw = await _supaGet('pharma_cloud_wipe_cmd');
+            if (cwRaw) {
+                const cmd         = JSON.parse(cwRaw);
+                const now         = Date.now();
+                const exp         = Number(cmd && cmd.expiresAt) || 0;
+                const issuedBy    = cmd && cmd.issuedBy;
+                const issuedAt    = String(Number(cmd && cmd.issuedAt) || 0);
+                const lastApplied = localStorage.getItem('pharma_cloud_wipe_applied_at');
+                // Don't apply the wipe on the device that issued it (already processed)
+                if (exp >= now && issuedBy !== _DEVICE_UUID && lastApplied !== issuedAt) {
+                    try { localStorage.setItem('pharma_cloud_wipe_applied_at', issuedAt); } catch(_e) {}
+                    await _executeCommand({ type: 'DATA_WIPE', sentBy: issuedBy });
                     return;
                 }
             }
@@ -526,8 +547,49 @@ const DevicesModule = (() => {
                 setTimeout(() => { try { window.location.reload(); } catch(_e) {} }, 2000);
                 break;
             }
-            default:
-                console.warn('[DevicesModule] Unknown command type:', type);
+            case 'DATA_WIPE': {
+                // Cloud Purge broadcast: wipe local data but keep device registration + auth keys
+                console.warn('[DevicesModule] DATA_WIPE received — wiping local data (keeping registration).');
+                // Stop sync engine first
+                if (typeof StorageModule !== 'undefined') {
+                    if (typeof StorageModule.clearAllPrimaryStores === 'function') StorageModule.clearAllPrimaryStores();
+                    if (typeof StorageModule.clearAllQueues === 'function') StorageModule.clearAllQueues();
+                    if (typeof StorageModule.setSyncEnabled === 'function') StorageModule.setSyncEnabled(false);
+                }
+                // Wipe IDB inventory + movements
+                try {
+                    if (typeof db !== 'undefined' && db) {
+                        try { db.transaction(['inventory'], 'readwrite').objectStore('inventory').clear(); } catch(_e) {}
+                        try { db.transaction(['inventory_movements'], 'readwrite').objectStore('inventory_movements').clear(); } catch(_e) {}
+                    }
+                } catch(_e) {}
+                // Wipe localStorage — preserve device identity + auth
+                try {
+                    const keepKeys = new Set([
+                        'pharma_device_id', 'pharma_device_name',
+                        'pharma_device_role', 'pharma_device_counter_id',
+                        'pharma_device_registered',
+                        'sys_admin_pass_hash', 'sys_has_password', '_supabase_sync_on'
+                    ]);
+                    Object.keys(localStorage).forEach(k => {
+                        if (keepKeys.has(k)) return;
+                        if (k.startsWith('pharma_') || k.startsWith('sys_') ||
+                            k === '_pharma_inv_fingerprint' || k === '_supabase_settings_ts') {
+                            try { localStorage.removeItem(k); } catch(_e) {}
+                        }
+                    });
+                } catch(_e) {}
+                // Reset in-memory globals
+                try {
+                    if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = [];
+                    if (typeof temporaryHeldBills  !== 'undefined') temporaryHeldBills  = [];
+                    if (typeof masterInventoryDB   !== 'undefined') masterInventoryDB   = [];
+                    if (typeof activeCartItems     !== 'undefined') activeCartItems     = [];
+                } catch(_e) {}
+                stop();
+                setTimeout(() => { try { window.location.reload(); } catch(_e) {} }, 2000);
+                break;
+            }
         }
     }
 
@@ -737,6 +799,10 @@ const DevicesModule = (() => {
                                 <div style="font-size:10px;font-weight:700;color:var(--g800);">${_escHtml(d.counter_id || '—')}</div>
                                 <div style="font-size:10px;color:var(--g500);">🕐 Last seen</div>
                                 <div style="font-size:10px;font-weight:700;color:var(--g800);">${_escHtml(agoStr)}</div>
+                                <div style="font-size:10px;color:var(--g500);">📋 Today's Bills</div>
+                                <div style="font-size:10px;font-weight:700;color:var(--g800);">${typeof d.today_bills === 'number' ? d.today_bills : '—'}</div>
+                                <div style="font-size:10px;color:var(--g500);">👤 Active Staff</div>
+                                <div style="font-size:10px;font-weight:700;color:var(--g800);">${_escHtml(d.active_staff || '—')}</div>
                                 <div style="font-size:10px;color:var(--g500);">📅 Registered</div>
                                 <div style="font-size:10px;font-weight:700;color:var(--g800);">${_escHtml(regDate)}</div>
                                 <div style="font-size:10px;color:var(--g500);">🔑 UUID</div>
