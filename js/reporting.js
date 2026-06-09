@@ -182,7 +182,10 @@ function _rptRenderRevenueSummary(invoices) {
     const sales    = invoices.filter(i => !i.is_refund);
     const refunds  = invoices.filter(i => i.is_refund);
     const totalRev = sales.reduce((s, i) => s + (Number(i.net_total) || 0), 0);
-    const totalRef = refunds.reduce((s, i) => s + (Number(i.net_total) || 0), 0);
+    // FIX: local ledger stores refund netTotal as negative (e.g. -3000) while
+    // Supabase stores it as positive.  Use Math.abs() so both sources produce
+    // a positive refund total, preventing double-negative arithmetic (3000 - -3000 = 6000).
+    const totalRef = refunds.reduce((s, i) => s + Math.abs(Number(i.net_total) || 0), 0);
     const netRev   = totalRev - totalRef;
     const avgBill  = sales.length ? (totalRev / sales.length) : 0;
 

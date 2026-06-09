@@ -748,7 +748,8 @@ function _renderReceiptModal(inv) {
     const deduction = (subtotal * discPct) / 100;
     const roundOffAmt = typeof inv.roundOffAmt === 'number' ? inv.roundOffAmt : 0;
     const modal = document.getElementById('receiptViewModal');
-    const content = document.getElementById('receiptViewContent');
+    // FIX: ID in index.html is 'receiptViewBody', not 'receiptViewContent'
+    const content = document.getElementById('receiptViewBody');
     content.innerHTML = '';
     const hdr = document.createElement('div'); hdr.className = 'rv-header';
     const _rvBi = _getBranchIdentity();
@@ -815,7 +816,9 @@ function _renderReceiptModal(inv) {
 }
 function closeReceiptModal() {
     document.getElementById('receiptViewModal').classList.remove('visible');
-    document.getElementById('receiptViewContent').innerHTML = '';
+    // FIX: correct ID is 'receiptViewBody'
+    const _rcBody = document.getElementById('receiptViewBody');
+    if (_rcBody) _rcBody.innerHTML = '';
 }
 
 // =========================================================================
