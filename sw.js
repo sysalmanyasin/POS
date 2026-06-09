@@ -1,28 +1,30 @@
 /**
  * Dua Pharma POS - Enterprise Production Service Worker
- * Version: pharmapos-cache-v11.4 (Optimized for Custom Domain & Strict Offline Isolation)
+ * Version: pharmapos-cache-v12.4 (Added syncHub.js + auditLog.js to offline cache)
  */
 
-const CACHE_NAME = 'pharmapos-cache-v12.3';
+const CACHE_NAME = 'pharmapos-cache-v12.4';
 
 // Explicit structural cache list to guarantee the system works offline instantly on day one
 const CORE_ASSETS = [
     '/',
     '/index.html',
-    '/config.js',
-    '/auth.js',
-    '/ui.js',
-    '/storage.js',
-    '/inventory.js',
-    '/billing.js',
-    '/devices.js',
-    '/history.js',
-    '/reporting.js',
-    '/settings.js',
-    '/tokens.css',
-    '/layout.css',
-    '/components.css',
-    '/print.css',
+    '/js/config.js',
+    '/js/storage.js',
+    '/js/auth.js',
+    '/js/ui.js',
+    '/js/billing.js',
+    '/js/inventory.js',
+    '/js/history.js',
+    '/js/settings.js',
+    '/js/reporting.js',
+    '/js/devices.js',
+    '/js/syncHub.js',      // FIX: was missing — sync engine must be cached for offline use
+    '/js/auditLog.js',     // FIX: was missing — audit log module must load offline
+    '/css/tokens.css',
+    '/css/layout.css',
+    '/css/components.css',
+    '/css/print.css',
     '/manifest.json'
 ];
 
