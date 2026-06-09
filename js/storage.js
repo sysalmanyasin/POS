@@ -450,6 +450,36 @@ const StorageModule = (() => {
         });
     }
 
+    /**
+     * Merge arbitrary fields into an existing offline_sync_queue record.
+     * Used by the sync engine to persist per-item state (e.g. processedItems)
+     * so partial-failure recovery survives page reloads and sync-engine restarts.
+     * @param {number} queueId
+     * @param {Object} updates  Plain object — keys are merged into the IDB record.
+     * @returns {Promise<void>}
+     */
+    function updateSyncQueueRecord(queueId, updates) {
+        return new Promise((resolve) => {
+            _whenReady(idb => {
+                if (!idb) { resolve(); return; }
+                try {
+                    const tx  = idb.transaction(['offline_sync_queue'], 'readwrite');
+                    const st  = tx.objectStore('offline_sync_queue');
+                    const req = st.get(queueId);
+                    req.onsuccess = e => {
+                        const rec = e.target.result;
+                        if (rec) {
+                            Object.assign(rec, updates);
+                            st.put(rec);
+                        }
+                        resolve();
+                    };
+                    req.onerror = () => resolve();
+                } catch(e) { resolve(); }
+            });
+        });
+    }
+
     // ── Invoice load ──────────────────────────────────────────────────────────
     function loadInvoices() {
         return new Promise(resolve => {
@@ -476,15 +506,32 @@ const StorageModule = (() => {
 
     // ── Held bills ────────────────────────────────────────────────────────────
     function saveHeldBills(bills) {
+        // FIX (split-brain): localStorage must only be written AFTER IDB confirms.
+        // Previously localStorage was updated synchronously before the IDB transaction
+        // completed.  If the page closed between those two writes IDB held stale data;
+        // loadHeldBills reads IDB first, so the user would silently lose the latest held
+        // bill on the next boot.  Now localStorage is written inside tx.oncomplete so
+        // both stores are always consistent.  The tx.onerror / catch branches still
+        // write localStorage as a last-resort fallback so data is never lost on IDB failure.
         _whenReady(idb => {
-            if (!idb) return;
+            if (!idb) {
+                try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(e) {}
+                return;
+            }
             try {
                 const tx = idb.transaction(['heldBills'], 'readwrite');
                 const st = tx.objectStore('heldBills');
                 st.clear().onsuccess = () => bills.forEach(b => { const copy = Object.assign({}, b); delete copy._hbIdx; st.put(copy); });
-            } catch(e) {}
+                tx.oncomplete = () => {
+                    try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(e) {}
+                };
+                tx.onerror = () => {
+                    try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(e) {}
+                };
+            } catch(e) {
+                try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(_e) {}
+            }
         });
-        try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(e) {}
         if (isSyncEnabled) { _supaSet(getSupaKey('heldBills'), JSON.stringify(bills)).catch(() => {}); }
     }
 
@@ -1010,6 +1057,7 @@ const StorageModule = (() => {
         getSyncQueueOrdered,
         deleteFromSyncQueue,
         updateSyncQueueRetryCount,
+        updateSyncQueueRecord,
         // ── Dead-letter queue ────────────────────────────────────────────────
         writeToFailedSyncLogs,
         // ── Phase 7: remote invoice persistence ─────────────────────────────

@@ -34,10 +34,7 @@ dbRequest.onupgradeneeded = function(e) {
     if (!movSt.indexNames.contains('by_synced')) movSt.createIndex('by_synced', 'synced',       { unique: false });
 };
 dbRequest.onsuccess = function(e) { db = e.target.result; loadInventoryFromDB(); };
-dbRequest.onerror   = function(e)  {
-    console.error('[IDB] Open failed:', e.target && e.target.error);
-    showToast('⚠️ Database initialization failed. Billing and inventory will not work. Go to browser Site Settings → Clear storage, then reload.', true);
-};
+dbRequest.onerror   = function()  { showToast('⚠️ Database initialization failed.', true); };
 
 let _invSaveLock    = false;
 let _invSavePending = null;
@@ -80,16 +77,23 @@ function _doIDBInventoryWrite(data) {
             (ev.target.result || []).forEach(k => { if (!validCodes.has(k)) store.delete(k); });
         };
         tx.oncomplete = function() {
-            // Apply staged version updates only after IDB confirms the write
-            if (typeof masterInventoryDB !== 'undefined' && Array.isArray(masterInventoryDB)) {
-                _pendingVersions.forEach(function(version, code) {
-                    const idx = masterInventoryDB.findIndex(p => p.code === code);
-                    if (idx >= 0) masterInventoryDB[idx].version = version;
-                });
+            // Apply staged version updates only after IDB confirms the write.
+            // FIX: wrapped in try/finally — if the forEach throws for any reason
+            // (e.g. bad data), _invSaveLock must still be released so future
+            // saveInventoryToDB calls are not deadlocked indefinitely.
+            try {
+                if (typeof masterInventoryDB !== 'undefined' && Array.isArray(masterInventoryDB)) {
+                    _pendingVersions.forEach(function(version, code) {
+                        const idx = masterInventoryDB.findIndex(p => p.code === code);
+                        if (idx >= 0) masterInventoryDB[idx].version = version;
+                    });
+                }
+            } finally {
+                _invSaveLock = false; _flushPendingInventorySave();
             }
-            _invSaveLock = false; _flushPendingInventorySave();
         };
         tx.onerror    = function() { _invSaveLock = false; _flushPendingInventorySave(); };
+        tx.onabort    = function() { _invSaveLock = false; _flushPendingInventorySave(); };
     } catch(e) { _invSaveLock = false; _flushPendingInventorySave(); }
 }
 function _flushPendingInventorySave() {
@@ -125,9 +129,20 @@ function _recordInvMovement(productCode, quantityChange, movementType, invoiceId
           .put(movement);
     } catch(e) {}
 }
+// FIX: explicitly bind to window so billing.js can always reach this function
+// even if the service worker serves a partially-stale file bundle.
+window._recordInvMovement = _recordInvMovement;
 
+let _pushMovementsRunning = false;
 async function _pushUnsyncedMovements() {
     if (!db) return;
+    // FIX: in-flight guard — if two sync cycles overlap (e.g. 60-second timer
+    // fires while a manual forceSyncNow is still running) both would read the
+    // same unsynced movements before either marks them synced, causing duplicate
+    // Supabase rows.  _dbUpsert is idempotent on movement_id so data is not
+    // corrupted, but the double-push wastes bandwidth and PostgREST quota.
+    if (_pushMovementsRunning) return;
+    _pushMovementsRunning = true;
     // FIX (Sync Gap): push unsynced movements to the relational
     // `inventory_movements` table via _dbUpsert so all devices can pull them —
     // previously this wrote a KV blob per device which other devices never read.
@@ -182,7 +197,7 @@ async function _pushUnsyncedMovements() {
             };
             tx.onerror = () => resolve();
         } catch(e) { resolve(); }
-    });
+    }).finally(() => { _pushMovementsRunning = false; });
 }
 
 async function _pullRemoteMovements() {
@@ -226,7 +241,14 @@ async function _pullRemoteMovements() {
         const fresh = remoteMovs.filter(m => m.movement_id && !appliedIds.has(m.movement_id));
         if (fresh.length === 0) return false;
 
-        let clampedCount = 0;
+        // FIX: collect in-memory mutations as pending — apply them only inside
+        // idbTx.oncomplete.  Previously masterInventoryDB was mutated and
+        // appliedIds were persisted BEFORE the IDB transaction confirmed, so
+        // a transaction failure left memory with wrong stock AND those movement
+        // IDs recorded as applied — meaning they would never be re-fetched.
+        const pendingMutations = []; // { prod, newStock, newVersion }
+        let pendingClampedCount = 0;
+
         try {
             const idbTx = db.transaction(['inventory_movements'], 'readwrite');
             const idbSt = idbTx.objectStore('inventory_movements');
@@ -235,10 +257,13 @@ async function _pullRemoteMovements() {
                 const prod = masterInventoryDB.find(p => p.code === m.product_code);
                 if (prod && qtyChange !== 0) {
                     const rawStock = (Number(prod.stock) || 0) + qtyChange;
-                    if (rawStock < 0) clampedCount++;
-                    prod.stock = Math.max(0, rawStock);
-                    prod.version = (typeof prod.version === 'number' && prod.version >= 1)
-                        ? prod.version + 1 : 1;
+                    if (rawStock < 0) pendingClampedCount++;
+                    pendingMutations.push({
+                        prod,
+                        newStock:   Math.max(0, rawStock),
+                        newVersion: (typeof prod.version === 'number' && prod.version >= 1)
+                            ? prod.version + 1 : 1
+                    });
                 }
                 newlyAppliedIds.push(m.movement_id);
                 try {
@@ -257,24 +282,45 @@ async function _pullRemoteMovements() {
                     });
                 } catch(_e) {}
             });
-        } catch(_idbErr) {}
 
-        if (clampedCount > 0 && typeof showToast === 'function') {
-            showToast('\u26a0\ufe0f ' + clampedCount + ' remote movement(s) clamped stock at 0.', false);
+            // Apply mutations and persist appliedIds only after IDB confirms
+            idbTx.oncomplete = function() {
+                pendingMutations.forEach(function(mut) {
+                    mut.prod.stock   = mut.newStock;
+                    mut.prod.version = mut.newVersion;
+                });
+                if (pendingClampedCount > 0 && typeof showToast === 'function') {
+                    showToast('\u26a0\ufe0f ' + pendingClampedCount + ' remote movement(s) clamped stock at 0.', false);
+                }
+                // Persist the applied IDs and save updated inventory to IDB
+                if (newlyAppliedIds.length > 0) {
+                    newlyAppliedIds.forEach(id => appliedIds.add(id));
+                    // M3 FIX: raised cap from 5000 to 20000 to prevent re-applying old movements
+                    try { StorageModule.set(_appliedKey, JSON.stringify([...appliedIds].slice(-20000))); } catch(e) {}
+                }
+                if (pendingMutations.length > 0) {
+                    try { saveInventoryToDB(masterInventoryDB); } catch(e) {}
+                }
+            };
+            // If the IDB write failed, clear newlyAppliedIds so these movements
+            // are re-fetched and re-applied on the next sync cycle instead of
+            // being silently dropped with wrong stock in memory.
+            idbTx.onerror = function() {
+                newlyAppliedIds.length = 0;
+                console.warn('[DeltaSync] inventory_movements IDB write failed; movements will be re-applied next cycle.');
+            };
+
+        } catch(_idbErr) {
+            newlyAppliedIds.length = 0;
         }
-        applied = fresh.length > 0;
+
+        applied = newlyAppliedIds.length > 0;
 
     } catch(e) {
         console.warn('[DeltaSync] Relational pull failed — trying legacy KV:', e);
         return await _pullRemoteMovementsLegacyKV(appliedIds, newlyAppliedIds);
     }
 
-    if (newlyAppliedIds.length > 0) {
-        newlyAppliedIds.forEach(id => appliedIds.add(id));
-        // M3 FIX: raised cap from 5000 to 20000 to prevent re-applying old movements
-        try { StorageModule.set(_appliedKey, JSON.stringify([...appliedIds].slice(-20000))); } catch(e) {}
-    }
-    if (applied) { try { saveInventoryToDB(masterInventoryDB); } catch(e) {} }
     return applied;
 }
 
@@ -1538,6 +1584,9 @@ function deleteProductFromCatalogue(productCode) {
         window.masterInventoryDB = _mergedDB;
         try {
             saveInventoryToDB(window.masterInventoryDB);
+            // Mark local inventory as dirty so the automatic startup cloud pull
+            // cannot silently overwrite this freshly-imported data.
+            try { localStorage.setItem('_pharma_inv_dirty', 'true'); } catch(_e) {}
             const demoBanner = document.getElementById('demoInventoryBanner');
             if (demoBanner) demoBanner.classList.remove('visible');
             if (typeof _invReady !== 'undefined' && _invReady) renderInventoryView();
@@ -1922,7 +1971,18 @@ async function _pushInventoryBootstrapToCloud() {
  *   3. Fetch all rows from `inventory` table.
  *   4. Map to IDB shape and overwrite local store + in-memory cache.
  */
-async function _pullInventoryFromSupabase() {
+async function _pullInventoryFromSupabase(force) {
+    // ── DIRTY-FLAG GUARD ──────────────────────────────────────────────────
+    // If the user has locally imported a CSV (or otherwise modified inventory)
+    // and has not yet pushed to cloud, skip automatic pulls so the freshly
+    // imported data isn't silently wiped.  Explicit force=true (from manual
+    // sync or the Force Sync button) bypasses this guard so the user can
+    // always pull when they deliberately choose to.
+    if (!force && localStorage.getItem('_pharma_inv_dirty') === 'true') {
+        console.info('[Phase4] Skipping auto pull — local inventory has unpushed changes. Push to cloud first, or use Force Sync to pull anyway.');
+        return false;
+    }
+
     // ── Step 1: resolve master UUID ───────────────────────────────────────
     const { data: masterRows, error: masterErr } = await _dbSelect(
         'devices',
@@ -1936,14 +1996,18 @@ async function _pullInventoryFromSupabase() {
     const masterUUID = masterRows[0].uuid;
 
     // ── Step 2: confirm bootstrap flag exists on master ───────────────────
-    const { data: flagRows } = await _dbSelect(
-        'settings',
-        'device_uuid=eq.' + encodeURIComponent(masterUUID) + '&key=eq.inventory_bootstrap_done',
-        'value'
-    );
-    if (!flagRows || flagRows.length === 0 || flagRows[0].value !== 'true') {
-        console.info('[Phase4] Master has not bootstrapped inventory yet — skipping pull.');
-        return false;
+    // When force=true (manual sync), skip this guard — the user explicitly
+    // requested a pull even if the master hasn't set the bootstrap flag yet.
+    if (!force) {
+        const { data: flagRows } = await _dbSelect(
+            'settings',
+            'device_uuid=eq.' + encodeURIComponent(masterUUID) + '&key=eq.inventory_bootstrap_done',
+            'value'
+        );
+        if (!flagRows || flagRows.length === 0 || flagRows[0].value !== 'true') {
+            console.info('[Phase4] Master has not bootstrapped inventory yet — skipping pull.');
+            return false;
+        }
     }
 
     // ── Step 3: fetch inventory rows ──────────────────────────────────────
@@ -1962,6 +2026,8 @@ async function _pullInventoryFromSupabase() {
     const mapped = invRows.map(_supabaseRowToIdbRow);
     window.masterInventoryDB = mapped;
     saveInventoryToDB(mapped);
+    // Clear dirty flag — local is now in sync with cloud
+    try { localStorage.removeItem('_pharma_inv_dirty'); } catch(_e) {}
 
     const demoBanner = document.getElementById('demoInventoryBanner');
     if (demoBanner) demoBanner.classList.remove('visible');
@@ -1995,6 +2061,10 @@ async function pushInventoryToCloud() {
         const payload = JSON.stringify(window.masterInventoryDB);
         const ok = await _supaSet('pharma_cloud_inventory', payload);
         if (!ok) throw new Error('Cloud write rejected');
+
+        // Local inventory is now in sync with cloud — clear the dirty flag so
+        // future startup pulls are allowed to merge server-side changes.
+        try { localStorage.removeItem('_pharma_inv_dirty'); } catch(_e) {}
 
         try {
             const arr = window.masterInventoryDB;
@@ -2069,6 +2139,3 @@ window.pullInventoryFromCloud   = pullInventoryFromCloud;
 // Phase 4 — relational table bootstrap (master push / client pull)
 window._pushInventoryBootstrapToCloud = _pushInventoryBootstrapToCloud;
 window._pullInventoryFromSupabase     = _pullInventoryFromSupabase;
-// FIX: expose _recordInvMovement globally so billing.js can call it safely
-// even if inventory.js had a delayed or partial initialisation.
-window._recordInvMovement = _recordInvMovement;

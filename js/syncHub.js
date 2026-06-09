@@ -129,7 +129,35 @@ async function syncOfflineQueue(deviceUuid, _skipGuard = false) {
 }
 
 // ── A3: Route a single queue record by type ───────────────────────────────
+// FIX (retry ceiling): storage.js exposes updateSyncQueueRetryCount() and
+// writeToFailedSyncLogs() for exactly this purpose but they were never wired up.
+// Without a ceiling a poison item (malformed payload, permanent HTTP 422, etc.)
+// would retry every 60 s indefinitely, flooding Supabase and the sync log.
+// Strategy:
+//   • On entry: if retryCount >= MAX_SYNC_RETRIES → dead-letter + discard.
+//   • On exit:  increment retryCount unconditionally.  If the item was already
+//     deleted by the handler, updateSyncQueueRetryCount is a safe no-op (the
+//     IDB get returns undefined and no put is issued).
+const _MAX_SYNC_RETRIES = 20;
+
 async function _processQueueItem(item, deviceUuid) {
+    // Dead-letter items that have exhausted all retry attempts
+    if ((item.retryCount || 0) >= _MAX_SYNC_RETRIES) {
+        console.warn('[SyncEngine] Dead-lettering queueId', item.queueId,
+            '(type=' + item.type + ') after', item.retryCount, 'retries.');
+        try {
+            await StorageModule.writeToFailedSyncLogs({
+                queueId:      item.queueId,
+                type:         item.type,
+                payload:      item.payload,
+                errorContext: 'Exhausted ' + _MAX_SYNC_RETRIES + ' retry attempts',
+                retryCount:   item.retryCount
+            });
+        } catch (_e) {}
+        try { await StorageModule.deleteFromSyncQueue(item.queueId); } catch (_e) {}
+        return;
+    }
+
     switch (item.type) {
         case 'INVOICE':
             await _processInvoiceItem(item, deviceUuid);
@@ -181,6 +209,15 @@ async function _processQueueItem(item, deviceUuid) {
             console.warn('[SyncEngine] Unknown queue type:', item.type, '— discarding queueId', item.queueId);
             await StorageModule.deleteFromSyncQueue(item.queueId);
     }
+
+    // FIX (retry ceiling): unconditionally increment retryCount after each
+    // attempt, whether the item succeeded (already deleted — no-op) or failed
+    // (still in queue — count advances toward the dead-letter ceiling above).
+    // updateSyncQueueRetryCount does an IDB get before put; if the item was
+    // already deleted it returns without writing, so this is always safe.
+    try {
+        await StorageModule.updateSyncQueueRetryCount(item.queueId, (item.retryCount || 0) + 1);
+    } catch (_e) {}
 }
 
 // =========================================================================
@@ -237,15 +274,33 @@ async function _processInvoiceItem(item, deviceUuid) {
         );
 
         if (invoiceError) {
-            // Duplicate key / conflict — treat as already synced and discard
+            // Duplicate key / conflict — invoice row already on server.
             if (String(invoiceError).includes('23505') || String(invoiceError).includes('duplicate')) {
-                console.log('[SyncEngine] Invoice', invoice_number, 'already exists on server — removing from queue.');
-                await StorageModule.deleteFromSyncQueue(item.queueId);
+                // FIX: partial-failure recovery — if the invoice was pushed in a
+                // previous cycle but connectivity dropped mid-loop (after invoice
+                // upsert but before all line-item RPC calls completed), the queue
+                // record has a processedItems array recording which items were
+                // already deducted.  When we see 23505 AND processedItems exists,
+                // fall through so the loop below can retry only the remaining items
+                // without double-deducting already-processed ones.
+                // If processedItems is absent this is an old-format record; discard
+                // safely (cannot retry without risking double-deduction).
+                if (Array.isArray(item.processedItems)) {
+                    console.log('[SyncEngine] Invoice', invoice_number,
+                        'already on server with partial tracking —',
+                        item.processedItems.length, 'item(s) already processed. Retrying remaining.');
+                    // Fall through — do NOT return; the line-item loop will skip
+                    // items already in processedItems.
+                } else {
+                    console.log('[SyncEngine] Invoice', invoice_number, 'already exists on server — removing from queue.');
+                    await StorageModule.deleteFromSyncQueue(item.queueId);
+                    return;
+                }
+            } else {
+                // Any other server error — leave in queue to retry next cycle
+                console.error('[SyncEngine] Invoice upsert failed for', invoice_number, invoiceError);
                 return;
             }
-            // Any other server error — leave in queue to retry next cycle
-            console.error('[SyncEngine] Invoice upsert failed for', invoice_number, invoiceError);
-            return;
         }
     } catch (netErr) {
         console.error('[SyncEngine] Network error posting invoice', invoice_number, netErr);
@@ -324,11 +379,25 @@ async function _processInvoiceItem(item, deviceUuid) {
         return;
     }
 
+    // FIX: partial-failure recovery — load the set of line items that were
+    // successfully processed in a prior attempt.  On 23505 retry the invoice
+    // upsert above falls through here so we only call the RPC for items that
+    // weren't already deducted, preventing double-deductions.
+    const _processedItems = new Set(
+        Array.isArray(item.processedItems) ? item.processedItems : []
+    );
+
     let allLineItemsHandled = true;
 
     for (const lineItem of line_items) {
         const { product_code, quantity, expected_version } = lineItem;
         if (!product_code || !quantity) continue;
+
+        // Skip items already deducted in a previous attempt (see processedItems above)
+        if (_processedItems.has(product_code)) {
+            console.log('[SyncEngine] Skipping already-processed item', product_code, 'in', invoice_number);
+            continue;
+        }
 
         // FIX (Refund Sync): deduct_inventory_atomic deducts stock by default.
         // For REFUND / PARTIAL_REFUND line items the queue stores a POSITIVE qty
@@ -352,6 +421,16 @@ async function _processInvoiceItem(item, deviceUuid) {
 
         if (!handled) {
             allLineItemsHandled = false;
+        } else {
+            // Mark item as processed so retries know it was already deducted.
+            // Persisted to the queue record so this survives page reloads.
+            _processedItems.add(product_code);
+            try {
+                await StorageModule.updateSyncQueueRecord(
+                    item.queueId,
+                    { processedItems: [..._processedItems] }
+                );
+            } catch (_e) {}
         }
     }
 
@@ -412,15 +491,16 @@ async function _processLineItem(productCode, quantity, expectedVersion, deviceUu
 
         // ── C2: OCC CONFLICT — rebase and retry once ─────────────────────
         if (typeof message === 'string' && message.includes('OCC conflict')) {
+            // FIX: pass movementType so OCC retry preserves the original classification
             return await _handleOccConflict(
-                productCode, quantity, deviceUuid, invoiceNumber
+                productCode, quantity, deviceUuid, invoiceNumber, movementType
             );
         }
 
         // ── C3: INSUFFICIENT STOCK — oversell resolution ──────────────────
         if (typeof message === 'string' && message.includes('Insufficient stock')) {
             return await _handleOversell(
-                productCode, quantity, deviceUuid, invoiceNumber, message
+                productCode, quantity, deviceUuid, invoiceNumber, message, expectedVersion
             );
         }
 
@@ -474,7 +554,10 @@ async function _callDeductInventoryAtomic(productCode, quantity, deviceUuid, inv
  * If server has enough stock, retries the RPC with the fresh version.
  * If server lacks stock, falls through to oversell resolution.
  */
-async function _handleOccConflict(productCode, quantity, deviceUuid, invoiceNumber) {
+// FIX: added movementType parameter — was missing, causing all OCC-retried
+// deductions to arrive at the RPC without a movement classification, so refunds
+// retried after a conflict were recorded on the server as a generic SALE type.
+async function _handleOccConflict(productCode, quantity, deviceUuid, invoiceNumber, movementType) {
     console.log('[SyncEngine] OCC conflict on', productCode, '— fetching fresh server state…');
 
     let serverRow;
@@ -498,8 +581,10 @@ async function _handleOccConflict(productCode, quantity, deviceUuid, invoiceNumb
     // Server has enough stock → retry with the fresh version
     if (serverQty >= quantity) {
         try {
+            // FIX: pass movementType so retried refunds/adjustments are classified
+            // correctly on the server — previously it was always passed as undefined.
             const rpcResult = await _callDeductInventoryAtomic(
-                productCode, quantity, deviceUuid, invoiceNumber, serverVersion
+                productCode, quantity, deviceUuid, invoiceNumber, serverVersion, movementType
             );
 
             if (!rpcResult) return false;
@@ -511,7 +596,7 @@ async function _handleOccConflict(productCode, quantity, deviceUuid, invoiceNumb
             }
             // If still failing after rebase, fall through to oversell
             if (typeof msg2 === 'string' && msg2.includes('Insufficient stock')) {
-                return await _handleOversell(productCode, quantity, deviceUuid, invoiceNumber, msg2);
+                return await _handleOversell(productCode, quantity, deviceUuid, invoiceNumber, msg2, serverVersion);
             }
             console.error('[SyncEngine] OCC retry still failed:', msg2);
             return false;
@@ -521,10 +606,11 @@ async function _handleOccConflict(productCode, quantity, deviceUuid, invoiceNumb
         }
     }
 
-    // Server doesn't have enough stock after rebase → treat as oversell
+    // Server doesn't have enough stock after rebase → treat as oversell (pass movementType)
     return await _handleOversell(
         productCode, quantity, deviceUuid, invoiceNumber,
-        'Insufficient stock after OCC rebase (server qty=' + serverQty + ')'
+        'Insufficient stock after OCC rebase (server qty=' + serverQty + ')',
+        serverVersion
     );
 }
 
@@ -536,7 +622,10 @@ async function _handleOccConflict(productCode, quantity, deviceUuid, invoiceNumb
  * Inserts a sync_conflicts record for MANUAL_REVIEW.
  * Alerts the pharmacist via showToast.
  */
-async function _handleOversell(productCode, quantity, deviceUuid, invoiceNumber, originalMessage) {
+// FIX: added expectedVersion parameter — was referenced on line 642 (sync_conflicts
+// local_version) but was never in scope; always resolved to undefined → 0.
+// All three call sites now pass the version they captured from the RPC context.
+async function _handleOversell(productCode, quantity, deviceUuid, invoiceNumber, originalMessage, expectedVersion) {
     console.warn('[SyncEngine] Oversell detected for', productCode, '—', originalMessage);
 
     // ── Fetch current server stock ─────────────────────────────────────
@@ -583,18 +672,28 @@ async function _handleOversell(productCode, quantity, deviceUuid, invoiceNumber,
             (typeof _DEVICE_UUID !== 'undefined' ? _DEVICE_UUID.slice(0, 8) : 'UNKNOWN') +
             '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6).toUpperCase();
 
-        // F4: Use correct schema column names and raw _dbInsert (no SDK)
+        // FIX: pass movement_id — was generated above but never included in the
+        // insert payload.  inventory_movements.movement_id is NOT NULL with no
+        // default (confirmed by _pushUnsyncedMovements which always provides it);
+        // omitting it caused this insert to fail silently and lose the audit row.
+        // FIX: add stock_after = 0 — NOT NULL column with no default; oversell debt
+        // adjustments reduce stock to zero (or below, clamped by the RPC).
         await _dbInsert('inventory_movements', {
+            movement_id:    movId,            // FIX: required NOT NULL column
             product_code:   productCode,
             quantity_change: -shortfall,      // schema col: quantity_change (not quantity_delta)
+            stock_after:    0,                // FIX: required NOT NULL column; debt → stock at 0
             movement_type:  'ADJUSTMENT',
             invoice_number: invoiceNumber,
             device_uuid:    deviceUuid,
+            // FIX: counter_id was missing — oversell audit rows had no counter
+            // identification, making it impossible to trace which terminal caused
+            // the oversell in the movements ledger.
+            counter_id:     (typeof _getDeviceCode === 'function' ? _getDeviceCode() : ''),
             description:    'Oversell debt — requested ' + quantity +
                             ', available ' + availableQty +
                             ', shortfall ' + shortfall,
             moved_at:       new Date().toISOString() // schema col: moved_at (not created_at)
-            // id is auto-PK — omitted
         });
     } catch (e) {
         console.error('[SyncEngine] Failed to insert debt ADJUSTMENT movement:', e);

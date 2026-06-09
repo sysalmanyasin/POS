@@ -948,9 +948,12 @@ async function executePurgeOld(keepDays) {
 
 // ── CSV Import ────────────────────────────────────────────────────────────
 function _handleCSVImport(file) {
+    // FIX: default to false — zero-stock items still belong in the catalogue
+    // so they appear in search and can be restocked. Only skip if the
+    // checkbox explicitly exists AND is checked.
     const skipZero = document.getElementById('csvSkipZeroStock')
         ? document.getElementById('csvSkipZeroStock').checked
-        : true;
+        : false;
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -1033,13 +1036,19 @@ function _handleCSVImport(file) {
                   subtitle: imported.length + ' items ready to import.' + skipNote + '\n\nThis will REPLACE your current inventory.' },
                 () => {
                     masterInventoryDB = imported;
+                    window.masterInventoryDB = imported;
                     try { saveInventoryToDB(masterInventoryDB); } catch(ex) {}
+                    // Mark local inventory as dirty so startup cloud pull cannot
+                    // overwrite it until the user explicitly pushes to cloud.
+                    try { localStorage.setItem('_pharma_inv_dirty', 'true'); } catch(_e) {}
                     // Clear demo banner if visible
                     const demoBanner = document.getElementById('demoInventoryBanner');
                     if (demoBanner) demoBanner.style.display = 'none';
-                    if (typeof updateStatsCounters   === 'function') updateStatsCounters();
-                    if (typeof refreshSearchIndex    === 'function') refreshSearchIndex();
-                    if (typeof renderInvoiceUI       === 'function') renderInvoiceUI();
+                    if (typeof updateStatsCounters      === 'function') updateStatsCounters();
+                    if (typeof refreshSearchIndex       === 'function') refreshSearchIndex();
+                    if (typeof renderInvoiceUI          === 'function') renderInvoiceUI();
+                    if (typeof updateHdrStats           === 'function') updateHdrStats();
+                    if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
                     refreshDataHubInventoryStats();
                     showToast('✅ Imported ' + imported.length + ' items from CSV.');
                 },
