@@ -27,6 +27,18 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
    APP SHELL
 ================================================================ */
 #appRoot{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+
+/* ── Safe-area insets: iOS PWA notch / home-indicator support ────
+   viewport-fit=cover lets us use the full screen; env() pads us
+   away from the hardware edges so nothing is clipped.              */
+@supports (padding: env(safe-area-inset-top)) {
+  #appRoot {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
 /* ================================================================
    HEADER — COMPACT ERP
 ================================================================ */
@@ -567,6 +579,64 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   #statusBar #f9StatusHint{display:flex;}
   /* Compact the bar */
   #statusBar{padding:0 10px;justify-content:flex-end;}
+
+  /* ── Portrait mobile: stack billing + payment vertically ────────
+     Left panel (search/invoice) fills the top; right panel
+     (totals/checkout) becomes a scrollable strip at the bottom.   */
+  #appBody{flex-direction:column;}
+  #leftPanel{flex:1;min-height:0;overflow:hidden;}
+  #rightPanel{
+    width:100%!important;
+    border-left:none!important;
+    border-top:2px solid var(--g200);
+    max-height:42vh;
+    overflow-y:auto;
+    flex-shrink:0;
+    -webkit-overflow-scrolling:touch;
+  }
+}
+
+/* ================================================================
+   LANDSCAPE MOBILE / COMPACT TABLETS
+   Phones rotated sideways: restore side-by-side layout but with
+   a narrower right panel and a slimmer header.
+================================================================ */
+@media (orientation:landscape) and (max-height:520px) {
+  /* Ultra-compact header */
+  #appHeader{height:36px;padding:0 8px;}
+  .hdr-brand{min-width:0;}
+  .hdr-sub{display:none;}
+  .hdr-stat-block{display:none;}
+  .hdr-f12-hint{display:none;}
+  .hdr-btn{height:24px;padding:0 8px;font-size:10px;}
+  .staff-badge{height:24px;font-size:10px;padding:0 7px;}
+
+  /* Smaller tab strip */
+  #tabStrip{height:26px;}
+  .tab-btn{height:20px;font-size:10px;padding:0 8px;}
+
+  /* Restore side-by-side with narrowed right panel */
+  #appBody{flex-direction:row!important;}
+  #leftPanel{flex:1;min-height:0;overflow:hidden;}
+  #rightPanel{
+    width:260px!important;
+    max-height:none!important;
+    border-left:1px solid var(--g200)!important;
+    border-top:none!important;
+    overflow-y:auto;
+    flex-shrink:0;
+  }
+
+  /* Hide status bar to reclaim vertical space */
+  #statusBar{display:none;}
+
+  /* Safe-area sides for landscape notch */
+  @supports (padding: env(safe-area-inset-left)) {
+    #appRoot{
+      padding-left:env(safe-area-inset-left);
+      padding-right:env(safe-area-inset-right);
+    }
+  }
 }
 
 /* ================================================================
