@@ -682,7 +682,7 @@
            Full event audit trail — every sale, refund, edit, login, setting
            change, and sync event. Rendered by auditLog.js.
       ════════════════════════════════════════════════════════════════════════ -->
-      <div id="auditLogView" class="view" style="display:none;">
+      <div id="auditLogView" class="view">
         <div style="padding:16px 20px 0;">
 
           <!-- Header -->
@@ -726,9 +726,9 @@
             </label>
           </div>
 
-          <!-- Table -->
-          <div style="overflow-x:auto;border:1px solid var(--g100,#f1f5f9);border-radius:10px;">
-            <table style="width:100%;border-collapse:collapse;min-width:540px;" aria-label="Audit Log">
+          <!-- Table — overflow wrapper for mobile -->
+          <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--g100,#f1f5f9);border-radius:10px;">
+            <table style="width:100%;border-collapse:collapse;min-width:500px;" aria-label="Audit Log">
               <thead>
                 <tr style="background:var(--g50,#f8fafc);border-bottom:2px solid var(--g100,#f1f5f9);">
                   <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;
