@@ -1519,13 +1519,10 @@ function deleteProductFromCatalogue(productCode) {
         });
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _attachCsvListener);
-    } else {
-        _attachCsvListener();
-    }
-
 })();
+// Note: CSV file input listener is registered in settings.js (_handleCSVImport).
+// The _attachCsvListener inside this module is intentionally not auto-invoked to
+// prevent double-processing when both modules are loaded on the same page.
 
 // =========================================================================
 // PURGE INVENTORY DATA — Password-protected local data wipe

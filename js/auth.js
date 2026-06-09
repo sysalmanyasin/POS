@@ -1063,15 +1063,49 @@ function executeProtectedAction() {
 }
 
 // =========================================================================
-// CSV IMPORT FIX — Trigger file input after auth
+// CSV IMPORT — show a visible overlay so the user directly clicks the label
+// Programmatic .click() on <input type="file"> is blocked by browsers when
+// called from async/timeout chains (no user-gesture context).  A <label>
+// click IS treated as a direct user gesture and reliably opens the picker.
 // =========================================================================
 function _triggerCsvFileInput() {
-    const f = document.getElementById('csvFile');
-    if (f) {
-        f.click();
-    } else {
-        showToast('❌ CSV file input not found.', true);
-    }
+    const existing = document.getElementById('_csvPickerOverlay');
+    if (existing) { existing.style.display = 'flex'; return; }
+    const overlay = document.createElement('div');
+    overlay.id = '_csvPickerOverlay';
+    overlay.style.cssText = [
+        'position:fixed;inset:0;z-index:9999;',
+        'background:rgba(10,20,35,.80);',
+        'display:flex;align-items:center;justify-content:center;padding:16px;'
+    ].join('');
+    overlay.innerHTML = [
+        '<div style="background:#fff;border-radius:16px;padding:32px 28px;',
+            'max-width:380px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.4);',
+            'text-align:center;font-family:inherit;">',
+          '<div style="font-size:40px;margin-bottom:12px;">📥</div>',
+          '<div style="font-size:15px;font-weight:800;color:#0f1923;margin-bottom:6px;">',
+              'Import Inventory CSV</div>',
+          '<div style="font-size:12px;color:#6b7280;line-height:1.7;margin-bottom:22px;">',
+              'Admin verified. Click <strong>Choose CSV File</strong> to select<br>',
+              'your inventory spreadsheet (.csv).</div>',
+          '<label for="csvFile" ',
+              'style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;',
+                  'padding:11px 28px;background:linear-gradient(135deg,#1565c0,#0d47a1);',
+                  'color:#fff;border-radius:10px;font-size:13px;font-weight:800;',
+                  'letter-spacing:.3px;box-shadow:0 4px 14px rgba(21,101,192,.4);" ',
+              'onclick="document.getElementById(\'_csvPickerOverlay\').style.display=\'none\'">',
+            '📂 Choose CSV File',
+          '</label>',
+          '<div style="margin-top:16px;">',
+            '<button onclick="document.getElementById(\'_csvPickerOverlay\').style.display=\'none\'" ',
+                'style="background:none;border:none;font-size:12px;color:#9ca3af;',
+                    'cursor:pointer;text-decoration:underline;">',
+              'Cancel',
+            '</button>',
+          '</div>',
+        '</div>'
+    ].join('');
+    document.body.appendChild(overlay);
 }
 
 function cancelPurgeConfirm() {
