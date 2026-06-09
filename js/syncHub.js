@@ -465,8 +465,8 @@ async function _handleOccConflict(productCode, quantity, deviceUuid, invoiceNumb
     try {
         const { data, error } = await _dbSelect(
             'inventory',
-            'stock, version',
-            'code=eq.' + productCode
+            'code=eq.' + productCode, // FIX: query filter (was wrongly in select position)
+            'stock,version'           // FIX: select columns (were wrongly in query position)
         );
 
         if (error) throw error;
@@ -529,8 +529,8 @@ async function _handleOversell(productCode, quantity, deviceUuid, invoiceNumber,
     try {
         const { data, error } = await _dbSelect(
             'inventory',
-            'stock, version',
-            'code=eq.' + productCode
+            'code=eq.' + productCode, // FIX: query filter (was wrongly in select position)
+            'stock,version'           // FIX: select columns (were wrongly in query position)
         );
 
         if (!error && data) {
@@ -1511,7 +1511,9 @@ async function forceInventoryPull() {
                         const st = tx.objectStore('inventory_movements');
                         for (const m of movs) {
                             if (!m || !m.movement_id) continue;
-                            if (m.device_uuid === _DEVICE_UUID) continue; // skip our own
+                            // FIX: removed "skip our own" guard — Force Pull is a full resync.
+                            // IDB put() is idempotent (keyPath=movementId), so re-writing own
+                            // movements is safe and ensures all devices see the complete ledger.
                             // SCHEMA FIX: IDB keyPath is 'movementId' (camelCase) —
                             // must map all Supabase snake_case fields to IDB camelCase
                             try { st.put({
