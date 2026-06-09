@@ -12,12 +12,12 @@
   }
 })();
 </script>
-<meta name="viewport" id="viewportMeta" content="width=1360">
+<meta name="viewport" id="viewportMeta" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <script>
 (function(){
   var ua = navigator.userAgent;
-  if (/Mobi|Android|iPhone|iPad/i.test(ua)) {
-    document.getElementById('viewportMeta').setAttribute('content','width=device-width,initial-scale=1,viewport-fit=cover');
+  if (!/Mobi|Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua)) {
+    document.getElementById('viewportMeta').setAttribute('content','width=1360');
   }
 })();
 </script>
@@ -103,7 +103,7 @@
   <button class="tab-btn" id="tab-history" onclick="switchTab('historyView',this)">
     📊 History <span class="tab-k">F7</span>
   </button>
-  <button class="tab-btn" id="tab-inventory" onclick="switchTab('inventoryView',this)">
+  <button class="tab-btn" id="tab-inventory" onclick="switchTab('inventoryView',this);if(typeof showInventoryPlaceholder==='function')showInventoryPlaceholder();">
     📦 Inventory <span class="tab-k">F8</span>
   </button>
   <button class="tab-btn" id="tab-settings" onclick="switchTab('settingsView',this)">
