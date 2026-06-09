@@ -104,7 +104,11 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   background:var(--white);border-bottom:2px solid var(--g200);
   display:flex;align-items:center;padding:0 6px;gap:2px;
   box-shadow:var(--sh1);
+  overflow-x:auto;overflow-y:hidden;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
 }
+#tabStrip::-webkit-scrollbar{display:none;}
 .tab-btn{
   height:24px;padding:0 12px;
   border:none;background:none;
@@ -127,7 +131,7 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   display:flex;align-items:center;justify-content:center;
 }
 .tab-sep{width:1px;height:18px;background:var(--g300);margin:auto 4px;}
-.tab-sp{flex:1;}
+.tab-sp{flex:1;min-width:0;}
 #editModeAlertBar{
   display:none;align-items:center;gap:6px;padding:0 10px;
   background:var(--amb-lt);border-left:3px solid var(--amb-mid);
@@ -471,6 +475,19 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
 ================================================================ */
 @media (max-width:640px){
 
+  /* ── Tab strip: ensure it scrolls and doesn't break layout ── */
+  #tabStrip{
+    height:auto;min-height:var(--tab-h);
+    padding:4px 6px;
+    /* Already overflow-x:auto from base styles */
+  }
+  .tab-btn{
+    white-space:nowrap;flex-shrink:0;
+    padding:0 10px;font-size:10px;
+  }
+  /* Keep tab-sp from forcing overflow */
+  .tab-sp{display:none;}
+
   /* ── Header: collapse to compact 2-row layout ── */
   #appHeader{
     height:auto;flex-wrap:wrap;gap:0;
@@ -550,4 +567,21 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   #statusBar #f9StatusHint{display:flex;}
   /* Compact the bar */
   #statusBar{padding:0 10px;justify-content:flex-end;}
+}
+
+/* ================================================================
+   AUDIT LOG VIEW — ensure proper layout inside .view container
+================================================================ */
+#auditLogView{
+  padding:0; /* inner div handles its own padding */
+}
+#auditLogView > div {
+  min-height:100%;
+}
+/* Make the audit table wrapper scroll safely on all screen sizes */
+#auditLogView .audit-table-scroll{
+  overflow-x:auto;
+  -webkit-overflow-scrolling:touch;
+  border:1px solid var(--g100);
+  border-radius:10px;
 }
