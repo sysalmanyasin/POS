@@ -1532,7 +1532,14 @@ function _doSwitchTab(tabId, btn) {
     if (tabId === 'holdView')      renderHeldBillsTable();
     if (tabId === 'historyView')   _restoreHistoryView();
     if (tabId === 'settingsView')  _loadSettingsForm();
-    if (tabId === 'inventoryView') { if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder(); }
+    if (tabId === 'inventoryView') {
+        if (typeof _invReady !== 'undefined' && _invReady) {
+            if (typeof renderInventoryView === 'function') renderInventoryView();
+        } else {
+            if (typeof generateInventoryReport === 'function') generateInventoryReport();
+            else if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
+        }
+    }
     if (tabId === 'syncHubView')   { if (typeof renderSyncHubView     === 'function') renderSyncHubView();  }
     if (tabId === 'billingView')  setTimeout(() => searchBox.focus(), 50);
 }
