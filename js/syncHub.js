@@ -2061,6 +2061,9 @@ function closeGlobalPurgeModal() {
     if (m) m.style.display = 'none';
     _gpOtpEntered = '';
     _gpPinEntered = '';
+    // FIX: clean up any lingering OTP key so it doesn't survive until the next purge attempt.
+    // Fire-and-forget — no need to await.
+    try { _supaDel(_GP_OTP_KEY).catch(() => {}); } catch(_e) {}
 }
 
 // ── STEP 1: pre-flight + send OTP ────────────────────────────────────────
@@ -2096,10 +2099,12 @@ async function _gpRenderStep1() {
                 uuid: r.uuid,
                 name: r.name || '—',
                 lastSeen: r.last_seen_at ? new Date(r.last_seen_at).getTime() : 0,
+                // FIX: consistent with populateSyncHubNetworkGrid — is_active===false means archived.
+                // There is no separate 'purged' status column; purged devices also have is_active=false.
                 status: (r.is_active === false) ? 'archived' : 'active'
             }))
             .filter(d => d.lastSeen >= cutoff)
-            .filter(d => d.status !== 'archived' && d.status !== 'purged');
+            .filter(d => d.status === 'active');
 
         if (devices.length === 0) {
             listEl.innerHTML = '<div style="padding:14px;text-align:center;color:#94a3b8;font-size:12px;">No active devices found.</div>';
@@ -2316,9 +2321,10 @@ async function _gpExecuteNetworkPurge() {
         'pharma_master_password_hash',
         // Also clear the master PIN setup key so the EmailJS flow re-runs correctly.
         'pharma_master_setup_pin',
-        // FIX: Clean up the purge broadcast keys themselves so they don't linger
-        // in pharma_sync and cause confusion on the next purge cycle.
-        'pharma_global_purge_cmd',
+        // FIX: Clean up the purge OTP key but NOT the broadcast command key.
+        // pharma_global_purge_cmd must survive for the 5-min broadcast window so offline
+        // devices that reconnect within that window still receive the GLOBAL_PURGE command.
+        // The command has its own expiresAt guard; devices ignore it once expired.
         'pharma_global_purge_otp',
     ];
     // FIX: Snapshot device list BEFORE deleting pharma_devices from KV.
@@ -2744,7 +2750,10 @@ async function _cpExecute() {
         'pharma_branch_identity', 'pharma_currency', 'pharma_max_disc',
         'pharma_discount_presets', 'pharma_thermal_settings', 'pharma_paper_mode',
         'pharma_receipt_info', 'pharma_allow_overstock', 'pharma_staff_list',
-        'pharma_commands', 'pharma_cloud_device_registry'
+        'pharma_commands', 'pharma_cloud_device_registry',
+        // FIX: clean up the broadcast command key and OTP so they don't linger
+        // past expiry or confuse subsequent Cloud Purge cycles.
+        'pharma_cloud_wipe_cmd', 'pharma_cloud_purge_otp'
     ];
     for (const k of kvKeys) {
         try { await _supaDel(k); log('☁️  deleted KV key: ' + k); }
@@ -2972,13 +2981,8 @@ window.PharmaOCCTest = (() => {
 const _IDB_NUKE_CMD_KEY = 'pharma_idb_nuke_cmd';
 
 async function openIDBNukeModal() {
-    // Re-use adminGateModal for PIN verification
-    window._pendingPostAuthAction = async function() {
-        delete window._pendingPostAuthAction;
-        await _executeIDBNukeBroadcast();
-    };
-
-    // Show a dedicated confirm dialog first
+    // Show a dedicated confirm dialog first, then route through requestAdminAccess('IDB_NUKE').
+    // executeProtectedAction dispatches to window._executeIDBNukeBroadcast on success.
     const existing = document.getElementById('_idbNukeConfirmOverlay');
     if (existing) { existing.style.display = 'flex'; return; }
 
@@ -3020,9 +3024,6 @@ function _idbNukeRequestAuth() {
 }
 
 async function _executeIDBNukeBroadcast() {
-    const supaUrl  = (typeof SUPABASE_URL  !== 'undefined') ? SUPABASE_URL  : null;
-    const supaKey  = (typeof SUPABASE_ANON !== 'undefined') ? SUPABASE_ANON : null;
-
     // Show progress overlay
     let logEl;
     const progOverlay = document.createElement('div');
@@ -3049,27 +3050,17 @@ async function _executeIDBNukeBroadcast() {
     try {
         const now       = Date.now();
         const expiresAt = now + 5 * 60 * 1000; // 5-minute window
-        const myUUID    = localStorage.getItem('pharma_device_id') || 'unknown';
+        const myUUID    = _DEVICE_UUID || localStorage.getItem('pharma_device_id') || 'unknown';
 
         const payload = JSON.stringify({ issuedAt: now, expiresAt, issuedBy: myUUID });
 
-        if (supaUrl && supaKey) {
-            const res = await fetch(`${supaUrl}/rest/v1/rpc/kv_set`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': supaKey,
-                    'Authorization': 'Bearer ' + supaKey
-                },
-                body: JSON.stringify({ p_key: _IDB_NUKE_CMD_KEY, p_value: payload })
-            });
-            if (res.ok) {
-                log('✅ IDB_NUKE command broadcast to cloud (5-min window).');
-            } else {
-                log('⚠️  Cloud broadcast failed — executing locally only.', '#fbbf24');
-            }
+        // FIX: was using undefined SUPABASE_URL/SUPABASE_ANON variables and a non-existent
+        // rpc/kv_set endpoint. Use _supaSet() which is the established KV helper in config.js.
+        const ok = await _supaSet(_IDB_NUKE_CMD_KEY, payload);
+        if (ok) {
+            log('✅ IDB_NUKE command broadcast to cloud (5-min window).');
         } else {
-            log('⚠️  Supabase not configured — local nuke only.', '#fbbf24');
+            log('⚠️  Cloud broadcast failed — executing locally only.', '#fbbf24');
         }
 
         // Execute locally on this device immediately

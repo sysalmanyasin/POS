@@ -1061,6 +1061,11 @@ function executeProtectedAction() {
     else if (type === 'MASTER_RECLAIM')        { if (typeof DevicesModule !== 'undefined' && typeof DevicesModule._doReclaimMasterRole === 'function') DevicesModule._doReclaimMasterRole(); }
     else if (type === 'PURGE_OLD_INVOICES')    { if (typeof _openPurgeOldModalConfirmed === 'function') _openPurgeOldModalConfirmed(); }
     else if (type === 'PURGE_ZERO_STOCK')      { if (typeof _purgeZeroStockConfirmed === 'function') _purgeZeroStockConfirmed(); }
+    // FIX: IDB_NUKE was missing from this dispatch — auth succeeded but nothing executed.
+    // _executeIDBNukeBroadcast is defined in syncHub.js and exposed on window.
+    else if (type === 'IDB_NUKE') {
+        if (typeof window._executeIDBNukeBroadcast === 'function') window._executeIDBNukeBroadcast();
+    }
 }
 
 // =========================================================================
