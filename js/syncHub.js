@@ -895,41 +895,62 @@ async function renderSyncHubView() {
       <div class="sh-card-hint">Counters with a heartbeat within the last ${SYNC_HUB_ACTIVE_SEC} seconds</div>
     </div>
 
-    <!-- FORCE INVENTORY PULL CARD -->
-    <div class="sh-card">
-      <div class="sh-card-lbl">⬇️ Force Inventory Pull</div>
-      <div class="sh-card-hint" style="margin-bottom:6px;">
-        Pulls the latest inventory snapshot and remote invoices/movements from the cloud.
-        Your local invoice ledger is preserved — only new remote records are merged in.
-      </div>
-      <button class="sh-btn sh-btn-teal" id="forcePullBtn"
-              onclick="forceInventoryPull()" style="margin-top:6px;width:100%;justify-content:center;">
-        <span id="forcePullIcon">⬇️</span> Pull Inventory From Cloud
-      </button>
-      <div class="sh-progress-wrap" id="shPullProgressWrap">
-        <div class="sh-progress-bar-track">
-          <div class="sh-progress-bar-fill" id="shPullProgressFill"></div>
-        </div>
-        <div class="sh-progress-label" id="shPullProgressLabel">Preparing…</div>
-      </div>
-    </div>
+    <!-- INVENTORY CLOUD SYNC — Push + Pull grouped card -->
+    <div class="sh-card" id="shPushInvCard" style="padding:0;overflow:hidden;">
 
-    <!-- PUSH INVENTORY TO CLOUD CARD — Master only -->
-    <div class="sh-card" id="shPushInvCard">
-      <div class="sh-card-lbl">⬆️ Push Inventory to Cloud</div>
-      <div class="sh-card-hint" style="margin-bottom:6px;">
-        Pushes the full local inventory catalogue to Supabase so all
-        devices can pull the latest stock and product list.
-      </div>
-      <button class="sh-btn sh-btn-teal" id="forcePushInvBtn"
-              onclick="forcePushInventoryToCloud()" style="margin-top:6px;width:100%;justify-content:center;">
-        <span id="forcePushInvIcon">⬆️</span> Push Inventory to Cloud
-      </button>
-      <div class="sh-progress-wrap" id="shPushInvProgressWrap">
-        <div class="sh-progress-bar-track">
-          <div class="sh-progress-bar-fill" id="shPushInvProgressFill"></div>
+      <!-- Group header -->
+      <div style="
+        display:flex;align-items:center;gap:9px;
+        padding:11px 16px 10px;
+        background:linear-gradient(135deg,#0f4c75 0%,#1a6e9e 100%);
+        border-radius:11px 11px 0 0;
+      ">
+        <span style="font-size:18px;line-height:1;">📦</span>
+        <div>
+          <div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.6px;text-transform:uppercase;">Inventory Cloud Sync</div>
+          <div style="font-size:10px;color:rgba(255,255,255,.65);margin-top:1px;">Push local catalogue · Pull remote snapshot</div>
         </div>
-        <div class="sh-progress-label" id="shPushInvProgressLabel">Preparing…</div>
+      </div>
+
+      <!-- Two-column body -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;padding:14px 14px 14px;">
+
+        <!-- PUSH column -->
+        <div style="padding-right:10px;border-right:1px solid var(--g200,#e5e7eb);">
+          <div style="font-size:10px;font-weight:700;color:#0f4c75;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">⬆️ Push to Cloud</div>
+          <div class="sh-card-hint" style="margin-bottom:8px;font-size:11px;line-height:1.5;">
+            Uploads your full local catalogue so all counters get the latest stock &amp; product list.
+          </div>
+          <button class="sh-btn sh-btn-teal" id="forcePushInvBtn"
+                  onclick="forcePushInventoryToCloud()" style="width:100%;justify-content:center;font-size:12px;padding:7px 10px;">
+            <span id="forcePushInvIcon">⬆️</span> Push Now
+          </button>
+          <div class="sh-progress-wrap" id="shPushInvProgressWrap" style="margin-top:6px;">
+            <div class="sh-progress-bar-track">
+              <div class="sh-progress-bar-fill" id="shPushInvProgressFill"></div>
+            </div>
+            <div class="sh-progress-label" id="shPushInvProgressLabel">Preparing…</div>
+          </div>
+        </div>
+
+        <!-- PULL column -->
+        <div style="padding-left:10px;">
+          <div style="font-size:10px;font-weight:700;color:#0f4c75;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">⬇️ Pull from Cloud</div>
+          <div class="sh-card-hint" style="margin-bottom:8px;font-size:11px;line-height:1.5;">
+            Merges the latest cloud snapshot into this device. Local invoice ledger is preserved.
+          </div>
+          <button class="sh-btn sh-btn-teal" id="forcePullBtn"
+                  onclick="forceInventoryPull()" style="width:100%;justify-content:center;font-size:12px;padding:7px 10px;">
+            <span id="forcePullIcon">⬇️</span> Pull Now
+          </button>
+          <div class="sh-progress-wrap" id="shPullProgressWrap" style="margin-top:6px;">
+            <div class="sh-progress-bar-track">
+              <div class="sh-progress-bar-fill" id="shPullProgressFill"></div>
+            </div>
+            <div class="sh-progress-label" id="shPullProgressLabel">Preparing…</div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -947,16 +968,27 @@ async function renderSyncHubView() {
   </div>
 
   <!-- ── Sync Activity Log ──────────────────────────────────────────────── -->
-  <div class="sh-section" style="margin-top:16px;">
-    <div class="sh-section-hdr" style="justify-content:space-between;">
-      <span class="sh-section-title">📋 Sync Activity Log</span>
-      <div style="display:flex;gap:8px;align-items:center;">
+  <div class="sh-section" style="margin-top:16px;" id="syncLogSection">
+    <div class="sh-section-hdr" style="justify-content:space-between;cursor:pointer;"
+         onclick="_toggleSyncLog()" title="Click to expand / collapse">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span id="syncLogChevron"
+              style="display:inline-flex;align-items:center;justify-content:center;
+                     width:22px;height:22px;border-radius:6px;
+                     background:var(--g100,#f1f5f9);color:var(--g500,#64748b);
+                     font-size:12px;font-weight:900;transition:transform .25s;
+                     flex-shrink:0;user-select:none;">▾</span>
+        <span class="sh-section-title">📋 Sync Activity Log</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;" onclick="event.stopPropagation()">
         <span class="sh-section-sub" id="syncLogSource">Loading…</span>
-        <button class="sh-btn sh-btn-teal" style="padding:5px 12px;font-size:11px;" onclick="renderSyncLogPanel()">↻ Refresh</button>
-        <button class="sh-btn" style="padding:5px 12px;font-size:11px;background:#e2e8f0;color:#475569;" onclick="_clearLocalSyncLog()">🗑 Clear Local</button>
+        <button class="sh-btn sh-btn-teal" style="padding:5px 12px;font-size:11px;"
+                onclick="renderSyncLogPanel()">↻ Refresh</button>
+        <button class="sh-btn" style="padding:5px 12px;font-size:11px;background:#e2e8f0;color:#475569;"
+                onclick="_clearLocalSyncLog()">🗑 Clear Local</button>
       </div>
     </div>
-    <div id="syncLogPanel" class="sh-matrix-wrap" style="padding:0;">
+    <div id="syncLogPanel" class="sh-matrix-wrap" style="padding:0;transition:max-height .3s ease,opacity .25s ease;overflow:hidden;">
       <div class="sh-loading">Loading sync log…</div>
     </div>
   </div>
@@ -1024,6 +1056,51 @@ async function refreshSyncHub() {
 //   1. Supabase sync_log table (all devices, last 7 days, 200 rows)
 //   2. Local localStorage ring-buffer (this device only, offline fallback)
 // =========================================================================
+
+// ── Sync Activity Log collapse / expand ───────────────────────────────────
+(function() {
+  var _syncLogCollapsed = false;
+
+  window._toggleSyncLog = function() {
+    _syncLogCollapsed = !_syncLogCollapsed;
+    var panel   = document.getElementById('syncLogPanel');
+    var chevron = document.getElementById('syncLogChevron');
+    if (!panel) return;
+    if (_syncLogCollapsed) {
+      // Snapshot current height then animate to 0
+      panel.style.maxHeight  = panel.scrollHeight + 'px';
+      panel.style.opacity    = '1';
+      requestAnimationFrame(function() {
+        panel.style.maxHeight = '0px';
+        panel.style.opacity   = '0';
+      });
+      if (chevron) {
+        chevron.style.transform = 'rotate(-90deg)';
+        chevron.title = 'Expand log';
+      }
+    } else {
+      panel.style.maxHeight = panel.scrollHeight + 'px';
+      panel.style.opacity   = '1';
+      // After transition ends, remove maxHeight so content can grow freely
+      panel.addEventListener('transitionend', function _cleanup() {
+        if (!_syncLogCollapsed) panel.style.maxHeight = 'none';
+        panel.removeEventListener('transitionend', _cleanup);
+      });
+      if (chevron) {
+        chevron.style.transform = 'rotate(0deg)';
+        chevron.title = 'Collapse log';
+      }
+    }
+  };
+
+  // After the log renders, ensure maxHeight is unconstrained so new rows show
+  window._syncLogExpandAfterRender = function() {
+    if (_syncLogCollapsed) return;
+    var panel = document.getElementById('syncLogPanel');
+    if (panel) panel.style.maxHeight = 'none';
+  };
+})();
+
 async function renderSyncLogPanel() {
     const panel   = document.getElementById('syncLogPanel');
     const srcEl   = document.getElementById('syncLogSource');
@@ -1131,6 +1208,7 @@ async function renderSyncLogPanel() {
 
     html += '</tbody></table>';
     panel.innerHTML = '<div style="overflow-x:auto;">' + html + '</div>';
+    if (typeof _syncLogExpandAfterRender === 'function') _syncLogExpandAfterRender();
 }
 
 function _clearLocalSyncLog() {
