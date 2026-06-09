@@ -441,6 +441,25 @@ const DevicesModule = (() => {
             }
         } catch(_e) {}
 
+        // IDB Nuke broadcast
+        try {
+            const idbRaw = await _supaGet('pharma_idb_nuke_cmd');
+            if (idbRaw) {
+                const cmd         = JSON.parse(idbRaw);
+                const now         = Date.now();
+                const exp         = Number(cmd && cmd.expiresAt) || 0;
+                const issuedBy    = cmd && cmd.issuedBy;
+                const issuedAt    = String(Number(cmd && cmd.issuedAt) || 0);
+                const lastApplied = localStorage.getItem('pharma_idb_nuke_applied_at');
+                // Execute on ALL devices (including issuer — it handles itself in syncHub)
+                if (exp >= now && lastApplied !== issuedAt && issuedBy !== _DEVICE_UUID) {
+                    try { localStorage.setItem('pharma_idb_nuke_applied_at', issuedAt); } catch(_e) {}
+                    await _executeCommand({ type: 'IDB_NUKE', sentBy: issuedBy });
+                    return;
+                }
+            }
+        } catch(_e) {}
+
         // Targeted commands
         try {
             const raw      = await _supaGet(COMMANDS_KEY);
@@ -552,6 +571,64 @@ const DevicesModule = (() => {
                 } catch(_e) {}
                 stop();
                 setTimeout(() => { try { window.location.reload(); } catch(_e) {} }, 2000);
+                break;
+            }
+            case 'IDB_NUKE': {
+                // Nuclear IDB wipe — deleteDatabase() on both primary databases.
+                // More reliable than .clear() because it removes the database entirely;
+                // rebuilt fresh on next boot. Called when Global Purge leaves stale IDB data.
+                console.warn('[DevicesModule] IDB_NUKE received — deleting IndexedDB databases.');
+
+                // Stop sync engine before touching IDB
+                try {
+                    if (typeof StorageModule !== 'undefined') {
+                        if (typeof StorageModule.setSyncEnabled === 'function') StorageModule.setSyncEnabled(false);
+                        if (typeof StorageModule.clearAllQueues === 'function') StorageModule.clearAllQueues();
+                    }
+                } catch(_e) {}
+
+                // Reset in-memory globals so nothing tries to write after delete
+                try {
+                    if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = [];
+                    if (typeof temporaryHeldBills  !== 'undefined') temporaryHeldBills  = [];
+                    if (typeof masterInventoryDB   !== 'undefined') masterInventoryDB   = [];
+                    if (typeof activeCartItems     !== 'undefined') activeCartItems     = [];
+                } catch(_e) {}
+
+                // Close open IDB handles before deleteDatabase
+                try { if (typeof StorageModule !== 'undefined' && typeof StorageModule.closeDB === 'function') StorageModule.closeDB(); } catch(_e) {}
+                try { if (typeof db !== 'undefined' && db && typeof db.close === 'function') db.close(); } catch(_e) {}
+
+                // Nuclear delete — use syncHub helper if available, else inline
+                const _idbDbs = ['PharmaDataDB', 'PharmaInventoryDB'];
+                for (const _dbName of _idbDbs) {
+                    await new Promise(resolve => {
+                        try {
+                            const r = indexedDB.deleteDatabase(_dbName);
+                            r.onsuccess = () => { console.log('[IDB_NUKE] Deleted:', _dbName); resolve(); };
+                            r.onerror   = () => { console.warn('[IDB_NUKE] Failed:', _dbName); resolve(); };
+                            r.onblocked = () => { console.warn('[IDB_NUKE] Blocked:', _dbName); setTimeout(resolve, 1000); };
+                        } catch(_e) { resolve(); }
+                    });
+                }
+
+                // Clear localStorage data keys (keep device identity)
+                try {
+                    const _keep = new Set(['pharma_device_id', 'pharma_device_name',
+                        'pharma_device_role', 'pharma_device_counter_id',
+                        'pharma_device_registered', 'pharma_idb_nuke_applied_at']);
+                    Object.keys(localStorage).forEach(k => {
+                        if (_keep.has(k)) return;
+                        if (k.startsWith('pharma_') || k.startsWith('sys_') ||
+                            k === '_pharma_inv_fingerprint' || k === '_supabase_sync_on' ||
+                            k === '_supabase_settings_ts') {
+                            try { localStorage.removeItem(k); } catch(_e) {}
+                        }
+                    });
+                } catch(_e) {}
+
+                stop();
+                setTimeout(() => { try { window.location.reload(); } catch(_e) {} }, 1500);
                 break;
             }
             case 'DATA_WIPE': {

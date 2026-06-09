@@ -838,15 +838,7 @@ async function renderSyncHubView() {
               title="Fire two overlapping checkouts against the same captured version and verify OCC integrity.">
         🧪 OCC Simulation
       </button>
-      <button class="sh-btn sh-btn-purge" id="shGlobalPurgeBtn" onclick="openGlobalPurgeModal()"
-              title="Wipe all data on every connected device. Requires email OTP + master PIN.">
-        ☢️ Global Purge
-      </button>
-      <button class="sh-btn" id="shCloudPurgeBtn" onclick="openCloudPurgeModal()"
-              style="background:#7c3aed;color:#fff;border:1px solid #a78bfa;box-shadow:0 0 0 1px rgba(167,139,250,.25);"
-              title="Delete all invoices, inventory and settings from the cloud. Devices stay registered. Requires email OTP + master PIN.">
-        🌩️ Cloud Purge
-      </button>
+
     </div>
   </div>
 
@@ -990,6 +982,66 @@ async function renderSyncHubView() {
     </div>
     <div id="syncLogPanel" class="sh-matrix-wrap" style="padding:0;transition:max-height .3s ease,opacity .25s ease;overflow:hidden;">
       <div class="sh-loading">Loading sync log…</div>
+    </div>
+  </div>
+
+  <!-- ── ☢️ Danger Zone ──────────────────────────────────────────────────── -->
+  <div class="sh-section" style="margin-top:20px;border:1.5px solid #fca5a5;background:#fff5f5;">
+
+    <!-- Section header -->
+    <div class="sh-section-hdr" style="background:#fff1f2;border-bottom:1px solid #fca5a5;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:16px;">☢️</span>
+        <div>
+          <div class="sh-section-title" style="color:#b91c1c;letter-spacing:.3px;">Danger Zone</div>
+          <div class="sh-section-sub" style="color:#ef4444;">Destructive operations — double-authentication required for all actions</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Danger action cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;padding:16px;">
+
+      <!-- Global Purge -->
+      <div style="background:#fff;border:1px solid #fecaca;border-radius:10px;padding:14px 16px;">
+        <div style="font-size:11px;font-weight:800;color:#b91c1c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">☢️ Global Purge</div>
+        <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
+          Wipes <strong>all data on every active device</strong> and the cloud. Requires email OTP + master PIN.
+        </div>
+        <button class="sh-btn sh-btn-purge" id="shGlobalPurgeBtn" onclick="openGlobalPurgeModal()"
+                style="width:100%;justify-content:center;"
+                title="Wipe all data on every connected device. Requires email OTP + master PIN.">
+          ☢️ Global Purge
+        </button>
+      </div>
+
+      <!-- Cloud Purge -->
+      <div style="background:#fff;border:1px solid #ddd6fe;border-radius:10px;padding:14px 16px;">
+        <div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">🌩️ Cloud Purge</div>
+        <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
+          Deletes all invoices, inventory &amp; settings from <strong>Supabase only</strong>. Devices stay registered.
+        </div>
+        <button class="sh-btn" id="shCloudPurgeBtn" onclick="openCloudPurgeModal()"
+                style="width:100%;justify-content:center;background:#7c3aed;color:#fff;border:1px solid #a78bfa;"
+                title="Delete all invoices, inventory and settings from the cloud.">
+          🌩️ Cloud Purge
+        </button>
+      </div>
+
+      <!-- Force IDB Nuke -->
+      <div style="background:#fff;border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;">
+        <div style="font-size:11px;font-weight:800;color:#c2410c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">💣 Force IDB Nuke</div>
+        <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
+          Broadcasts a command to <strong>delete the IndexedDB databases</strong> on all active devices.
+          Use when Global Purge leaves stale IDB data behind. Devices reload automatically.
+        </div>
+        <button class="sh-btn" id="shIdbNukeBtn" onclick="openIDBNukeModal()"
+                style="width:100%;justify-content:center;background:#ea580c;color:#fff;border:1px solid #fb923c;"
+                title="Nuclear IDB wipe — deleteDatabase() on PharmaDataDB and PharmaInventoryDB on every device.">
+          💣 Force IDB Nuke
+        </button>
+      </div>
+
     </div>
   </div>
 
@@ -2905,3 +2957,164 @@ window.PharmaOCCTest = (() => {
 
     return { runSimulation };
 })();
+
+// =========================================================================
+// 💣 FORCE IDB NUKE — broadcasts deleteDatabase() to all active devices.
+//
+// Broadcasts a pharma_idb_nuke_cmd KV key (5-min window).
+// Every device polling _pollCommands() picks it up and executes IDB_NUKE:
+//   - indexedDB.deleteDatabase('PharmaDataDB')
+//   - indexedDB.deleteDatabase('PharmaInventoryDB')
+// Then reloads. Databases are rebuilt clean on next boot.
+//
+// Requires: Admin passkey (adminGateModal). No OTP needed — local-only op.
+// =========================================================================
+const _IDB_NUKE_CMD_KEY = 'pharma_idb_nuke_cmd';
+
+async function openIDBNukeModal() {
+    // Re-use adminGateModal for PIN verification
+    window._pendingPostAuthAction = async function() {
+        delete window._pendingPostAuthAction;
+        await _executeIDBNukeBroadcast();
+    };
+
+    // Show a dedicated confirm dialog first
+    const existing = document.getElementById('_idbNukeConfirmOverlay');
+    if (existing) { existing.style.display = 'flex'; return; }
+
+    const overlay = document.createElement('div');
+    overlay.id = '_idbNukeConfirmOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10500;background:rgba(10,5,0,.75);display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:16px;padding:28px 24px;max-width:400px;width:100%;
+                  box-shadow:0 24px 64px rgba(0,0,0,.45);font-family:inherit;border-top:4px solid #ea580c;">
+        <div style="font-size:36px;text-align:center;margin-bottom:10px;">💣</div>
+        <div style="font-size:15px;font-weight:900;color:#0f1923;text-align:center;margin-bottom:6px;">Force IDB Nuke</div>
+        <div style="font-size:12px;color:#6b7280;line-height:1.7;margin-bottom:16px;text-align:center;">
+          This will broadcast a command to <strong>delete PharmaDataDB and PharmaInventoryDB</strong>
+          on <strong>all active devices</strong>.<br>
+          Each device will reload automatically. Databases are rebuilt fresh on next boot.<br><br>
+          <span style="color:#b91c1c;font-weight:700;">Use only when Global Purge leaves stale IndexedDB data behind.</span>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;">
+          <button onclick="document.getElementById('_idbNukeConfirmOverlay').style.display='none'"
+                  style="padding:10px 22px;background:#f1f5f9;border:none;border-radius:9px;
+                         font-size:13px;font-weight:700;color:#475569;cursor:pointer;">Cancel</button>
+          <button onclick="document.getElementById('_idbNukeConfirmOverlay').style.display='none';_idbNukeRequestAuth()"
+                  style="padding:10px 22px;background:#ea580c;border:none;border-radius:9px;
+                         font-size:13px;font-weight:700;color:#fff;cursor:pointer;">
+            💣 Confirm &amp; Authenticate
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+}
+
+function _idbNukeRequestAuth() {
+    // Use existing adminGateModal — set a special pending action
+    if (typeof requestAdminAccess === 'function') {
+        // Store callback, then trigger auth
+        window.__idbNukePendingAuth = true;
+        requestAdminAccess('IDB_NUKE');
+    }
+}
+
+async function _executeIDBNukeBroadcast() {
+    const supaUrl  = (typeof SUPABASE_URL  !== 'undefined') ? SUPABASE_URL  : null;
+    const supaKey  = (typeof SUPABASE_ANON !== 'undefined') ? SUPABASE_ANON : null;
+
+    // Show progress overlay
+    let logEl;
+    const progOverlay = document.createElement('div');
+    progOverlay.style.cssText = 'position:fixed;inset:0;z-index:10600;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;';
+    progOverlay.innerHTML = `
+      <div style="background:#0f1923;border-radius:14px;padding:24px 28px;min-width:340px;max-width:440px;
+                  font-family:monospace;font-size:12px;color:#4ade80;line-height:1.8;">
+        <div style="font-size:15px;font-weight:800;color:#fff;margin-bottom:12px;font-family:inherit;">
+          💣 IDB Nuke Broadcast
+        </div>
+        <div id="_idbNukeLog" style="min-height:80px;"></div>
+      </div>`;
+    document.body.appendChild(progOverlay);
+    logEl = document.getElementById('_idbNukeLog');
+
+    function log(msg, col) {
+        if (!logEl) return;
+        const line = document.createElement('div');
+        line.style.color = col || '#4ade80';
+        line.textContent = msg;
+        logEl.appendChild(line);
+    }
+
+    try {
+        const now       = Date.now();
+        const expiresAt = now + 5 * 60 * 1000; // 5-minute window
+        const myUUID    = localStorage.getItem('pharma_device_id') || 'unknown';
+
+        const payload = JSON.stringify({ issuedAt: now, expiresAt, issuedBy: myUUID });
+
+        if (supaUrl && supaKey) {
+            const res = await fetch(`${supaUrl}/rest/v1/rpc/kv_set`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': supaKey,
+                    'Authorization': 'Bearer ' + supaKey
+                },
+                body: JSON.stringify({ p_key: _IDB_NUKE_CMD_KEY, p_value: payload })
+            });
+            if (res.ok) {
+                log('✅ IDB_NUKE command broadcast to cloud (5-min window).');
+            } else {
+                log('⚠️  Cloud broadcast failed — executing locally only.', '#fbbf24');
+            }
+        } else {
+            log('⚠️  Supabase not configured — local nuke only.', '#fbbf24');
+        }
+
+        // Execute locally on this device immediately
+        log('💣 Nuking local IndexedDB…');
+        await _doLocalIDBNuke(log);
+
+        log('✅ Local IDB deleted. Reloading in 3 s…');
+        setTimeout(() => {
+            try { progOverlay.remove(); } catch(_e) {}
+            try { window.location.reload(); } catch(_e) {}
+        }, 3000);
+
+    } catch(err) {
+        log('❌ Error: ' + (err && err.message ? err.message : String(err)), '#f87171');
+        setTimeout(() => { try { progOverlay.remove(); } catch(_e) {} }, 4000);
+    }
+}
+
+async function _doLocalIDBNuke(log) {
+    const DBS = ['PharmaDataDB', 'PharmaInventoryDB'];
+    for (const dbName of DBS) {
+        await new Promise(resolve => {
+            try {
+                const req = indexedDB.deleteDatabase(dbName);
+                req.onsuccess = () => { if (log) log('🗄  Deleted: ' + dbName); resolve(); };
+                req.onerror   = () => { if (log) log('⚠️  Could not delete ' + dbName, '#fbbf24'); resolve(); };
+                req.onblocked = () => {
+                    if (log) log('⏳ ' + dbName + ' blocked — force-closing connections…', '#fbbf24');
+                    // Try to close any open handle via StorageModule
+                    try {
+                        if (typeof StorageModule !== 'undefined' && typeof StorageModule.closeDB === 'function') StorageModule.closeDB();
+                    } catch(_e) {}
+                    try {
+                        if (typeof db !== 'undefined' && db && typeof db.close === 'function') db.close();
+                    } catch(_e) {}
+                    setTimeout(resolve, 1500);
+                };
+            } catch(e) {
+                if (log) log('❌ deleteDatabase threw for ' + dbName, '#f87171');
+                resolve();
+            }
+        });
+    }
+}
+
+window._doLocalIDBNuke       = _doLocalIDBNuke;
+window._executeIDBNukeBroadcast = _executeIDBNukeBroadcast;
+window.openIDBNukeModal      = openIDBNukeModal;

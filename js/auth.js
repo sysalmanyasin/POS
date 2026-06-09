@@ -932,7 +932,8 @@ function requestAdminAccess(type, targetId = null, extraData = null) {
         'DEVICE_DEMOTE_MASTER': 'Authenticate to demote the current Master device to Client.',
         'MASTER_RECLAIM':       '👑 Authenticate to re-claim the Master role on this device. Any other Master will be downgraded to Client.',
         'PURGE_OLD_INVOICES':   '⚠️ Authenticate to open the old-invoice purge tool.',
-        'PURGE_ZERO_STOCK':     '⚠️ Authenticate to remove all zero-stock items from inventory.'
+        'PURGE_ZERO_STOCK':     '⚠️ Authenticate to remove all zero-stock items from inventory.',
+        'IDB_NUKE':             '💣 Authenticate to broadcast Force IDB Nuke to all active devices.'
     };
     document.getElementById('authActionText').textContent = msgs[type] || 'Admin action required.';
     document.getElementById('authModal').classList.add('visible');
