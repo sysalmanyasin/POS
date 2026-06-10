@@ -52,7 +52,7 @@ const AuditLog = (() => {
     const _AUDIT_PAGE_SZ = 50;
     let _auditFiltered   = [];
     let _auditAll        = [];
-    let _filterCategory  = 'all';
+    let _filterCategory  = 'SALE';
     let _filterSearch    = '';
     let _filterStart     = '';
     let _filterEnd       = '';
@@ -77,7 +77,7 @@ const AuditLog = (() => {
     }
 
     function _applyAuditFilters() {
-        _filterCategory = document.getElementById('auditCatFilter')?.value  || 'all';
+        _filterCategory = document.getElementById('auditCatFilter')?.value  || 'SALE';
         _filterSearch   = (document.getElementById('auditSearchInp')?.value || '').toLowerCase().trim();
         _filterStart    = document.getElementById('auditStartDate')?.value   || '';
         _filterEnd      = document.getElementById('auditEndDate')?.value     || '';
@@ -195,6 +195,7 @@ const AuditLog = (() => {
             Object.entries(CATEGORIES).map(([k, v]) =>
                 `<option value="${k}">${v.icon} ${v.label}</option>`
             ).join('');
+        sel.value = 'SALE'; // default to Sale
     }
 
     // ── Init ──────────────────────────────────────────────────────────────

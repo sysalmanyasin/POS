@@ -942,6 +942,16 @@ async function renderSyncHubView() {
 .sh-section-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--g100,#f1f5f9);background:var(--g50,#f8fafc);gap:8px;flex-wrap:wrap;}
 .sh-section-title{font-size:13px;font-weight:800;color:var(--g700,#334155);}
 .sh-section-sub{font-size:11px;color:var(--g400,#94a3b8);}
+/* Collapsible sections */
+.sh-section-hdr.sh-collapsible{cursor:pointer;user-select:none;}
+.sh-section-hdr.sh-collapsible:hover{background:var(--g100,#f1f5f9);}
+.sh-chevron{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:var(--g100,#f1f5f9);color:var(--g500,#64748b);font-size:11px;font-weight:900;transition:transform .25s;flex-shrink:0;}
+.sh-chevron.collapsed{transform:rotate(-90deg);}
+.sh-collapsible-body{overflow:hidden;transition:max-height .3s ease,opacity .25s ease;}
+.sh-collapsible-body.sh-body-open{max-height:4000px;opacity:1;}
+.sh-collapsible-body.sh-body-closed{max-height:0;opacity:0;}
+.sh-section-hdr.sh-danger-hdr{cursor:pointer;user-select:none;}
+.sh-section-hdr.sh-danger-hdr:hover{background:#ffe4e6;}
 .sh-matrix-wrap{padding:10px 14px 16px;overflow-x:auto;}
 
 /* Device table */
@@ -1105,40 +1115,42 @@ async function renderSyncHubView() {
 
   <!-- ── Sync Status Overview ──────────────────────────────────────────── -->
   <div class="sh-section" style="margin-bottom:16px;">
-    <div class="sh-section-hdr">
+    <div class="sh-section-hdr sh-collapsible" onclick="_shToggle('shSyncStatusBody','shSyncStatusChevron')" title="Click to expand / collapse">
       <div style="display:flex;align-items:center;gap:10px;">
+        <span class="sh-chevron" id="shSyncStatusChevron">▾</span>
         <span class="sh-section-title">🔄 Sync Status Overview</span>
         <span class="sh-section-sub">Live queue depth &amp; last-completed timestamp for each direction</span>
       </div>
       <span class="sh-section-sub" id="shStatusTs" style="font-style:italic;opacity:.8;"></span>
     </div>
-    <div id="shSyncStatusTableWrap" style="padding:0 2px;">
-      <div class="sh-loading">Calculating sync status…</div>
+    <div id="shSyncStatusBody" class="sh-collapsible-body sh-body-open">
+      <div id="shSyncStatusTableWrap" style="padding:0 2px;">
+        <div class="sh-loading">Calculating sync status…</div>
+      </div>
     </div>
   </div>
 
   <!-- ── Multi-device network matrix (Rule 5C) ─────────────────────────── -->
   <div class="sh-section">
-    <div class="sh-section-hdr">
-      <span class="sh-section-title">🌐 Multi-Device Counter Log Matrix</span>
-      <span class="sh-section-sub">Showing counters active within the last ${SYNC_HUB_PRUNE_DAYS} days</span>
+    <div class="sh-section-hdr sh-collapsible" onclick="_shToggle('shMatrixBody','shMatrixChevron')" title="Click to expand / collapse">
+      <span style="display:flex;align-items:center;gap:10px;">
+        <span class="sh-chevron collapsed" id="shMatrixChevron">▾</span>
+        <span class="sh-section-title">🌐 Multi-Device Counter Log Matrix</span>
+        <span class="sh-section-sub">Showing counters active within the last ${SYNC_HUB_PRUNE_DAYS} days</span>
+      </span>
     </div>
-    <div id="syncDeviceMatrix" class="sh-matrix-wrap">
-      <div class="sh-loading">⟳ Fetching device registry from Supabase…</div>
+    <div id="shMatrixBody" class="sh-collapsible-body sh-body-closed">
+      <div id="syncDeviceMatrix" class="sh-matrix-wrap">
+        <div class="sh-loading">⟳ Fetching device registry from Supabase…</div>
+      </div>
     </div>
   </div>
 
   <!-- ── Sync Activity Log ──────────────────────────────────────────────── -->
   <div class="sh-section" style="margin-top:16px;" id="syncLogSection">
-    <div class="sh-section-hdr" style="justify-content:space-between;cursor:pointer;"
-         onclick="_toggleSyncLog()" title="Click to expand / collapse">
+    <div class="sh-section-hdr sh-collapsible" onclick="_shToggle('syncLogPanel','syncLogChevron')" title="Click to expand / collapse">
       <div style="display:flex;align-items:center;gap:10px;">
-        <span id="syncLogChevron"
-              style="display:inline-flex;align-items:center;justify-content:center;
-                     width:22px;height:22px;border-radius:6px;
-                     background:var(--g100,#f1f5f9);color:var(--g500,#64748b);
-                     font-size:12px;font-weight:900;transition:transform .25s;
-                     flex-shrink:0;user-select:none;">▾</span>
+        <span class="sh-chevron collapsed" id="syncLogChevron">▾</span>
         <span class="sh-section-title">📋 Sync Activity Log</span>
       </div>
       <div style="display:flex;gap:8px;align-items:center;" onclick="event.stopPropagation()">
@@ -1149,7 +1161,7 @@ async function renderSyncHubView() {
                 onclick="_clearLocalSyncLog()">🗑 Clear Local</button>
       </div>
     </div>
-    <div id="syncLogPanel" class="sh-matrix-wrap" style="padding:0;transition:max-height .3s ease,opacity .25s ease;overflow:hidden;">
+    <div id="syncLogPanel" class="sh-collapsible-body sh-body-closed" style="padding:0;">
       <div class="sh-loading">Loading sync log…</div>
     </div>
   </div>
@@ -1158,8 +1170,10 @@ async function renderSyncHubView() {
   <div class="sh-section" style="margin-top:20px;border:1.5px solid #fca5a5;background:#fff5f5;">
 
     <!-- Section header -->
-    <div class="sh-section-hdr" style="background:#fff1f2;border-bottom:1px solid #fca5a5;">
+    <div class="sh-section-hdr sh-danger-hdr" style="background:#fff1f2;border-bottom:1px solid #fca5a5;"
+         onclick="_shToggle('shDangerBody','shDangerChevron')" title="Click to expand / collapse">
       <div style="display:flex;align-items:center;gap:8px;">
+        <span class="sh-chevron collapsed" id="shDangerChevron" style="background:#fecaca;color:#b91c1c;">▾</span>
         <span style="font-size:16px;">☢️</span>
         <div>
           <div class="sh-section-title" style="color:#b91c1c;letter-spacing:.3px;">Danger Zone</div>
@@ -1169,48 +1183,50 @@ async function renderSyncHubView() {
     </div>
 
     <!-- Danger action cards -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;padding:16px;">
+    <div id="shDangerBody" class="sh-collapsible-body sh-body-closed">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;padding:16px;">
 
-      <!-- Global Purge -->
-      <div style="background:#fff;border:1px solid #fecaca;border-radius:10px;padding:14px 16px;">
-        <div style="font-size:11px;font-weight:800;color:#b91c1c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">☢️ Global Purge</div>
-        <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
-          Wipes <strong>all data on every active device</strong> and the cloud. Requires email OTP + master PIN.
+        <!-- Global Purge -->
+        <div style="background:#fff;border:1px solid #fecaca;border-radius:10px;padding:14px 16px;">
+          <div style="font-size:11px;font-weight:800;color:#b91c1c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">☢️ Global Purge</div>
+          <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
+            Wipes <strong>all data on every active device</strong> and the cloud. Requires email OTP + master PIN.
+          </div>
+          <button class="sh-btn sh-btn-purge" id="shGlobalPurgeBtn" onclick="openGlobalPurgeModal()"
+                  style="width:100%;justify-content:center;"
+                  title="Wipe all data on every connected device. Requires email OTP + master PIN.">
+            ☢️ Global Purge
+          </button>
         </div>
-        <button class="sh-btn sh-btn-purge" id="shGlobalPurgeBtn" onclick="openGlobalPurgeModal()"
-                style="width:100%;justify-content:center;"
-                title="Wipe all data on every connected device. Requires email OTP + master PIN.">
-          ☢️ Global Purge
-        </button>
-      </div>
 
-      <!-- Cloud Purge -->
-      <div style="background:#fff;border:1px solid #ddd6fe;border-radius:10px;padding:14px 16px;">
-        <div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">🌩️ Cloud Purge</div>
-        <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
-          Deletes all invoices, inventory &amp; settings from <strong>Supabase only</strong>. Devices stay registered.
+        <!-- Cloud Purge -->
+        <div style="background:#fff;border:1px solid #ddd6fe;border-radius:10px;padding:14px 16px;">
+          <div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">🌩️ Cloud Purge</div>
+          <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
+            Deletes all invoices, inventory &amp; settings from <strong>Supabase only</strong>. Devices stay registered.
+          </div>
+          <button class="sh-btn" id="shCloudPurgeBtn" onclick="openCloudPurgeModal()"
+                  style="width:100%;justify-content:center;background:#7c3aed;color:#fff;border:1px solid #a78bfa;"
+                  title="Delete all invoices, inventory and settings from the cloud.">
+            🌩️ Cloud Purge
+          </button>
         </div>
-        <button class="sh-btn" id="shCloudPurgeBtn" onclick="openCloudPurgeModal()"
-                style="width:100%;justify-content:center;background:#7c3aed;color:#fff;border:1px solid #a78bfa;"
-                title="Delete all invoices, inventory and settings from the cloud.">
-          🌩️ Cloud Purge
-        </button>
-      </div>
 
-      <!-- Force IDB Nuke -->
-      <div style="background:#fff;border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;">
-        <div style="font-size:11px;font-weight:800;color:#c2410c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">💣 Force IDB Nuke</div>
-        <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
-          Broadcasts a command to <strong>delete the IndexedDB databases</strong> on all active devices.
-          Use when Global Purge leaves stale IDB data behind. Devices reload automatically.
+        <!-- Force IDB Nuke -->
+        <div style="background:#fff;border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;">
+          <div style="font-size:11px;font-weight:800;color:#c2410c;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">💣 Force IDB Nuke</div>
+          <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
+            Broadcasts a command to <strong>delete the IndexedDB databases</strong> on all active devices.
+            Use when Global Purge leaves stale IDB data behind. Devices reload automatically.
+          </div>
+          <button class="sh-btn" id="shIdbNukeBtn" onclick="openIDBNukeModal()"
+                  style="width:100%;justify-content:center;background:#ea580c;color:#fff;border:1px solid #fb923c;"
+                  title="Nuclear IDB wipe — deleteDatabase() on PharmaDataDB and PharmaInventoryDB on every device.">
+            💣 Force IDB Nuke
+          </button>
         </div>
-        <button class="sh-btn" id="shIdbNukeBtn" onclick="openIDBNukeModal()"
-                style="width:100%;justify-content:center;background:#ea580c;color:#fff;border:1px solid #fb923c;"
-                title="Nuclear IDB wipe — deleteDatabase() on PharmaDataDB and PharmaInventoryDB on every device.">
-          💣 Force IDB Nuke
-        </button>
-      </div>
 
+      </div>
     </div>
   </div>
 
@@ -1283,49 +1299,36 @@ async function refreshSyncHub() {
 //   2. Local localStorage ring-buffer (this device only, offline fallback)
 // =========================================================================
 
-// ── Sync Activity Log collapse / expand ───────────────────────────────────
-(function() {
-  var _syncLogCollapsed = false;
-
-  window._toggleSyncLog = function() {
-    _syncLogCollapsed = !_syncLogCollapsed;
-    var panel   = document.getElementById('syncLogPanel');
-    var chevron = document.getElementById('syncLogChevron');
-    if (!panel) return;
-    if (_syncLogCollapsed) {
-      // Snapshot current height then animate to 0
-      panel.style.maxHeight  = panel.scrollHeight + 'px';
-      panel.style.opacity    = '1';
-      requestAnimationFrame(function() {
-        panel.style.maxHeight = '0px';
-        panel.style.opacity   = '0';
-      });
-      if (chevron) {
-        chevron.style.transform = 'rotate(-90deg)';
-        chevron.title = 'Expand log';
-      }
-    } else {
-      panel.style.maxHeight = panel.scrollHeight + 'px';
-      panel.style.opacity   = '1';
-      // After transition ends, remove maxHeight so content can grow freely
-      panel.addEventListener('transitionend', function _cleanup() {
-        if (!_syncLogCollapsed) panel.style.maxHeight = 'none';
-        panel.removeEventListener('transitionend', _cleanup);
-      });
-      if (chevron) {
-        chevron.style.transform = 'rotate(0deg)';
-        chevron.title = 'Collapse log';
-      }
+// ── Unified collapsible section toggle ────────────────────────────────────
+// bodyId   : id of the .sh-collapsible-body div
+// chevronId: id of the .sh-chevron span
+window._shToggle = function(bodyId, chevronId) {
+  var body    = document.getElementById(bodyId);
+  var chevron = document.getElementById(chevronId);
+  if (!body) return;
+  var isOpen = body.classList.contains('sh-body-open');
+  if (isOpen) {
+    body.classList.replace('sh-body-open', 'sh-body-closed');
+    if (chevron) chevron.classList.add('collapsed');
+  } else {
+    body.classList.replace('sh-body-closed', 'sh-body-open');
+    if (chevron) chevron.classList.remove('collapsed');
+    // If this is the sync log panel, load content on first expand
+    if (bodyId === 'syncLogPanel' && body.querySelector('.sh-loading')) {
+      renderSyncLogPanel().catch(() => {});
     }
-  };
+  }
+};
 
-  // After the log renders, ensure maxHeight is unconstrained so new rows show
-  window._syncLogExpandAfterRender = function() {
-    if (_syncLogCollapsed) return;
-    var panel = document.getElementById('syncLogPanel');
-    if (panel) panel.style.maxHeight = 'none';
-  };
-})();
+// Legacy alias kept so any remaining callers don't break
+window._toggleSyncLog = function() { window._shToggle('syncLogPanel', 'syncLogChevron'); };
+
+// After the log renders, nothing special needed — CSS handles height
+window._syncLogExpandAfterRender = function() {
+  var body = document.getElementById('syncLogPanel');
+  if (body && body.classList.contains('sh-body-closed')) return; // stay collapsed
+  // open: CSS max-height:4000px is enough for the log rows
+};
 
 async function renderSyncLogPanel() {
     const panel   = document.getElementById('syncLogPanel');
