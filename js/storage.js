@@ -313,7 +313,7 @@ const StorageModule = (() => {
 
     // ── Structured offline sync queue (append-only event log records) ─────────
     // Record shape: { queueId (auto int), type, payload, capturedVersion, createdAt }
-    // Supported types: "INVOICE" | "INVENTORY_MOVE" | "HEARTBEAT"
+    // Supported types: "INVOICE" | "INVOICE_UPDATE" | "INVENTORY_MOVEMENT"
 
     /**
      * Enqueue a new event record into the offline_sync_queue store.

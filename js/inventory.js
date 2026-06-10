@@ -1957,6 +1957,18 @@ async function _pushInventoryBootstrapToCloud() {
         console.warn('[Phase4] bootstrap_done flag write failed:', flagWriteErr);
         showToast('⚠️ Inventory pushed (' + pushed + ' items) but bootstrap flag write failed. Subsequent imports may re-push.', false);
     } else {
+        // FIX: also write inventory_last_updated so _checkAndPullInventoryIfUpdated
+        // on client devices can detect this push via the 30s heartbeat.
+        // Previously only forcePushInventoryToCloud wrote this key, meaning clients
+        // only got automatic pulls after CSV-popup pushes, not Force Sync pushes.
+        await _dbUpsert('settings', [{
+            device_uuid: _DEVICE_UUID,
+            key:         'inventory_last_updated',
+            value:       now,
+            updated_at:  now
+        }], 'device_uuid,key').catch(e => {
+            console.warn('[Phase4] inventory_last_updated write failed (non-fatal):', e);
+        });
         showToast('✅ Inventory bootstrapped to cloud (' + pushed + ' products). Clients will pull on next startup.');
     }
 }
@@ -2041,6 +2053,61 @@ async function _pullInventoryFromSupabase(force) {
     showToast('☁️ Inventory loaded from cloud (' + mapped.length + ' products).', false);
     return true;
 }
+
+// =========================================================================
+// HEARTBEAT PULL — called every 30 s by syncHub.js background timer.
+// Checks whether the master has pushed a newer inventory catalogue since
+// our last pull, and calls _pullInventoryFromSupabase() if so.
+//
+// Design:
+//   - Master devices: no-op (they are the source of truth, they push).
+//   - Client devices: reads inventory_last_updated from the Supabase
+//     settings table; compares against _pharma_inv_pull_ts in localStorage;
+//     pulls only when cloud timestamp is strictly newer.
+//   - Dirty-flag guard: if the user has locally imported a CSV that hasn't
+//     been pushed yet, skip — _pullInventoryFromSupabase also checks this,
+//     but checking here avoids an unnecessary round-trip.
+//   - All errors are swallowed; this is a best-effort background operation.
+// =========================================================================
+async function _checkAndPullInventoryIfUpdated() {
+    try {
+        const role = (typeof StorageModule !== 'undefined')
+            ? StorageModule.get('pharma_device_role') : null;
+        // Master is the source of truth — never auto-pull
+        if (role === 'master') return false;
+        // Skip if there are unpushed local changes
+        if (localStorage.getItem('_pharma_inv_dirty') === 'true') return false;
+        if (typeof _dbSelect !== 'function') return false;
+
+        // Read the most recently written inventory_last_updated signal from any device.
+        // Only master devices write this key (via forcePushInventoryToCloud /
+        // _pushInventoryBootstrapToCloud), so this is always the master's timestamp.
+        const { data, error } = await _dbSelect(
+            'settings',
+            'key=eq.inventory_last_updated&order=updated_at.desc&limit=1',
+            'value'
+        );
+        if (error || !Array.isArray(data) || data.length === 0) return false;
+        const cloudTs = data[0].value;
+        if (!cloudTs) return false;
+
+        // Compare with the timestamp we recorded on our last successful pull
+        const localTs = (typeof StorageModule !== 'undefined')
+            ? StorageModule.get('_pharma_inv_pull_ts') : null;
+        if (localTs && cloudTs <= localTs) return false; // Already up to date
+
+        // Cloud has a newer catalogue — pull it
+        if (typeof _pullInventoryFromSupabase !== 'function') return false;
+        const result = await _pullInventoryFromSupabase(false);
+        if (result !== false) {
+            // Record the cloud timestamp so we don't re-pull on the next heartbeat
+            try { StorageModule.set('_pharma_inv_pull_ts', cloudTs); } catch(_e) {}
+            return true;
+        }
+    } catch(_e) { /* heartbeat — swallow all errors silently */ }
+    return false;
+}
+window._checkAndPullInventoryIfUpdated = _checkAndPullInventoryIfUpdated;
 
 // =========================================================================
 // INVENTORY ↔ CLOUD — dedicated push / pull (inventory only)

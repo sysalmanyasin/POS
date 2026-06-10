@@ -662,7 +662,12 @@ function _buildBackupPayload() {
      'pharma_auto_backup_on','pharma_receipt_info','pharma_allow_overstock','pharma_require_staff_pin'].forEach(k => {
         const v = StorageModule.get(k); if (v !== null) lsSnapshot[k] = v;
     });
-    return { _meta:{ app:'PharmaPOS', version:1, exportedAt:new Date().toISOString(), branchName:bi.branchName, counterId:bi.counterId, operatorName:bi.operatorName }, inventory:masterInventoryDB, savedInvoices:savedInvoicesLedger, heldBills:temporaryHeldBills, localStorage:lsSnapshot };
+    // FIX: use window.masterInventoryDB with fallback so stale-SW scenarios that
+    // haven't yet initialised the global don't throw a ReferenceError here.
+    const _inv  = (typeof window.masterInventoryDB  !== 'undefined' && Array.isArray(window.masterInventoryDB))  ? window.masterInventoryDB  : (typeof masterInventoryDB  !== 'undefined' ? masterInventoryDB  : []);
+    const _invs = (typeof window.savedInvoicesLedger !== 'undefined' && Array.isArray(window.savedInvoicesLedger)) ? window.savedInvoicesLedger : (typeof savedInvoicesLedger !== 'undefined' ? savedInvoicesLedger : []);
+    const _hb   = (typeof temporaryHeldBills !== 'undefined' && Array.isArray(temporaryHeldBills)) ? temporaryHeldBills : [];
+    return { _meta:{ app:'PharmaPOS', version:1, exportedAt:new Date().toISOString(), branchName:bi.branchName, counterId:bi.counterId, operatorName:bi.operatorName }, inventory:_inv, savedInvoices:_invs, heldBills:_hb, localStorage:lsSnapshot };
 }
 async function exportFullBackup() {
     try {
@@ -702,8 +707,9 @@ function _performRestore(payload) {
         const _idbInv  = ((_idb['PharmaInventoryDB'] || {})['inventory']);
         const _idbInvs = ((_idb['PharmaDataDB']      || {})['invoices']);
         const _idbHb   = ((_idb['PharmaDataDB']      || {})['heldBills']);
-        masterInventoryDB   = Array.isArray(payload.inventory)     && payload.inventory.length     > 0 ? payload.inventory     : Array.isArray(_idbInv)  && _idbInv.length  > 0 ? _idbInv  : [];
-        savedInvoicesLedger = Array.isArray(payload.savedInvoices) && payload.savedInvoices.length > 0 ? payload.savedInvoices : Array.isArray(_idbInvs) && _idbInvs.length > 0 ? _idbInvs : [];
+        // FIX: always update window.* so every module picks up the restored data
+        masterInventoryDB = window.masterInventoryDB = Array.isArray(payload.inventory) && payload.inventory.length > 0 ? payload.inventory : Array.isArray(_idbInv) && _idbInv.length > 0 ? _idbInv : [];
+        savedInvoicesLedger = window.savedInvoicesLedger = Array.isArray(payload.savedInvoices) && payload.savedInvoices.length > 0 ? payload.savedInvoices : Array.isArray(_idbInvs) && _idbInvs.length > 0 ? _idbInvs : [];
         syncInvoiceCounterFromLedger(savedInvoicesLedger);
         temporaryHeldBills  = Array.isArray(payload.heldBills)     && payload.heldBills.length     > 0 ? payload.heldBills     : Array.isArray(_idbHb)   && _idbHb.length   > 0 ? _idbHb   : [];
         activeCartItems = []; currentlyEditingInvoiceId = null;
@@ -1109,7 +1115,7 @@ function _purgeZeroStockConfirmed() {
         { title: '🧹 Remove Zero-Stock Items?',
           subtitle: 'This will permanently delete ' + toRemove + ' item' + (toRemove !== 1 ? 's' : '') + ' with stock = 0.' },
         () => {
-            masterInventoryDB = inv.filter(p => (p.stock || 0) > 0);
+            masterInventoryDB = window.masterInventoryDB = inv.filter(p => (p.stock || 0) > 0);
             try { saveInventoryToDB(masterInventoryDB); } catch(e) {}
             if (typeof updateStatsCounters === 'function') updateStatsCounters();
             refreshDataHubInventoryStats();

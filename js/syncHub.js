@@ -29,7 +29,7 @@ let _forceSyncRunning       = false;  // guard against concurrent runs
 //               the deduct_inventory_atomic RPC for every line item.
 //
 // Concurrency guard  : _forceSyncRunning (shared with forceSyncNow)
-// Network triggers   : window 'online' event  +  setInterval (60 s)
+// Network triggers   : window 'online' event  +  setInterval (30 s)
 // =========================================================================
 
 // ── A1: Background auto-trigger wiring ────────────────────────────────────
@@ -42,37 +42,43 @@ window.addEventListener('online', () => {
     }, 2000);
 });
 
-// Run the queue check every 60 seconds as a background safety net
+// Heartbeat: every 30 s.  ORDER IS INTENTIONAL — push always completes before pull.
+// Previous implementation fired all three tasks concurrently (fire-and-forget
+// .catch(() => {})), so pull could finish before push, causing clients to read
+// stale cloud data that didn't yet include their own bills.
+// Now uses a sequential async IIFE so pull never starts until push finishes.
 setInterval(() => {
-    if (navigator.onLine && !_forceSyncRunning) {
-        syncOfflineQueue(_DEVICE_UUID).catch(() => {});
-        // FIX: also let clients auto-pull master inventory updates.
-        // _checkAndPullInventoryIfUpdated() is defined in inventory.js and
-        // is a no-op on the master device.
-        if (typeof _checkAndPullInventoryIfUpdated === 'function') {
-            _checkAndPullInventoryIfUpdated().catch(() => {});
-        }
-        // Auto-push any unsynced movements (background)
-        if (typeof _pushUnsyncedMovements === 'function') {
-            _countUnsyncedMovements().catch(() => 0).then(prePending => {
-                _pushUnsyncedMovements().then(() => {
-                    _countUnsyncedMovements().catch(() => 0).then(postPending => {
-                        const flushed = Math.max(0, prePending - postPending);
-                        // S4 FIX: only update timestamp + write sync_log if movements
-                        // were actually flushed — was flooding sync_log with ~4300
-                        // zero-row heartbeat entries per day across 3 devices.
-                        if (flushed > 0) {
-                            try { localStorage.setItem('_pharma_last_push_ts', String(Date.now())); } catch(_e) {}
-                            const _bgEntry = { invoices_pushed: 0, invoices_pulled: 0, movements_pushed: flushed, movements_pulled: 0, note: 'Background Push' };
-                            _writeSyncLogEntry(_bgEntry).catch(() => {});
-                            _appendLocalSyncLog(_bgEntry);
-                        }
-                    });
-                }).catch(() => {});
-            });
-        }
-    }
-}, 60_000);
+    if (!navigator.onLine || _forceSyncRunning) return;
+    (async () => {
+        try {
+            // ── PUSH PHASE ───────────────────────────────────────────────
+            // 1. Drain the structured offline_sync_queue (INVOICE records)
+            await syncOfflineQueue(_DEVICE_UUID).catch(() => {});
+
+            // 2. Flush any unsynced inventory movements
+            if (typeof _pushUnsyncedMovements === 'function') {
+                const prePending  = await _countUnsyncedMovements().catch(() => 0);
+                await _pushUnsyncedMovements().catch(() => {});
+                const postPending = await _countUnsyncedMovements().catch(() => 0);
+                const flushed     = Math.max(0, prePending - postPending);
+                // S4 FIX: only write sync_log when something was actually flushed —
+                // prevents ~4300 zero-row heartbeat rows per day across 3 devices.
+                if (flushed > 0) {
+                    try { localStorage.setItem('_pharma_last_push_ts', String(Date.now())); } catch(_e) {}
+                    const _bgEntry = { invoices_pushed: 0, invoices_pulled: 0, movements_pushed: flushed, movements_pulled: 0, note: 'Background Push' };
+                    _writeSyncLogEntry(_bgEntry).catch(() => {});
+                    _appendLocalSyncLog(_bgEntry);
+                }
+            }
+
+            // ── PULL PHASE (only after push completes) ───────────────────
+            // Pull inventory version check — no-op on master device.
+            if (typeof _checkAndPullInventoryIfUpdated === 'function') {
+                await _checkAndPullInventoryIfUpdated().catch(() => {});
+            }
+        } catch (_bgErr) { /* heartbeat — swallow all errors silently */ }
+    })();
+}, 30_000);
 
 // ── A2: Core execution function ───────────────────────────────────────────
 /**
@@ -165,15 +171,27 @@ async function _processQueueItem(item, deviceUuid) {
         // SCHEMA FIX: INVOICE_UPDATE type — patches a single column on an existing
         // invoice row (e.g. is_fully_refunded=true after processFullRefund).
         // Payload must include invoice_number + the column(s) to patch.
+        //
+        // FIX: switched from _dbUpsert (INSERT ON CONFLICT) to _dbUpdate (PATCH).
+        // _dbUpsert with a sparse payload (only invoice_number + is_fully_refunded)
+        // risks an INSERT with NULLs for all other NOT NULL columns if the row
+        // doesn't exist on the server yet (e.g. INVOICE failed a prior sync cycle).
+        // _dbUpdate (PATCH) only touches the matching row and is a safe no-op when
+        // the row doesn't exist — the queue item stays and retries next cycle.
         case 'INVOICE_UPDATE': {
             const upd = item.payload;
-            if (upd && upd.invoice_number && typeof _dbUpsert === 'function') {
+            if (upd && upd.invoice_number && typeof _dbUpdate === 'function') {
                 try {
-                    const { error } = await _dbUpsert('invoices', [upd], 'invoice_number');
+                    const { invoice_number: _invNum, ...patchFields } = upd;
+                    const { error } = await _dbUpdate(
+                        'invoices',
+                        'invoice_number=eq.' + encodeURIComponent(_invNum),
+                        patchFields
+                    );
                     if (!error) {
                         await StorageModule.deleteFromSyncQueue(item.queueId);
                     } else {
-                        console.warn('[SyncEngine] INVOICE_UPDATE upsert failed:', error);
+                        console.warn('[SyncEngine] INVOICE_UPDATE patch failed:', error);
                     }
                 } catch (e) {
                     console.warn('[SyncEngine] INVOICE_UPDATE error:', e);
@@ -392,6 +410,13 @@ async function _processInvoiceItem(item, deviceUuid) {
     for (const lineItem of line_items) {
         const { product_code, quantity, expected_version } = lineItem;
         if (!product_code || !quantity) continue;
+
+        // Skip MANUAL quick-add items — they have no cloud inventory row.
+        // Calling deduct_inventory_atomic on a non-existent code returns failure,
+        // which sets allLineItemsHandled=false and traps the invoice in the queue
+        // forever.  The invoice row + invoice_items are already upserted above, so
+        // skipping here is safe; no stock deduction is needed for untracked items.
+        if (typeof product_code === 'string' && product_code.startsWith('MANUAL-')) continue;
 
         // Skip items already deducted in a previous attempt (see processedItems above)
         if (_processedItems.has(product_code)) {
@@ -2133,7 +2158,7 @@ async function forcePushInventoryToCloud() {
 
             _setProg(100, '✅ ' + pushed + ' products pushed to cloud.');
             if (typeof showToast === 'function')
-                showToast('✅ Inventory pushed (' + pushed + ' products). Clients will auto-pull within 60 s.');
+                showToast('✅ Inventory pushed (' + pushed + ' products). Clients will auto-pull within 30 s.');
         }
 
     } catch (err) {
@@ -2766,10 +2791,11 @@ async function _gpExecuteNetworkPurge() {
     } catch (_e) {}
 
         // 6. Reset in-memory globals so any pending writes don't repopulate.
+    // FIX: always update window.* alongside bare references so every module sees the cleared state.
     try {
-        if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = [];
+        if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = window.savedInvoicesLedger = [];
         if (typeof temporaryHeldBills    !== 'undefined') temporaryHeldBills = [];
-        if (typeof masterInventoryDB     !== 'undefined') masterInventoryDB = [];
+        window.masterInventoryDB = []; if (typeof masterInventoryDB !== 'undefined') masterInventoryDB = window.masterInventoryDB;
         if (typeof activeCartItems       !== 'undefined') activeCartItems = [];
     } catch (_e) {}
 
@@ -3155,10 +3181,11 @@ async function _cpExecute() {
     } catch (_e) {}
 
     // 5. Reset in-memory globals
+    // FIX: always update window.* alongside bare references so every module sees the cleared state.
     try {
-        if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = [];
+        if (typeof savedInvoicesLedger !== 'undefined') savedInvoicesLedger = window.savedInvoicesLedger = [];
         if (typeof temporaryHeldBills    !== 'undefined') temporaryHeldBills = [];
-        if (typeof masterInventoryDB     !== 'undefined') masterInventoryDB = [];
+        window.masterInventoryDB = []; if (typeof masterInventoryDB !== 'undefined') masterInventoryDB = window.masterInventoryDB;
         if (typeof activeCartItems       !== 'undefined') activeCartItems = [];
     } catch (_e) {}
 

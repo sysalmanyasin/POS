@@ -7,7 +7,12 @@ let temporaryHeldBills = [];
 // the ledger across file boundaries without a ReferenceError.  All assignments
 // inside this file (e.g. savedInvoicesLedger = await StorageModule.loadInvoices())
 // implicitly update window.savedInvoicesLedger in non-module browser scripts.
-window.savedInvoicesLedger = window.savedInvoicesLedger || [];
+window.savedInvoicesLedger  = window.savedInvoicesLedger  || [];
+// Defensive guard: inventory.js sets this earlier in the load order, but if a
+// stale service worker serves an old inventory.js that doesn't init the window
+// binding, billing.js ensures it is at least an empty array so all .find()/.filter()
+// calls in this file never throw a ReferenceError.
+window.masterInventoryDB = window.masterInventoryDB || [];
 let selectedProductRef = null;
 let activeDropdownIndex = -1;
 let pendingAction = null;
@@ -1257,7 +1262,7 @@ async function finalizeAndPrintBill() {
     showToast('✅ Bill ' + _escHtml(invoiceID) + ' saved!');
     // Audit trail
     if (typeof _auditWrite === 'function') {
-        _auditWrite('SALE', 'Invoice ' + invoiceID + ' · Total PKR ' + (typeof netTotal !== 'undefined' ? netTotal : ''));
+        _auditWrite('SALE', 'Invoice ' + invoiceID + ' · Total PKR ' + rounded);
     }
     } catch (checkoutErr) {
         console.error('[Checkout] Failed:', checkoutErr);
@@ -2076,7 +2081,7 @@ function submitPartialRefund() {
     })();
 
     updateHdrStats();
-    renderHistoryCards(savedInvoicesLedger);
+    renderHistoryCards(_refLedger);
     closePartialRefundModal();
     showToast('↩ Partial refund ' + _escHtml(refId) + ' — ' + _getCurrency() + refAmt.toFixed(2) + ' credited. Stock restored.');
 }
