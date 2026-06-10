@@ -1714,7 +1714,7 @@ function _showPostCsvPushPopup(itemCount) {
 
     const modal = document.createElement('div');
     modal.id = 'postCsvPushModal';
-    modal.innerHTML = \`
+    modal.innerHTML = `
 <style>
 #postCsvPushModal .pcpm-overlay{position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:9990;display:flex;align-items:center;justify-content:center;padding:16px;}
 #postCsvPushModal .pcpm-card{background:#fff;width:100%;max-width:400px;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);overflow:hidden;animation:pcpm-in .2s ease;}
@@ -1763,7 +1763,7 @@ function _showPostCsvPushPopup(itemCount) {
     </div>
   </div>
 </div>
-\`;
+`;
     document.body.appendChild(modal);
 }
 window._showPostCsvPushPopup = _showPostCsvPushPopup;
