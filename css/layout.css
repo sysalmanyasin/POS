@@ -483,35 +483,6 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
 #printReceiptOnSave{display:none;}
 
 /* ================================================================
-   DESKTOP & TABLET  (≥ 641 px)
-   Explicitly enforce two-column layout: left panel (billing) and
-   right panel (checkout) side-by-side regardless of other factors.
-================================================================ */
-@media (min-width:641px){
-  /* Fix rightPanel using position:fixed (bypasses any HTML nesting issues).
-     The panel anchors to the viewport right edge, below header+tabs,
-     above the status bar — matching the same technique as #statusBar. */
-  #rightPanel{
-    position:fixed !important;
-    right:0 !important;
-    top:calc(var(--hdr-h) + var(--tab-h)) !important;
-    bottom:var(--sbar-h) !important;
-    width:var(--rp-w) !important;
-    z-index:80;
-    overflow-y:auto;
-    overflow-x:hidden;
-    border-left:1px solid var(--g200) !important;
-    border-top:none !important;
-    max-height:none !important;
-    background:var(--white);
-  }
-  /* Prevent leftPanel billing content from sliding under the fixed rightPanel */
-  #leftPanel{padding-right:var(--rp-w);}
-  /* Pad scrollable area so content clears the fixed status bar */
-  #leftContent{padding-bottom:var(--sbar-h);}
-}
-
-/* ================================================================
    MOBILE RESPONSIVE  (≤ 640 px)
 ================================================================ */
 @media (max-width:640px){
