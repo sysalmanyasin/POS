@@ -1689,10 +1689,11 @@ async function forceSyncNow() {
     if (progWrap){ progWrap.classList.add('visible'); }
     _setProgress(5, 'Initialising sync…');
 
-    let totalFlushed  = 0;
-    let queueFlushed  = 0;
-    let offlineFlushed = 0;
-    let errorOccurred = false;
+    let totalFlushed       = 0;
+    let queueFlushed       = 0;
+    let offlineFlushed     = 0;
+    let errorOccurred      = false;
+    let invoicesPulledCount = 0;   // FIX: hoisted from inner try-block scope
 
     try {
 
@@ -1829,7 +1830,6 @@ async function forceSyncNow() {
         // Step 5b: Pull remote invoices from ALL other devices into local IDB
         _setProgress(88, 'Step 5/6 — Pulling remote invoices from all devices…');
         if (typeof showToast === 'function') showToast('⬇️ Pulling invoices from all devices…');
-        let invoicesPulledCount = 0;
         try {
             if (typeof _dbSelect === 'function') {
                 const { data: devRows } = await _dbSelect('devices', 'is_active=eq.true', 'uuid');
