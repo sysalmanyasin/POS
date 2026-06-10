@@ -572,13 +572,9 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   .inv-view-content{overflow-x:auto;-webkit-overflow-scrolling:touch;}
   .inv-table{min-width:820px;}
 
-  /* ── Status bar: hide keyboard shortcuts on touch ── */
-  #statusBar .sb-hint{display:none;}
-  /* Keep only the clock and f9 hint */
-  #statusBar #statusClock{display:flex;}
-  #statusBar #f9StatusHint{display:flex;}
-  /* Compact the bar */
-  #statusBar{padding:0 10px;justify-content:flex-end;}
+  /* ── Status bar: fully hidden on mobile — keyboard shortcuts are irrelevant
+     on touch devices and the bar was stealing vertical space from content ── */
+  #statusBar{display:none !important;}
 
   /* ── Portrait mobile: stack billing + payment vertically ────────
      Left panel (search/invoice) fills the top; right panel
