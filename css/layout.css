@@ -2,8 +2,7 @@
    RESET
 ================================================================ */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-html,body{
-  width:100%;height:100%;
+html,body{\n  width:100%;height:100%;
   font-family:var(--font-sans);
   font-size:13px;line-height:1.45;
   background:var(--g100);color:var(--g900);
@@ -26,7 +25,15 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
 /* ================================================================
    APP SHELL
 ================================================================ */
-#appRoot{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+#appRoot {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  /* Reserve exact bottom layout padding to accommodate the pinned status bar */
+  padding-bottom: 24px !important; 
+  box-sizing: border-box;
+}
 
 /* ── Safe-area insets: iOS PWA notch / home-indicator support ────
    viewport-fit=cover lets us use the full screen; env() pads us
@@ -34,7 +41,6 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
 @supports (padding: env(safe-area-inset-top)) {
   #appRoot {
     padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }
@@ -159,25 +165,29 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
 #appBody{display:flex;flex:1;overflow:hidden;}
 
 /* ================================================================
-   STATUS BAR — BASE SETTINGS
+   STATUS BAR — IRONCLAD WINDOW PIN
 ================================================================ */
-#statusBar {
-  height: 24px;
-  flex-shrink: 0;
-  background: var(--hdr-bg, #060D16);
-  color: rgba(255, 255, 255, 0.7);
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  font-size: 11px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  z-index: 200;
+#statusBar, .status-bar {
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  height: 24px !important;
+  background: var(--hdr-bg, #060D16) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 0 12px !important;
+  font-size: 11px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  z-index: 99999 !important; /* Force layout precedence over all elements */
 }
 #statusBar .sb-hint {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-right: 14px;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  margin-right: 14px !important;
 }
 
 /* ================================================================
@@ -594,12 +604,12 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   .inv-table{min-width:820px;}
 
   /* ── Status bar: hide keyboard shortcuts on touch ── */
-  #statusBar .sb-hint{display:none;}
+  #statusBar .sb-hint{display:none !important;}
   /* Keep only the clock and f9 hint */
-  #statusBar #statusClock{display:flex;}
-  #statusBar #f9StatusHint{display:flex;}
+  #statusBar #statusClock{display:flex !important;}
+  #statusBar #f9StatusHint{display:flex !important;}
   /* Compact the bar */
-  #statusBar{padding:0 10px;justify-content:flex-end;}
+  #statusBar{padding:0 10px !important;justify-content:flex-end !important;}
 
   /* ── Portrait mobile: stack billing + payment vertically ──────── */
   #appBody{flex-direction:column;}
@@ -635,8 +645,7 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   /* Restore side-by-side with narrowed right panel */
   #appBody{flex-direction:row!important;}
   #leftPanel{flex:1;min-height:0;overflow:hidden;}
-  #rightPanel{
-    width:260px!important;
+  #rightPanel{\n    width:260px!important;
     max-height:none!important;
     border-left:1px solid var(--g200)!important;
     border-top:none!important;
@@ -644,13 +653,14 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
     flex-shrink:0;
   }
 
+  /* Clear application padding when hidden */
+  #appRoot { padding-bottom: 0 !important; }
   /* Hide status bar to reclaim vertical space */
-  #statusBar{display:none;}
+  #statusBar, .status-bar { display: none !important; }
 
   /* Safe-area sides for landscape notch */
   @supports (padding: env(safe-area-inset-left)) {
-    #appRoot{
-      padding-left:env(safe-area-inset-left);
+    #appRoot{\n      padding-left:env(safe-area-inset-left);
       padding-right:env(safe-area-inset-right);
     }
   }
@@ -672,3 +682,4 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   border:1px solid var(--g100);
   border-radius:10px;
 }
+
