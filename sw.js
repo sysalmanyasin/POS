@@ -3,7 +3,7 @@
  * Version: pharmapos-cache-v12.4 (Added syncHub.js + auditLog.js to offline cache)
  */
 
-const CACHE_NAME = 'pharmapos-cache-v15.6';
+const CACHE_NAME = 'pharmapos-cache-v16.3';
 
 // Explicit structural cache list to guarantee the system works offline instantly on day one
 const CORE_ASSETS = [
@@ -80,7 +80,7 @@ self.addEventListener('fetch', (event) => {
 
     event.respondWith(
         caches.open(CACHE_NAME).then(async (cache) => {
-            const cachedResponse = await cache.match(event.request);
+            const cachedResponse = await cache.match(event.request, { ignoreSearch: true });
             
             // Asynchronous background task: fetches fresh files from GitHub CDN and updates the cache silently
             const fetchPromise = fetch(event.request).then((networkResponse) => {
