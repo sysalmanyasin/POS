@@ -806,7 +806,7 @@ const StorageModule = (() => {
         }
 
         if (hbRaw)   { try { const r = JSON.parse(hbRaw);   if (Array.isArray(r) && r.length > 0 && typeof temporaryHeldBills !== 'undefined') { const localKeys = new Set(temporaryHeldBills.map(b => b.tag + '|' + b.timestamp)); const netNew = r.filter(b => !localKeys.has(b.tag + '|' + b.timestamp)); if (netNew.length > 0) { const merged = temporaryHeldBills.concat(netNew); saveHeldBills(merged); temporaryHeldBills = merged; changed = true; } } } catch(e) {} }
-        if (invDbRaw) { try { const r = JSON.parse(invDbRaw); if (Array.isArray(r) && r.length > 0 && typeof masterInventoryDB !== 'undefined') { const { merged, hadNew } = _mergeInventory(masterInventoryDB, r); if (hadNew) { masterInventoryDB = merged; if (typeof saveInventoryToDB === 'function') saveInventoryToDB(merged); changed = true; } } } catch(e) {} }
+        if (invDbRaw && localStorage.getItem('_pharma_inv_dirty') !== 'true') { try { const r = JSON.parse(invDbRaw); if (Array.isArray(r) && r.length > 0 && typeof masterInventoryDB !== 'undefined') { const { merged, hadNew } = _mergeInventory(masterInventoryDB, r); if (hadNew) { masterInventoryDB = merged; if (typeof saveInventoryToDB === 'function') saveInventoryToDB(merged); changed = true; } } } catch(e) {} }
         if (settRaw)  { try { const r = JSON.parse(settRaw);  if (r && typeof r === 'object') { const remoteTs = r._ts || 0; const localTs = parseInt(get('_supabase_settings_ts') || '0', 10); if (remoteTs > localTs || (remoteTs > 0 && localTs === 0)) { SYNC_SETTINGS_KEYS.forEach(k => { if (r[k] === undefined) return; if (k === 'pharma_branch_identity') { try { const localBi = JSON.parse(get(k) || '{}'); const cloudBi = typeof r[k] === 'string' ? JSON.parse(r[k]) : r[k]; set(k, JSON.stringify(Object.assign({}, cloudBi, { counterId: localBi.counterId }))); } catch(_e2) {} } else { set(k, r[k]); } }); set('_supabase_settings_ts', String(Math.max(remoteTs, Date.now()))); changed = true; } } } catch(e) {} }
 
         try {
@@ -853,31 +853,30 @@ const StorageModule = (() => {
 
                 if (invDbRaw) {
             try {
-                const cloudInv = JSON.parse(invDbRaw);
-                
-                // FIX: If cloud data is explicitly empty array, clear local cache to sync clean slate
-                if (Array.isArray(cloudInv) && cloudInv.length === 0) {
-                    localStorage.removeItem('_pharma_inv_fingerprint');
-                    if (typeof masterInventoryDB !== 'undefined' && masterInventoryDB.length > 0) {
-                        masterInventoryDB = [];
-                        if (typeof saveInventoryToDB === 'function') saveInventoryToDB([]);
-                        changed = true;
-                    }
-                }
+                // DIRTY-FLAG GUARD: if local inventory has unpushed changes (e.g. a fresh
+                // CSV import not yet pushed to cloud), never let a cloud read overwrite or
+                // clear local data.  The user must push first or use Force Sync.
+                const _invDirty = localStorage.getItem('_pharma_inv_dirty') === 'true';
+                if (!_invDirty) {
+                    const cloudInv = JSON.parse(invDbRaw);
 
-                if (Array.isArray(cloudInv) && cloudInv.length > 0 && typeof masterInventoryDB !== 'undefined') {
-
-                    const remoteFingerprint = cloudInv.length + '|' + (cloudInv[0] ? cloudInv[0].code : '') + '|' + (cloudInv[cloudInv.length - 1] ? cloudInv[cloudInv.length - 1].code : '');
-                    const localFingerprint  = get('_pharma_inv_fingerprint') || '';
-                    if (remoteFingerprint !== localFingerprint) {
-                        const { merged, hadNew } = _mergeInventory(masterInventoryDB, cloudInv);
-                        const localCodes  = new Set(masterInventoryDB.map(p => p.code));
-                        const cloudHasAll = cloudInv.every(p => localCodes.has(p.code));
-                        if (!cloudHasAll || hadNew || cloudInv.length !== masterInventoryDB.length) {
-                            masterInventoryDB = merged;
-                            if (typeof saveInventoryToDB === 'function') saveInventoryToDB(merged);
-                            set('_pharma_inv_fingerprint', remoteFingerprint);
-                            changed = true;
+                    // SAFETY: An empty cloud array means the cloud key was never populated
+                    // (brand-new device, push hasn't happened yet). Do NOT treat this as an
+                    // authoritative "wipe local" signal — that would silently destroy a
+                    // freshly imported inventory. Only merge/overwrite when cloud has data.
+                    if (Array.isArray(cloudInv) && cloudInv.length > 0 && typeof masterInventoryDB !== 'undefined') {
+                        const remoteFingerprint = cloudInv.length + '|' + (cloudInv[0] ? cloudInv[0].code : '') + '|' + (cloudInv[cloudInv.length - 1] ? cloudInv[cloudInv.length - 1].code : '');
+                        const localFingerprint  = get('_pharma_inv_fingerprint') || '';
+                        if (remoteFingerprint !== localFingerprint) {
+                            const { merged, hadNew } = _mergeInventory(masterInventoryDB, cloudInv);
+                            const localCodes  = new Set(masterInventoryDB.map(p => p.code));
+                            const cloudHasAll = cloudInv.every(p => localCodes.has(p.code));
+                            if (!cloudHasAll || hadNew || cloudInv.length !== masterInventoryDB.length) {
+                                masterInventoryDB = merged;
+                                if (typeof saveInventoryToDB === 'function') saveInventoryToDB(merged);
+                                set('_pharma_inv_fingerprint', remoteFingerprint);
+                                changed = true;
+                            }
                         }
                     }
                 }
