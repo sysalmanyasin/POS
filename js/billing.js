@@ -920,6 +920,7 @@ function syncInvoiceCounterFromLedger(ledger) {
 // HELPER: Atomic per-item IDB stock write-back.
 // =========================================================================
 function _atomicStockWriteBack(productCode, newStockValue, newVersion) {
+    const db = (window.PharmaInventoryEngine && window.PharmaInventoryEngine.getDatabaseHandle) ? window.PharmaInventoryEngine.getDatabaseHandle() : null;
     if (!db || !productCode) return;
     try {
         const tx    = db.transaction(['inventory'], 'readwrite');
@@ -949,6 +950,7 @@ function _atomicStockWriteBack(productCode, newStockValue, newVersion) {
 // =========================================================================
 function _readItemVersionFromIDB(productCode) {
     return new Promise(resolve => {
+        const db = (window.PharmaInventoryEngine && window.PharmaInventoryEngine.getDatabaseHandle) ? window.PharmaInventoryEngine.getDatabaseHandle() : null;
         if (!db || !productCode) { resolve(1); return; }
         try {
             const req = db.transaction(['inventory'], 'readonly')
@@ -1535,7 +1537,7 @@ function _doSwitchTab(tabId, btn) {
         if (typeof _invReady !== 'undefined' && _invReady) {
             if (typeof renderInventoryView === 'function') renderInventoryView();
         } else {
-            if (typeof loadInventoryFromDB === 'function' && typeof db !== 'undefined' && db) loadInventoryFromDB();
+            if (typeof loadInventoryFromDB === 'function' && window.PharmaInventoryEngine && window.PharmaInventoryEngine.getDatabaseHandle && window.PharmaInventoryEngine.getDatabaseHandle()) loadInventoryFromDB();
             if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
         }
     }

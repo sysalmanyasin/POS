@@ -410,6 +410,14 @@ function loadInventoryFromDB() {
             if (demoBanner) demoBanner.classList.add('visible');
         }
         updateHdrStats();
+        // Update inventory view content immediately after data loads.
+        // If _invReady=true a full report was already open — re-render it.
+        // Otherwise refresh the placeholder so it shows the correct product count.
+        if (typeof _invReady !== 'undefined' && _invReady) {
+            if (typeof renderInventoryView === 'function') try { renderInventoryView(); } catch(_e) {}
+        } else {
+            if (typeof showInventoryPlaceholder === 'function') try { showInventoryPlaceholder(); } catch(_e) {}
+        }
         // Startup full cloud sync — runs for ALL devices (master and client).
         // Ensures every counter is up-to-date with all movements, invoices,
         // and inventory from the cloud on each page load.
