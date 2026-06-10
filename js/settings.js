@@ -1043,6 +1043,7 @@ function _handleCSVImport(file) {
                 () => {
                     masterInventoryDB = imported;
                     window.masterInventoryDB = imported;
+                    // Persist to IndexedDB
                     try { saveInventoryToDB(masterInventoryDB); } catch(ex) {}
                     // Mark local inventory as dirty so startup cloud pull cannot
                     // overwrite it until the user explicitly pushes to cloud.
@@ -1050,13 +1051,23 @@ function _handleCSVImport(file) {
                     // Clear demo banner if visible
                     const demoBanner = document.getElementById('demoInventoryBanner');
                     if (demoBanner) demoBanner.style.display = 'none';
-                    if (typeof updateStatsCounters      === 'function') updateStatsCounters();
-                    if (typeof refreshSearchIndex       === 'function') refreshSearchIndex();
-                    if (typeof renderInvoiceUI          === 'function') renderInvoiceUI();
-                    if (typeof updateHdrStats           === 'function') updateHdrStats();
-                    if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
+                    if (typeof updateStatsCounters === 'function') updateStatsCounters();
+                    if (typeof renderInvoiceUI     === 'function') renderInvoiceUI();
+                    if (typeof updateHdrStats       === 'function') updateHdrStats();
+                    // Refresh inventory view if the tab is already open, otherwise show placeholder
+                    if (typeof _invReady !== 'undefined' && _invReady && typeof renderInventoryView === 'function') {
+                        renderInventoryView();
+                    } else if (typeof showInventoryPlaceholder === 'function') {
+                        showInventoryPlaceholder();
+                    }
                     refreshDataHubInventoryStats();
                     showToast('✅ Imported ' + imported.length + ' items from CSV.');
+                    // Show "Push to Cloud" popup after a short delay so the success toast is visible first
+                    setTimeout(function() {
+                        if (typeof window._showPostCsvPushPopup === 'function') {
+                            window._showPostCsvPushPopup(imported.length);
+                        }
+                    }, 800);
                 },
                 null, 'Import', true, 'Cancel'
             );
