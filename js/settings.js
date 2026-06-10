@@ -1043,11 +1043,12 @@ function _handleCSVImport(file) {
                 () => {
                     masterInventoryDB = imported;
                     window.masterInventoryDB = imported;
-                    // Persist to IndexedDB
-                    try { saveInventoryToDB(masterInventoryDB); } catch(ex) {}
-                    // Mark local inventory as dirty so startup cloud pull cannot
-                    // overwrite it until the user explicitly pushes to cloud.
                     try { localStorage.setItem('_pharma_inv_dirty', 'true'); } catch(_e) {}
+                    try {
+                        saveInventoryToDB(masterInventoryDB);
+                    } catch(ex) {
+                        showToast('⚠️ Inventory save error: ' + (ex.message || ex), true);
+                    }
                     // Clear demo banner if visible
                     const demoBanner = document.getElementById('demoInventoryBanner');
                     if (demoBanner) demoBanner.style.display = 'none';

@@ -33,11 +33,41 @@ dbRequest.onupgradeneeded = function(e) {
     if (!movSt.indexNames.contains('by_type'))   movSt.createIndex('by_type',   'movementType', { unique: false });
     if (!movSt.indexNames.contains('by_synced')) movSt.createIndex('by_synced', 'synced',       { unique: false });
 };
-dbRequest.onsuccess = function(e) { db = e.target.result; loadInventoryFromDB(); };
+dbRequest.onsuccess = function(e) {
+    db = e.target.result;
+    const pending = _preDbSavePending;
+    if (pending) {
+        _preDbSavePending = null;
+        window.masterInventoryDB = pending;
+        _doIDBInventoryWrite(pending, loadInventoryFromDB);
+    } else {
+        loadInventoryFromDB();
+    }
+};
 dbRequest.onerror   = function()  { showToast('⚠️ Database initialization failed.', true); };
 
-let _invSaveLock    = false;
-let _invSavePending = null;
+let _invSaveLock       = false;
+let _invSavePending    = null;
+let _preDbSavePending  = null;
+const _INV_CACHE_KEY   = '_pharma_inv_local_cache';
+
+function _mirrorInventoryCache(data) {
+    if (!Array.isArray(data) || data.length === 0) return;
+    try {
+        const payload = JSON.stringify(data);
+        if (payload.length > 4_500_000) return;
+        localStorage.setItem(_INV_CACHE_KEY, payload);
+    } catch(_e) {}
+}
+
+function _restoreInventoryCache() {
+    try {
+        const raw = localStorage.getItem(_INV_CACHE_KEY);
+        if (!raw) return null;
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) && arr.length > 0 ? arr : null;
+    } catch(_e) { return null; }
+}
 
 // =========================================================================
 // INVENTORY PERSISTENCE
@@ -47,11 +77,19 @@ let _invSavePending = null;
 // and is read at checkout time to stamp capturedVersion onto queue records.
 // =========================================================================
 function saveInventoryToDB(data) {
-    if (!db) return;
-    if (_invSaveLock) { _invSavePending = data; return; }
+    if (!Array.isArray(data)) return false;
+    window.masterInventoryDB = data;
+    if (!db) {
+        _preDbSavePending = data;
+        _mirrorInventoryCache(data);
+        console.warn('[Inventory] DB not ready — queued save of ' + data.length + ' items');
+        return false;
+    }
+    if (_invSaveLock) { _invSavePending = data; return true; }
     _doIDBInventoryWrite(data);
+    return true;
 }
-function _doIDBInventoryWrite(data) {
+function _doIDBInventoryWrite(data, onComplete) {
     _invSaveLock = true;
     if (!Array.isArray(data)) { _invSaveLock = false; _flushPendingInventorySave(); return; }
     try {
@@ -82,6 +120,7 @@ function _doIDBInventoryWrite(data) {
             // (e.g. bad data), _invSaveLock must still be released so future
             // saveInventoryToDB calls are not deadlocked indefinitely.
             try {
+                _mirrorInventoryCache(snapshot);
                 if (typeof masterInventoryDB !== 'undefined' && Array.isArray(masterInventoryDB)) {
                     _pendingVersions.forEach(function(version, code) {
                         const idx = masterInventoryDB.findIndex(p => p.code === code);
@@ -90,10 +129,23 @@ function _doIDBInventoryWrite(data) {
                 }
             } finally {
                 _invSaveLock = false; _flushPendingInventorySave();
+                if (typeof onComplete === 'function') {
+                    try { onComplete(); } catch(_e) {}
+                }
             }
         };
-        tx.onerror    = function() { _invSaveLock = false; _flushPendingInventorySave(); };
-        tx.onabort    = function() { _invSaveLock = false; _flushPendingInventorySave(); };
+        tx.onerror    = function() {
+            _invSaveLock = false; _flushPendingInventorySave();
+            if (typeof onComplete === 'function') {
+                try { onComplete(); } catch(_e) {}
+            }
+        };
+        tx.onabort    = function() {
+            _invSaveLock = false; _flushPendingInventorySave();
+            if (typeof onComplete === 'function') {
+                try { onComplete(); } catch(_e) {}
+            }
+        };
     } catch(e) { _invSaveLock = false; _flushPendingInventorySave(); }
 }
 function _flushPendingInventorySave() {
@@ -389,25 +441,46 @@ function loadInventoryFromDB() {
                 if (typeof item.version !== 'number' || item.version < 1) item.version = 1;
                 return item;
             }));
+            window.masterInventoryDB = masterInventoryDB;
             if (demoBanner) demoBanner.classList.remove('visible');
         } else if (window._supabaseRemoteInventory && window._supabaseRemoteInventory.length > 0) {
             masterInventoryDB = structuredClone(window._supabaseRemoteInventory.map(item => {
                 if (typeof item.version !== 'number' || item.version < 1) item.version = 1;
                 return item;
             }));
+            window.masterInventoryDB = masterInventoryDB;
             window._supabaseRemoteInventory = null;
             saveInventoryToDB(masterInventoryDB);
             showToast('☁️ Inventory restored from cloud (' + masterInventoryDB.length + ' items).', false);
             if (demoBanner) demoBanner.classList.remove('visible');
         } else {
-            masterInventoryDB = [
-                { code:'P-1002', name:'Panadol CF',    unitPrice:150, stock:120, company:'GSK',    generic:'Paracetamol', supplier:'Standard Dist.', packDetails:'10x10',  version:1 },
-                { code:'A-5541', name:'Amoxil 250mg',  unitPrice:490, stock:45,  company:'GSK',    generic:'Amoxicillin', supplier:'Standard Dist.', packDetails:'1x12',   version:1 },
-                { code:'B-2099', name:'Brufen 400mg',  unitPrice:210, stock:300, company:'Abbott', generic:'Ibuprofen',   supplier:'Alpha Pharma',   packDetails:'30Tabs', version:1 }
-            ];
-            saveInventoryToDB(masterInventoryDB);
-            showToast('ℹ️ Demo stock loaded. Import CSV to replace.', false);
-            if (demoBanner) demoBanner.classList.add('visible');
+            const cached = _restoreInventoryCache();
+            const _isDirty = localStorage.getItem('_pharma_inv_dirty') === 'true';
+            if (cached) {
+                masterInventoryDB = structuredClone(cached.map(item => {
+                    if (typeof item.version !== 'number' || item.version < 1) item.version = 1;
+                    return item;
+                }));
+                window.masterInventoryDB = masterInventoryDB;
+                saveInventoryToDB(masterInventoryDB);
+                showToast('📦 Inventory restored from local backup (' + masterInventoryDB.length + ' items).', false);
+                if (demoBanner) demoBanner.classList.remove('visible');
+            } else if (_isDirty) {
+                masterInventoryDB = [];
+                window.masterInventoryDB = masterInventoryDB;
+                if (demoBanner) demoBanner.classList.remove('visible');
+                showToast('⚠️ Imported inventory was not found in local storage. Please re-import your CSV.', true);
+            } else {
+                masterInventoryDB = [
+                    { code:'P-1002', name:'Panadol CF',    unitPrice:150, stock:120, company:'GSK',    generic:'Paracetamol', supplier:'Standard Dist.', packDetails:'10x10',  version:1 },
+                    { code:'A-5541', name:'Amoxil 250mg',  unitPrice:490, stock:45,  company:'GSK',    generic:'Amoxicillin', supplier:'Standard Dist.', packDetails:'1x12',   version:1 },
+                    { code:'B-2099', name:'Brufen 400mg',  unitPrice:210, stock:300, company:'Abbott', generic:'Ibuprofen',   supplier:'Alpha Pharma',   packDetails:'30Tabs', version:1 }
+                ];
+                window.masterInventoryDB = masterInventoryDB;
+                saveInventoryToDB(masterInventoryDB);
+                showToast('ℹ️ Demo stock loaded. Import CSV to replace.', false);
+                if (demoBanner) demoBanner.classList.add('visible');
+            }
         }
         updateHdrStats();
         // Update inventory view content immediately after data loads.
