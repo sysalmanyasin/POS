@@ -95,6 +95,31 @@ async function _dbSelect(table, query = '', select = '*') {
  * @param {string} table   — table name
  * @param {object|Array} rows — row object or array of row objects
  */
+/**
+ * SELECT ALL rows from a table, paginating automatically to bypass
+ * PostgREST's default 1000-row limit.  Required for large catalogues
+ * (e.g. inventory with 30,000+ products).
+ * @param {string} table    — table name
+ * @param {string} query    — PostgREST filter string (no limit/offset — added internally)
+ * @param {string} select   — columns to return, default "*"
+ * @param {number} pageSize — rows per page, default 1000
+ */
+async function _dbSelectAll(table, query = '', select = '*', pageSize = 1000) {
+    const allData = [];
+    let offset = 0;
+    while (true) {
+        const pageQuery = [query, 'limit=' + pageSize, 'offset=' + offset]
+            .filter(Boolean).join('&');
+        const { data, error } = await _dbSelect(table, pageQuery, select);
+        if (error) return { data: null, error };
+        if (!data || data.length === 0) break;
+        allData.push(...data);
+        if (data.length < pageSize) break; // reached last page
+        offset += pageSize;
+    }
+    return { data: allData, error: null };
+}
+
 async function _dbInsert(table, rows) {
     try {
         const r = await fetch(_SUPA_URL + '/rest/v1/' + table, {

@@ -2105,8 +2105,8 @@ async function _pullInventoryFromSupabase(force) {
         }
     }
 
-    // ── Step 3: fetch inventory rows ──────────────────────────────────────
-    const { data: invRows, error: invErr } = await _dbSelect('inventory', '', '*');
+    // ── Step 3: fetch ALL inventory rows (paginated — bypasses PostgREST 1000-row default limit)
+    const { data: invRows, error: invErr } = await _dbSelectAll('inventory', '', '*');
     if (invErr) {
         console.warn('[Phase4] Inventory pull error:', invErr);
         showToast('⚠️ Cloud inventory pull failed: ' + invErr, true);
