@@ -410,7 +410,7 @@
           </div>
         </div>
         <div id="inventoryViewContent" class="inv-view-content">
-          <div class="inv-empty">Open the Inventory tab to begin.</div>
+          <div class="inv-empty" id="invStaticPlaceholder" style="color:var(--muted-fg,#64748b);padding:40px 0;">Loading inventory…</div>
         </div>
 
         <!-- Per-item movement history drawer — RULE 2: lightweight init, deferred ledger -->
@@ -1526,7 +1526,7 @@
 
 <!-- ════ JAVASCRIPT — load order matters ════ -->
 <!-- 1. Config (constants, device UUID, Supabase, EmailJS keys) -->
-<script src="js/config.js?v=4"></script>
+<script src="js/config.js?v=6"></script>
 <!-- 1b. Initialize EmailJS v4 (must run after config.js defines EMAILJS_PUBLIC_KEY) -->
 <script>
   if (typeof emailjs !== "undefined" && typeof EMAILJS_PUBLIC_KEY !== "undefined") {
@@ -1534,30 +1534,30 @@
   }
 </script>
 <!-- 2. Storage (IndexedDB + localStorage module) -->
-<script src="js/storage.js?v=4"></script>
+<script src="js/storage.js?v=6"></script>
 <!-- 3. Auth (8-digit PIN, password hash, EmailJS reset) -->
-<script src="js/auth.js?v=4"></script>
+<script src="js/auth.js?v=6"></script>
 <!-- 4. UI helpers (toast, confirm modal, tab switch, etc.) -->
-<script src="js/ui.js?v=4"></script>
+<script src="js/ui.js?v=6"></script>
 <!-- 5. Inventory (search, CSV import, movements) — must load before billing -->
-<script src="js/inventory.js?v=4"></script>
+<script src="js/inventory.js?v=6"></script>
 <!-- 6. Billing (cart, invoice engine, keyboard shortcuts) -->
-<script src="js/billing.js?v=4"></script>
+<script src="js/billing.js?v=6"></script>
 <!-- 7. History (ledger table, filters, receipt viewer, hold view) -->
-<script src="js/history.js?v=4"></script>
+<script src="js/history.js?v=6"></script>
 <!-- 8. Settings (branch, staff, backup, thermal, round-off, etc.) -->
-<script src="js/settings.js?v=4"></script>
+<script src="js/settings.js?v=6"></script>
 <!-- 9. Reporting (staff sales report) -->
-<script src="js/reporting.js?v=4"></script>
+<script src="js/reporting.js?v=6"></script>
 <!-- 10. Devices dashboard (Task 4) -->
-<script src="js/devices.js?v=4"></script>
+<script src="js/devices.js?v=6"></script>
 <!-- 11. Central Cloud Sync Hub (Phase 2 — Rule 5) -->
-<script src="js/syncHub.js?v=4"></script>
+<script src="js/syncHub.js?v=6"></script>
 <!-- 12. Audit Log — event trail for every sale, refund, edit, login, sync -->
 <!--     Must load AFTER storage.js (needs StorageModule.writeAuditLog) and  -->
 <!--     AFTER config.js (needs _DEVICE_UUID). auditLog.js is also in sw.js  -->
 <!--     CORE_ASSETS so it caches correctly for offline use.                  -->
-<script src="js/auditLog.js?v=4"></script>
+<script src="js/auditLog.js?v=6"></script>
 <!-- Service Worker registration (Task 5) -->
 <script>
 // ============================================================================
