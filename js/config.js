@@ -188,6 +188,33 @@ async function _dbDelete(table, query) {
     }
 }
 
+/**
+ * INSERT rows, silently skipping any that already exist (ignore-duplicates).
+ * Use for append-only tables like inventory_movements where upsert is not
+ * needed and no UNIQUE constraint is guaranteed for on_conflict resolution.
+ * @param {string} table   — table name
+ * @param {object|Array} rows — row object or array of row objects
+ */
+async function _dbInsertIgnore(table, rows) {
+    try {
+        const r = await fetch(_SUPA_URL + '/rest/v1/' + table, {
+            method:  'POST',
+            headers: {
+                ..._SUPA_HEADERS,
+                'Prefer': 'resolution=ignore-duplicates,return=representation'
+            },
+            body: JSON.stringify(rows)
+        });
+        if (!r.ok) {
+            const err = await r.text().catch(() => r.statusText);
+            return { data: null, error: err };
+        }
+        return { data: await r.json(), error: null };
+    } catch(e) {
+        return { data: null, error: e.message || String(e) };
+    }
+}
+
 // ── EmailJS config ────────────────────────────────────────────────────────
 const EMAILJS_SERVICE_ID  = 'service_c46u9tr';
 const EMAILJS_TEMPLATE_ID = 'template_nr8juhn';

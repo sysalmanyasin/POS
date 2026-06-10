@@ -227,9 +227,11 @@ async function _pushUnsyncedMovements() {
                     let allOk = true;
                     for (let i = 0; i < rows.length; i += BATCH) {
                         const batch = rows.slice(i, i + BATCH);
-                        // _dbUpsert is defined in config.js — gracefully skip if unavailable
-                        if (typeof _dbUpsert !== 'function') { allOk = false; break; }
-                        const { error } = await _dbUpsert('inventory_movements', batch, 'movement_id');
+                        // _dbInsertIgnore is defined in config.js — gracefully skip if unavailable
+                        // inventory_movements is append-only; ignore-duplicates handles re-sync safely
+                        // without requiring a UNIQUE constraint on movement_id for on_conflict upsert.
+                        if (typeof _dbInsertIgnore !== 'function') { allOk = false; break; }
+                        const { error } = await _dbInsertIgnore('inventory_movements', batch);
                         if (error) { allOk = false; break; }
                     }
                     if (allOk) {
