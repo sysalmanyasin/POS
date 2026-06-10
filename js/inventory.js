@@ -920,8 +920,8 @@ function renderInventoryView() {
 
     const activeFilters = Object.values(_invFilters).some(v=>v) || _invStockFilter !== 'all';
     const filterBar = activeFilters
-        ? `<div class="inv-filter-bar"><span>Showing ${shownCount} of ${totalCount}</span><button onclick="_invClearAllFilters()">✕ Clear all filters</button><button class="inv-gen-btn" style="background:#dc2626;margin-left:auto;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All Inventory</button></div>`
-        : `<div class="inv-filter-bar inv-filter-bar-dim"><span>${totalCount} products</span><button class="inv-gen-btn" style="background:#dc2626;margin-left:auto;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All Inventory</button></div>`;
+        ? `<div class="inv-filter-bar"><span>Showing ${shownCount} of ${totalCount}</span><button onclick="_invClearAllFilters()">✕ Clear all filters</button><button class="inv-gen-btn" style="background:#0369a1;margin-left:auto;" onclick="deleteZeroStockItems()" title="Delete all zero-stock items from catalogue &amp; cloud">🧹 Delete Zero Stock</button><button class="inv-gen-btn" style="background:#dc2626;margin-left:6px;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All</button></div>`
+        : `<div class="inv-filter-bar inv-filter-bar-dim"><span>${totalCount} products</span><button class="inv-gen-btn" style="background:#0369a1;margin-left:auto;" onclick="deleteZeroStockItems()" title="Delete all zero-stock items from catalogue &amp; cloud">🧹 Delete Zero Stock</button><button class="inv-gen-btn" style="background:#dc2626;margin-left:6px;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All</button></div>`;
 
     container.innerHTML = filterBar + `
         <table class="inv-table inv-table-full">
@@ -1777,6 +1777,64 @@ window._showPostCsvPushPopup = _showPostCsvPushPopup;
 // =========================================================================
 // PURGE INVENTORY DATA — Password-protected local data wipe
 // =========================================================================
+// =========================================================================
+// DELETE ZERO / EMPTY STOCK ITEMS
+// Removes all products with stock <= 0 from IDB, in-memory cache, and
+// Supabase cloud in one operation.  Safe to run at any time — movement
+// history is preserved (inventory_movements is untouched).
+// =========================================================================
+async function deleteZeroStockItems() {
+    const all     = (window.masterInventoryDB || []);
+    const toKeep  = all.filter(p => (Number(p.stock) || 0) > 0);
+    const toDelete = all.filter(p => (Number(p.stock) || 0) <= 0);
+    const count   = toDelete.length;
+
+    if (count === 0) {
+        showToast('✅ No zero-stock items found — catalogue is clean.');
+        return;
+    }
+
+    showConfirmModal(
+        {
+            title:    '🧹 Delete ' + count.toLocaleString() + ' Zero-Stock Items?',
+            subtitle: 'Products with stock = 0 will be removed from catalogue & cloud. Movement history is kept.'
+        },
+        async function() {
+            // ── 1. Update in-memory + IDB ──────────────────────────────────
+            saveInventoryToDB(toKeep);
+            showToast('⏳ Removing ' + count.toLocaleString() + ' items locally…');
+
+            // ── 2. Delete from Supabase cloud in batches ───────────────────
+            if (typeof _dbDelete === 'function') {
+                // Use stock filter — deletes all rows where stock <= 0
+                const { error } = await _dbDelete('inventory', 'stock=lte.0');
+                if (error) {
+                    console.warn('[ZeroStockClean] Cloud delete partial error:', error);
+                    showToast('⚠️ Local cleaned. Cloud delete had an error — re-sync to finish.', true);
+                } else {
+                    showToast('✅ ' + count.toLocaleString() + ' zero-stock items removed (local + cloud).');
+                }
+            } else {
+                showToast('✅ ' + count.toLocaleString() + ' zero-stock items removed locally.');
+            }
+
+            // ── 3. Refresh UI ──────────────────────────────────────────────
+            if (typeof updateHdrStats === 'function') updateHdrStats();
+            if (_invReady && typeof renderInventoryView === 'function') {
+                renderInventoryView();
+            } else if (typeof showInventoryPlaceholder === 'function') {
+                showInventoryPlaceholder();
+            }
+
+            // ── 4. Audit log ───────────────────────────────────────────────
+            if (typeof _auditWrite === 'function') {
+                _auditWrite('INVENTORY', 'Deleted ' + count + ' zero-stock items from catalogue + cloud.');
+            }
+        },
+        null, 'Delete ' + count.toLocaleString() + ' Items', true
+    );
+}
+
 function openPurgeInventoryModal() {
     let modal = document.getElementById('purgeInventoryModal');
     if (!modal) {
@@ -2283,6 +2341,7 @@ async function pullInventoryFromCloud() {
 
 // EXPOSE TO GLOBAL WINDOW SO BUTTONS CAN CLICK THEM
 window.openPurgeInventoryModal  = openPurgeInventoryModal;
+window.deleteZeroStockItems      = deleteZeroStockItems;
 window.closePurgeInventoryModal = closePurgeInventoryModal;
 window.pushInventoryToCloud     = pushInventoryToCloud;
 window.pullInventoryFromCloud   = pullInventoryFromCloud;
