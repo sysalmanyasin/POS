@@ -196,20 +196,22 @@ async function _dbDelete(table, query) {
  * @param {object|Array} rows — row object or array of row objects
  */
 async function _dbInsertIgnore(table, rows) {
+    // Plain INSERT — no resolution= Prefer header.
+    // resolution=ignore-duplicates and merge-duplicates both require a UNIQUE
+    // constraint on the conflict column; without one PostgREST returns 400.
+    // We handle 409 (duplicate key) as success since the row already exists.
     try {
         const r = await fetch(_SUPA_URL + '/rest/v1/' + table, {
             method:  'POST',
-            headers: {
-                ..._SUPA_HEADERS,
-                'Prefer': 'resolution=ignore-duplicates,return=representation'
-            },
-            body: JSON.stringify(rows)
+            headers: { ..._SUPA_HEADERS, 'Prefer': 'return=minimal' },
+            body:    JSON.stringify(rows)
         });
+        if (r.status === 409) return { data: [], error: null }; // already synced — fine
         if (!r.ok) {
             const err = await r.text().catch(() => r.statusText);
             return { data: null, error: err };
         }
-        return { data: await r.json(), error: null };
+        return { data: [], error: null };
     } catch(e) {
         return { data: null, error: e.message || String(e) };
     }
