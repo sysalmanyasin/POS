@@ -209,6 +209,8 @@ async function _dbInsertIgnore(table, rows) {
         if (r.status === 409) return { data: [], error: null }; // already synced — fine
         if (!r.ok) {
             const err = await r.text().catch(() => r.statusText);
+            // Log full PostgREST error so schema mismatches are visible in console
+            console.error('[_dbInsertIgnore] 400 detail:', err);
             return { data: null, error: err };
         }
         return { data: [], error: null };
