@@ -3,7 +3,7 @@
  * Version: pharmapos-cache-v12.4 (Added syncHub.js + auditLog.js to offline cache)
  */
 
-const CACHE_NAME = 'pharmapos-cache-v17.1';
+const CACHE_NAME = 'pharmapos-cache-v17.2';
 
 // Explicit structural cache list to guarantee the system works offline instantly on day one
 const CORE_ASSETS = [
