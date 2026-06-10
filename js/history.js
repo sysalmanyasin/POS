@@ -654,16 +654,13 @@ async function launchInvoiceIsolatedWindow(invoiceID) {
         return;
     }
 
-    // Case A2: not in memory — check IDB directly (covers invoices from other
-    // devices that were synced into IDB but not yet in savedInvoicesLedger)
-    if (!inv && db) {
+    // Case A2: not in memory — check IDB directly via StorageModule (covers invoices
+    // from other devices that were synced into PharmaDataDB but not yet loaded into
+    // savedInvoicesLedger).  Uses StorageModule.getInvoiceById() which correctly
+    // targets the 'invoices' store in PharmaDataDB — NOT the inventory db handle.
+    if (!inv && typeof StorageModule !== 'undefined' && typeof StorageModule.getInvoiceById === 'function') {
         try {
-            inv = await new Promise((resolve, reject) => {
-                const tx  = db.transaction(['invoices'], 'readonly');
-                const req = tx.objectStore('invoices').get(invoiceID);
-                req.onsuccess = () => resolve(req.result || null);
-                req.onerror   = () => reject(req.error);
-            });
+            inv = await StorageModule.getInvoiceById(invoiceID);
         } catch(_e) { inv = null; }
         if (inv && Array.isArray(inv.details) && inv.details.length > 0) {
             _renderReceiptModal(inv);
@@ -718,10 +715,42 @@ async function launchInvoiceIsolatedWindow(invoiceID) {
                     inv.details = cloudInv.details;
                 } else {
                     savedInvoicesLedger.push(cloudInv);
-                    if (db) {
+                    // Write-back via StorageModule.putRemoteInvoice() so it lands in
+                    // PharmaDataDB (the correct database) instead of PharmaInventoryDB.
+                    if (typeof StorageModule !== 'undefined' && typeof StorageModule.putRemoteInvoice === 'function') {
                         try {
-                            const tx = db.transaction(['invoices'], 'readwrite');
-                            tx.objectStore('invoices').put(cloudInv);
+                            // putRemoteInvoice expects Supabase snake_case shape; cloudInv is already
+                            // camelCase. Build a minimal snake_case wrapper it can accept, then it
+                            // will upsert cleanly into the 'invoices' store.
+                            StorageModule.putRemoteInvoice({
+                                invoice_number:      cloudInv.id,
+                                device_uuid:         cloudInv.deviceUuid        || '',
+                                counter_id:          cloudInv.deviceCode        || '',
+                                customer_name:       cloudInv.customerName      || '',
+                                customer_phone:      cloudInv.customerPhone     || '',
+                                staff_name:          cloudInv.staffName         || '',
+                                subtotal:            cloudInv.subtotal          || 0,
+                                discount_pct:        cloudInv.discountPct       || 0,
+                                round_off_amt:       cloudInv.roundOffAmt       || 0,
+                                net_total:           cloudInv.netTotal          || 0,
+                                payment_method:      cloudInv.paymentMethod     || '',
+                                cash_received:       cloudInv.cashReceived      || 0,
+                                change_amount:       cloudInv.changeAmount      || 0,
+                                is_refund:           !!cloudInv.isRefund,
+                                is_partial_refund:   !!cloudInv.isPartialRefund,
+                                is_edit:             !!cloudInv.isEdit,
+                                is_manual:           !!cloudInv.isManual,
+                                original_invoice_id: cloudInv.originalId       || null,
+                                billed_at:           cloudInv.timestamp        || '',
+                                invoice_items:       Array.isArray(cloudInv.details) ? cloudInv.details.map(li => ({
+                                    product_code: li.code        || '',
+                                    product_name: li.name        || '',
+                                    pack_size:    li.packDetails || '',
+                                    unit_price:   li.unitPrice   || 0,
+                                    qty:          li.qty         || 0,
+                                    total:        li.total       || 0
+                                })) : []
+                            }).catch(() => {});
                         } catch(_e) {}
                     }
                 }

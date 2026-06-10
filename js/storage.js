@@ -1039,6 +1039,25 @@ const StorageModule = (() => {
         });
     }
 
+    // ── Single-invoice lookup by ID ─────────────────────────────────────────
+    // Used by history.js receipt viewer to check IDB for a specific invoice
+    // without loading the entire ledger.  Returns the record or null.
+    function getInvoiceById(invoiceId) {
+        return new Promise(resolve => {
+            if (!invoiceId) { resolve(null); return; }
+            _whenReady(idb => {
+                if (!idb) { resolve(null); return; }
+                try {
+                    const req = idb.transaction(['invoices'], 'readonly')
+                                   .objectStore('invoices')
+                                   .get(invoiceId);
+                    req.onsuccess = () => resolve(req.result ? structuredClone(req.result) : null);
+                    req.onerror   = () => resolve(null);
+                } catch(e) { resolve(null); }
+            });
+        });
+    }
+
     return {
         set, get, remove,
         saveInvoices, loadInvoices,
@@ -1061,6 +1080,7 @@ const StorageModule = (() => {
         writeToFailedSyncLogs,
         // ── Phase 7: remote invoice persistence ─────────────────────────────
         putRemoteInvoice,
+        getInvoiceById,
         // ── Audit Log (v6) ──────────────────────────────────────────────────
         writeAuditLog,
         getAuditLogs,

@@ -36,7 +36,7 @@ let _forceSyncRunning       = false;  // guard against concurrent runs
 window.addEventListener('online', () => {
     // Small debounce — let the browser settle connectivity before we hammer
     setTimeout(() => {
-        if (navigator.onLine) {
+        if (navigator.onLine && localStorage.getItem('_pharma_offline_work_mode') !== 'true') {
             syncOfflineQueue(_DEVICE_UUID).catch(() => {});
         }
     }, 2000);
@@ -49,6 +49,7 @@ window.addEventListener('online', () => {
 // Now uses a sequential async IIFE so pull never starts until push finishes.
 setInterval(() => {
     if (!navigator.onLine || _forceSyncRunning) return;
+    if (localStorage.getItem('_pharma_offline_work_mode') === 'true') return; // Offline Work Mode active
     (async () => {
         try {
             // ── PUSH PHASE ───────────────────────────────────────────────
@@ -898,6 +899,19 @@ async function renderSyncHubView() {
 .sh-btn-orange{background:#ea580c;color:#fff;}
 .sh-btn-purge{background:#7f1d1d;color:#fff;border:1px solid #ef4444;box-shadow:0 0 0 1px rgba(239,68,68,.25);}
 .sh-btn-purge:hover{background:#991b1b;}
+.sh-btn-stop{background:#dc2626;color:#fff;}
+.sh-btn-stop:hover{background:#b91c1c;}
+.sh-btn-go{background:#16a34a;color:#fff;}
+.sh-btn-go:hover{background:#15803d;}
+
+/* Offline Work Mode banner */
+.sh-offline-banner{display:none;align-items:center;gap:12px;padding:12px 18px;background:#fef3c7;border:1.5px solid #f59e0b;border-radius:10px;margin-bottom:20px;}
+.sh-offline-banner.visible{display:flex;}
+.sh-offline-banner-icon{font-size:22px;flex-shrink:0;}
+.sh-offline-banner-body{flex:1;min-width:0;}
+.sh-offline-banner-title{font-size:13px;font-weight:800;color:#92400e;}
+.sh-offline-banner-sub{font-size:11px;color:#b45309;margin-top:2px;line-height:1.5;}
+.sh-offline-counter{font-size:11px;font-weight:800;color:#92400e;background:rgba(245,158,11,.18);padding:2px 10px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
 .sh-btn-spin{animation:sh-spin .7s linear infinite;display:inline-block;}
 @keyframes sh-spin{to{transform:rotate(360deg);}}
 
@@ -998,8 +1012,23 @@ async function renderSyncHubView() {
               title="Fire two overlapping checkouts against the same captured version and verify OCC integrity.">
         🧪 OCC Simulation
       </button>
+      <button class="sh-btn sh-btn-stop" id="shOfflineModeBtn"
+              onclick="toggleOfflineWorkMode()"
+              title="Stop all background sync so you can import and work fully offline. When done, click to push everything to cloud.">
+        <span id="shOfflineModeIcon">⏸</span> <span id="shOfflineModeLabel">Stop Sync</span>
+      </button>
 
     </div>
+  </div>
+
+  <!-- ── Offline Work Mode Banner ─────────────────────────────────────── -->
+  <div class="sh-offline-banner" id="shOfflineBanner">
+    <span class="sh-offline-banner-icon">✈️</span>
+    <div class="sh-offline-banner-body">
+      <div class="sh-offline-banner-title">Offline Work Mode — Sync Paused</div>
+      <div class="sh-offline-banner-sub">All background cloud sync is stopped. Import your CSV, bill customers normally — everything saves locally. When you're done, click <strong>Start Sync</strong> to push all data to the cloud.</div>
+    </div>
+    <span class="sh-offline-counter" id="shOfflineQueueCount">0 pending</span>
   </div>
 
   <!-- ── Metric cards ──────────────────────────────────────────────────── -->
@@ -1196,6 +1225,8 @@ async function renderSyncHubView() {
 
     // My-device card reads from localStorage — synchronous, instant
     _renderMyDeviceCard();
+    // Reflect offline work mode state immediately
+    if (typeof _updateOfflineModeUI === 'function') _updateOfflineModeUI();
 
     // Kick off async data in parallel
     await Promise.all([
@@ -3466,3 +3497,113 @@ async function _doLocalIDBNuke(log) {
 window._doLocalIDBNuke       = _doLocalIDBNuke;
 window._executeIDBNukeBroadcast = _executeIDBNukeBroadcast;
 window.openIDBNukeModal      = openIDBNukeModal;
+
+// =========================================================================
+// OFFLINE WORK MODE — Stop Sync / Start Sync
+// =========================================================================
+// Lets the operator pause ALL background cloud sync (30s heartbeat + 30s
+// lightweight poll in billing.js) so they can safely import a CSV and bill
+// customers fully offline.  Everything saves to local IDB as normal.
+// When they click "Start Sync", forceSyncNow() pushes every accumulated
+// invoice, movement, and the inventory catalogue to the cloud.
+//
+// State key: localStorage '_pharma_offline_work_mode' = 'true' | absent
+// The 30s setInterval guards in billing.js and syncHub.js both check this.
+// =========================================================================
+
+const _OFFLINE_MODE_KEY = '_pharma_offline_work_mode';
+
+function isOfflineWorkMode() {
+    return localStorage.getItem(_OFFLINE_MODE_KEY) === 'true';
+}
+
+function _updateOfflineModeUI() {
+    const btn     = document.getElementById('shOfflineModeBtn');
+    const icon    = document.getElementById('shOfflineModeIcon');
+    const label   = document.getElementById('shOfflineModeLabel');
+    const banner  = document.getElementById('shOfflineBanner');
+    const counter = document.getElementById('shOfflineQueueCount');
+
+    const active = isOfflineWorkMode();
+
+    if (btn) {
+        btn.className = 'sh-btn ' + (active ? 'sh-btn-go' : 'sh-btn-stop');
+        btn.title = active
+            ? 'Push all accumulated data to cloud and resume background sync.'
+            : 'Stop all background sync so you can import and work fully offline.';
+    }
+    if (icon)  icon.textContent = active ? '▶' : '⏸';
+    if (label) label.textContent = active ? 'Start Sync' : 'Stop Sync';
+    if (banner) banner.classList.toggle('visible', active);
+
+    // Count pending items while in offline mode
+    if (active && counter) {
+        let pending = 0;
+        try {
+            if (typeof StorageModule !== 'undefined' && StorageModule.syncQueueMetrics) {
+                const m = StorageModule.syncQueueMetrics();
+                pending = Number(m.total) || 0;
+            }
+        } catch(_e) {}
+        counter.textContent = pending + ' pending';
+    }
+
+    // Also update the global sync badge in the header bar
+    if (typeof updateSupabaseSyncUI === 'function') {
+        updateSupabaseSyncUI(active ? 'offline' : 'connected');
+    }
+}
+
+async function toggleOfflineWorkMode() {
+    const currentlyOffline = isOfflineWorkMode();
+
+    if (currentlyOffline) {
+        // ── RESUMING: push everything, then re-enable sync ─────────────────
+        const btn = document.getElementById('shOfflineModeBtn');
+        if (btn) { btn.disabled = true; btn.textContent = '⟳ Pushing…'; }
+
+        try {
+            // Re-enable sync first so forceSyncNow can reach the cloud
+            localStorage.removeItem(_OFFLINE_MODE_KEY);
+            if (typeof StorageModule !== 'undefined') {
+                StorageModule.setSyncEnabled(true);
+                StorageModule.set('_supabase_sync_on', 'true');
+            }
+            _updateOfflineModeUI();
+
+            if (typeof showToast === 'function') showToast('☁️ Resuming sync — pushing all offline data…');
+
+            // Full sync: inventory + invoices + movements → cloud
+            await forceSyncNow();
+
+        } catch(err) {
+            if (typeof showToast === 'function')
+                showToast('❌ Sync push failed: ' + (err && err.message ? err.message : err), true);
+            // Don't re-enter offline mode — user is now online even if push errored
+        } finally {
+            if (btn) { btn.disabled = false; }
+            _updateOfflineModeUI();
+        }
+
+    } else {
+        // ── STOPPING: pause all background sync ───────────────────────────
+        localStorage.setItem(_OFFLINE_MODE_KEY, 'true');
+        // Also set dirty flag so cloud sync can't overwrite local inventory
+        try { localStorage.setItem('_pharma_inv_dirty', 'true'); } catch(_e) {}
+
+        if (typeof StorageModule !== 'undefined') {
+            StorageModule.setSyncEnabled(false);
+            StorageModule.set('_supabase_sync_on', 'false');
+        }
+
+        _updateOfflineModeUI();
+
+        if (typeof showToast === 'function')
+            showToast('✈️ Offline Work Mode ON — sync paused. Import CSV and bill freely. Click Start Sync when done.');
+    }
+}
+
+// Expose globally and wire up banner update on every renderSyncHubView call
+window.toggleOfflineWorkMode = toggleOfflineWorkMode;
+window.isOfflineWorkMode     = isOfflineWorkMode;
+window._updateOfflineModeUI  = _updateOfflineModeUI;
