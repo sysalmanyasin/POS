@@ -2,33 +2,6 @@
 // SETTINGS — branch identity, receipt, billing, thermal, staff, backup
 // =========================================================================
 
-// ── Settings card collapse / expand ──────────────────────────────────────
-window._settToggle = function(hdrEl) {
-    const body    = hdrEl.nextElementSibling;
-    const chevron = hdrEl.querySelector('.sett-card-chevron');
-    if (!body) return;
-    const isOpen = body.classList.contains('open');
-    if (isOpen) {
-        body.classList.replace('open', 'closed');
-        hdrEl.classList.remove('open');
-        if (chevron) { chevron.classList.replace('open', 'closed'); }
-    } else {
-        body.classList.replace('closed', 'open');
-        hdrEl.classList.add('open');
-        if (chevron) { chevron.classList.replace('closed', 'open'); }
-        // Lazy-load device manager on first expand
-        if (body.querySelector('#settDeviceGrid') &&
-            typeof renderSettingsDeviceManager === 'function') {
-            renderSettingsDeviceManager();
-        }
-        // Lazy-render receipt preview on first expand
-        if (body.querySelector('#receiptPreviewPaper') &&
-            typeof _renderReceiptPreview === 'function') {
-            setTimeout(_renderReceiptPreview, 80);
-        }
-    }
-};
-
 // ── Branch identity ──────────────────────────────────────────────────────
 const BRANCH_DEFAULTS = { businessName:'', branchName:'Main Branch', counterId:'C-01', operatorName:'Operator', receiptHeader:'' };
 function _getBranchIdentity() {

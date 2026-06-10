@@ -626,14 +626,12 @@ window.PharmaInventoryEngine = {
 let _invSortCol  = 'name';
 let _invSortDir  = 1;
 let _invReady    = false;
-let _invPage     = 1;
-const _INV_PAGE_SIZE = 100;
 let _invFilters  = { code:'', name:'', generic:'', company:'', supplier:'', pack:'', price:'', stock:'' };
 let _invStockFilter = 'all';
 let _invSearchProduct = null;
 let _invGroupBy = 'none';
 
-function _invSetGroupBy(val) { _invGroupBy = val; _invPage = 1; if (_invReady) renderInventoryView(); }
+function _invSetGroupBy(val) { _invGroupBy = val; if (_invReady) renderInventoryView(); }
 
 function sortInvBy(col) {
     if (_invSortCol === col) _invSortDir = -_invSortDir;
@@ -875,42 +873,6 @@ function renderInventoryView() {
     const totalCount = items.length;
     const shownCount = filtered.length;
 
-    // ── Pagination ───────────────────────────────────────────────────────────
-    const totalPages = Math.max(1, Math.ceil(shownCount / _INV_PAGE_SIZE));
-    if (_invPage > totalPages) _invPage = totalPages;
-    if (_invPage < 1) _invPage = 1;
-    const pageStart = (_invPage - 1) * _INV_PAGE_SIZE;
-    const pageEnd   = Math.min(pageStart + _INV_PAGE_SIZE, shownCount);
-    const pagedItems = filtered.slice(pageStart, pageEnd);
-
-    const _buildPaginationBar = () => {
-        if (totalPages <= 1) return '';
-        const first = pageStart + 1;
-        const last  = pageEnd;
-        const prevDisabled = _invPage <= 1 ? 'disabled' : '';
-        const nextDisabled = _invPage >= totalPages ? 'disabled' : '';
-        let pageButtons = '';
-        const maxButtons = 7;
-        let startBtn = Math.max(1, _invPage - Math.floor(maxButtons / 2));
-        let endBtn   = Math.min(totalPages, startBtn + maxButtons - 1);
-        if (endBtn - startBtn < maxButtons - 1) startBtn = Math.max(1, endBtn - maxButtons + 1);
-        if (startBtn > 1) pageButtons += `<button class="inv-pg-btn" onclick="_invGoPage(1)">1</button>`;
-        if (startBtn > 2) pageButtons += `<span class="inv-pg-ellipsis">…</span>`;
-        for (let i = startBtn; i <= endBtn; i++) {
-            pageButtons += `<button class="inv-pg-btn${i === _invPage ? ' inv-pg-active' : ''}" onclick="_invGoPage(${i})">${i}</button>`;
-        }
-        if (endBtn < totalPages - 1) pageButtons += `<span class="inv-pg-ellipsis">…</span>`;
-        if (endBtn < totalPages) pageButtons += `<button class="inv-pg-btn" onclick="_invGoPage(${totalPages})">${totalPages}</button>`;
-        return `<div class="inv-pagination-bar">
-            <span class="inv-pg-info">Showing ${first}–${last} of ${shownCount} products</span>
-            <div class="inv-pg-controls">
-                <button class="inv-pg-btn inv-pg-nav" onclick="_invGoPage(${_invPage - 1})" ${prevDisabled} title="Previous page">‹ Prev</button>
-                ${pageButtons}
-                <button class="inv-pg-btn inv-pg-nav" onclick="_invGoPage(${_invPage + 1})" ${nextDisabled} title="Next page">Next ›</button>
-            </div>
-        </div>`;
-    };
-
     // Build rows with optional group headers
     const _makeRow = (item) => {
         const s = Number(item.stock) || 0;
@@ -937,7 +899,7 @@ function renderInventoryView() {
         const gk = _invGroupBy === 'supplier' ? 'supplier' : _invGroupBy === 'generic' ? 'generic' : 'company';
         const gLabel = _invGroupBy === 'supplier' ? '🚚 Supplier' : _invGroupBy === 'generic' ? '💊 Generic' : '🏭 Company';
         let lastGroup = null;
-        pagedItems.forEach(item => {
+        filtered.forEach(item => {
             const gval = item[gk] || '—';
             if (gval !== lastGroup) {
                 const groupItems = filtered.filter(x => (x[gk] || '—') === gval);
@@ -953,7 +915,7 @@ function renderInventoryView() {
             rows += _makeRow(item);
         });
     } else {
-        rows = pagedItems.map(_makeRow).join('');
+        rows = filtered.map(_makeRow).join('');
     }
 
     const activeFilters = Object.values(_invFilters).some(v=>v) || _invStockFilter !== 'all';
@@ -961,9 +923,7 @@ function renderInventoryView() {
         ? `<div class="inv-filter-bar"><span>Showing ${shownCount} of ${totalCount}</span><button onclick="_invClearAllFilters()">✕ Clear all filters</button><button class="inv-gen-btn" style="background:#0369a1;margin-left:auto;" onclick="deleteZeroStockItems()" title="Delete all zero-stock items from catalogue &amp; cloud">🧹 Delete Zero Stock</button><button class="inv-gen-btn" style="background:#dc2626;margin-left:6px;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All</button></div>`
         : `<div class="inv-filter-bar inv-filter-bar-dim"><span>${totalCount} products</span><button class="inv-gen-btn" style="background:#0369a1;margin-left:auto;" onclick="deleteZeroStockItems()" title="Delete all zero-stock items from catalogue &amp; cloud">🧹 Delete Zero Stock</button><button class="inv-gen-btn" style="background:#dc2626;margin-left:6px;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All</button></div>`;
 
-    const paginationBar = _buildPaginationBar();
-
-    container.innerHTML = filterBar + paginationBar + `
+    container.innerHTML = filterBar + `
         <table class="inv-table inv-table-full">
             <thead>
                 <tr>
@@ -982,19 +942,11 @@ function renderInventoryView() {
         </table>`;
 }
 
-function _invGoPage(page) {
-    const container = document.getElementById('inventoryViewContent');
-    _invPage = page;
-    renderInventoryView();
-    if (container) container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function _invSetStockStatus(val) { _invStockFilter = val; _invPage = 1; if (_invReady) renderInventoryView(); }
+function _invSetStockStatus(val) { _invStockFilter = val; if (_invReady) renderInventoryView(); }
 
 function _invClearAllFilters() {
     _invFilters = { code:'', name:'', generic:'', company:'', supplier:'', pack:'', price:'', stock:'' };
     _invStockFilter = 'all';
-    _invPage = 1;
     clearInvProductSearch();
     renderInventoryView();
 }
