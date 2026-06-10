@@ -937,6 +937,34 @@ const DevicesModule = (() => {
         }
     }
 
+
+    // Permanently hard-deletes an archived device row from Supabase registry.
+    // Only shown for already-archived devices — no PURGE command needed.
+    async function _deleteDevice(targetUUID) {
+        if (!targetUUID) return;
+        if (typeof showConfirmModal !== 'function') return;
+        showConfirmModal(
+            {
+                title:    '🗑 Permanently Delete Device?',
+                subtitle: 'This removes the device record from the cloud registry. It cannot be undone.'
+            },
+            async function() {
+                try {
+                    const { error } = await _dbDelete(
+                        'devices',
+                        'uuid=eq.' + encodeURIComponent(targetUUID)
+                    );
+                    if (error) throw new Error(error);
+                    if (typeof showToast === 'function') showToast('✅ Device permanently deleted from registry.');
+                    await _refreshDashboard();
+                } catch(e) {
+                    if (typeof showToast === 'function') showToast('❌ Delete failed: ' + (e.message || e), true);
+                }
+            },
+            null, 'Delete Permanently', true
+        );
+    }
+
     async function _setAsMaster(targetUUID) {
         requestAdminAccess('DEVICE_SET_MASTER', targetUUID);
     }
@@ -1087,6 +1115,7 @@ const DevicesModule = (() => {
         _reRegisterAfterRemoval,
         _lockPinKey,
         _removeDevice,
+        _deleteDevice,
         _doPurgeDevice,
         _setAsMaster,
         _doSetAsMaster,
