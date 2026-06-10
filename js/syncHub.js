@@ -206,9 +206,9 @@ async function _processQueueItem(item, deviceUuid) {
         // These are pushed by _pushUnsyncedMovements when movements accumulate offline.
         case 'INVENTORY_MOVEMENT': {
             const mv = item.payload;
-            if (mv && mv.movement_id && typeof _dbUpsert === 'function') {
+            if (mv && mv.movement_id && typeof _dbInsertIgnore === 'function') {
                 try {
-                    const { error } = await _dbUpsert('inventory_movements', [mv], 'movement_id');
+                    const { error } = await _dbInsertIgnore('inventory_movements', [mv]);
                     if (!error) {
                         await StorageModule.deleteFromSyncQueue(item.queueId);
                     } else {
@@ -367,10 +367,9 @@ async function _processInvoiceItem(item, deviceUuid) {
 
         if (itemRows.length > 0) {
             try {
-                const { error: iiErr } = await _dbUpsert(
+                const { error: iiErr } = await _dbInsertIgnore(
                     'invoice_items',
-                    itemRows,
-                    'invoice_number,product_code'
+                    itemRows
                 );
                 if (iiErr) {
                     // Non-fatal: log but continue — inventory deduction still proceeds

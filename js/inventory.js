@@ -210,9 +210,9 @@ async function _pushUnsyncedMovements() {
                     const rows = unsynced.map(m => ({
                         movement_id:    m.movementId,
                         product_code:   m.productCode,
-                        quantity_change: Number(m.quantityChange) || 0,
-                        // SCHEMA FIX: stock_after is NOT NULL with no default
-                        stock_after:    typeof m.stockAfter === 'number' ? m.stockAfter : 0,
+                        // SCHEMA FIX: Supabase columns are INTEGER — round to avoid 22P02 float error
+                        quantity_change: Math.round(Number(m.quantityChange) || 0),
+                        stock_after:    Math.round(typeof m.stockAfter === 'number' ? m.stockAfter : 0),
                         movement_type:  m.movementType  || 'ADJUSTMENT',
                         invoice_number: m.invoiceId     || null,
                         description:    m.description   || null,
