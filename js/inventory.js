@@ -1059,7 +1059,7 @@ function _compileLedgerForCurrentDrawer() {
                 const tsRaw   = m.timestamp;
                 const tsMs    = typeof tsRaw === 'number' ? tsRaw : new Date(tsRaw).getTime();
                 const ts      = (tsMs && !isSynth)
-                    ? new Date(tsMs).toLocaleString([], { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })
+                    ? _toPKT(new Date(tsMs), {year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:true})
                     : (isSynth ? 'Baseline estimate' : '—');
                 const dispBal  = Math.max(0, m._balanceAfter);
                 const balCls   = m._balanceAfter <= 0 ? 'inv-mv-neg' : m._balanceAfter <= 10 ? 'inv-mv-low' : 'inv-mv-pos';
@@ -1130,7 +1130,7 @@ function exportLedgerCSV() {
     const typeLabel = { SALE:'Sale', REFUND:'Refund', PARTIAL_REFUND:'Partial Refund', OPENING:'Opening Stock', ADJUSTMENT:'Adjustment', EDIT_RESTORE:'Edit Restore' };
     const dataRows = L.movements.map(m => {
         const tsMs = typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime();
-        const ts = (tsMs && !m._isSynthetic) ? new Date(tsMs).toLocaleString() : 'Baseline estimate';
+        const ts = (tsMs && !m._isSynthetic) ? _toPKT(new Date(tsMs)) : 'Baseline estimate';
         const type = typeLabel[m.movementType] || m.movementType || '—';
         const sign = Number(m.quantityChange) >= 0 ? '+' : '';
         return [
@@ -1145,7 +1145,7 @@ function exportLedgerCSV() {
         '# ' + storeName + ' — Product Ledger Export',
         '# Product: ' + L.productName + ' (' + L.productCode + ')',
         '# Generic: ' + L.generic + ' | Company: ' + L.company + ' | Supplier: ' + L.supplier,
-        '# Exported: ' + new Date().toLocaleString(),
+        '# Exported: ' + _toPKT(new Date()),
         '# Ledger Balance: ' + L.ledgerStock + ' | Snapshot Stock: ' + L.snapshotStock,
         '',
         header.join(','),
@@ -1175,7 +1175,7 @@ function exportLedgerPDF() {
 
     const rowsHTML = L.movements.map((m, i) => {
         const tsMs = typeof m.timestamp === 'number' ? m.timestamp : new Date(m.timestamp).getTime();
-        const ts = (tsMs && !m._isSynthetic) ? new Date(tsMs).toLocaleString([], {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : 'Baseline estimate';
+        const ts = (tsMs && !m._isSynthetic) ? _toPKT(new Date(tsMs), {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true}) : 'Baseline estimate';
         const type  = typeLabel[m.movementType] || m.movementType || '—';
         const color = typeColor[m.movementType] || '#374151';
         const bg    = typeBg[m.movementType]    || '#fff';
@@ -1205,7 +1205,7 @@ function exportLedgerPDF() {
     const totalSales   = L.movements.filter(m => m.movementType === 'SALE').reduce((s, m) => s + Math.abs(Number(m.quantityChange)||0), 0);
     const totalRefunds = L.movements.filter(m => m.movementType === 'REFUND' || m.movementType === 'PARTIAL_REFUND').reduce((s, m) => s + Math.abs(Number(m.quantityChange)||0), 0);
     const totalAdj     = L.movements.filter(m => m.movementType === 'ADJUSTMENT').reduce((s, m) => s + (Number(m.quantityChange)||0), 0);
-    const now = new Date().toLocaleString([], {year:'numeric',month:'long',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const now = _toPKT(new Date(), {year:'numeric',month:'long',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true});
 
     const html = `<!DOCTYPE html>
 <html lang="en">

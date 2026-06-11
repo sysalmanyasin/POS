@@ -301,3 +301,83 @@ function _getDeviceCode() {
         return raw.slice(0, 6) || 'DEV';
     } catch(e) { return 'DEV'; }
 }
+
+// ── Pakistan Standard Time (PKT = UTC+5) helpers ─────────────────────────
+// All timestamps in this app are stored as UTC ISO strings in Supabase and
+// local IndexedDB. These helpers ensure every displayed time is shown in
+// PKT regardless of what timezone the browser's OS is set to.
+
+const _PKT_TIMEZONE = 'Asia/Karachi';
+
+/**
+ * Format any Date (or UTC ISO string, or ms epoch) as a human-readable
+ * PKT string, e.g. "11/6/2026, 2:11 PM".
+ * Pass options to override the default date+time format.
+ */
+function _toPKT(dateOrStr, options) {
+    try {
+        const d = (dateOrStr instanceof Date) ? dateOrStr : new Date(dateOrStr);
+        if (isNaN(d.getTime())) return String(dateOrStr || '');
+        return d.toLocaleString('en-PK', Object.assign({
+            year:   'numeric',
+            month:  'numeric',
+            day:    'numeric',
+            hour:   'numeric',
+            minute: '2-digit',
+            hour12: true,
+            timeZone: _PKT_TIMEZONE
+        }, options || {}));
+    } catch(e) { return String(dateOrStr || ''); }
+}
+
+/**
+ * Return a Date object adjusted so that calling .toISOString() on it
+ * gives the wall-clock time in PKT expressed as if it were UTC.
+ * Useful for splitting billed_at into a PKT-local date string (YYYY-MM-DD).
+ *
+ *   _pktDateStr(new Date())  →  '2026-06-11'  (PKT date, not UTC date)
+ */
+function _pktDateStr(dateOrStr) {
+    try {
+        const d = (dateOrStr instanceof Date) ? dateOrStr : new Date(dateOrStr);
+        if (isNaN(d.getTime())) return '';
+        // Extract the date parts in PKT timezone
+        const parts = new Intl.DateTimeFormat('en-CA', {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            timeZone: _PKT_TIMEZONE
+        }).format(d);           // gives "YYYY-MM-DD" in en-CA locale
+        return parts;
+    } catch(e) { return ''; }
+}
+
+/**
+ * Return a "now" ISO string that is clock-offset adjusted AND represents
+ * the actual wall time. Equivalent to new Date(Date.now() + _getClockOffset()).toISOString()
+ * but centralised so every module uses the same source of truth.
+ * The stored value is still UTC ISO (correct for Supabase timestamptz).
+ */
+function _nowISO() {
+    try {
+        const offset = (function() {
+            try { const v = parseInt(localStorage.getItem('server_clock_offset_ms'), 10); return isNaN(v) ? 0 : v; } catch(e) { return 0; }
+        })();
+        return new Date(Date.now() + offset).toISOString();
+    } catch(e) { return new Date().toISOString(); }
+}
+
+/**
+ * Convenience: PKT display string for right now (used on receipts, held bills, etc.)
+ * Returns e.g. "6/11/2026, 2:11 PM"
+ */
+function _nowPKTStr(options) {
+    return _toPKT(new Date(), options);
+}
+
+/**
+ * PKT time-only string, e.g. "2:11 PM" — used in held bill tags, clock display.
+ */
+function _nowPKTTimeStr() {
+    return _toPKT(new Date(), { year: undefined, month: undefined, day: undefined,
+        hour: 'numeric', minute: '2-digit', hour12: true });
+}
+

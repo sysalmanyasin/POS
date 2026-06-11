@@ -1624,7 +1624,7 @@ async function renderSyncStatusTable() {
   </tbody>
 </table>`;
 
-    if (tsEl) tsEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+    if (tsEl) tsEl.textContent = 'Updated ' + _toPKT(new Date(), {year:undefined,month:undefined,day:undefined,hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
 }
 
 // =========================================================================

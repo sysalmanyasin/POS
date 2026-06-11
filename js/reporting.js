@@ -524,7 +524,7 @@ async function _rptLoadMovementAudit() {
     const rows = movements.map(m => {
         const dev     = _rptDeviceMap[m.device_uuid] || {};
         const devName = _escHtml(dev.name || (m.device_uuid || '').slice(0, 8));
-        const movedAt = m.moved_at ? new Date(m.moved_at).toLocaleString('en-PK', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+        const movedAt = m.moved_at ? _toPKT(new Date(m.moved_at), {year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true}) : '—';
         const qtySign = (Number(m.quantity_change) || 0) >= 0 ? '+' : '';
         const qtyClass = (Number(m.quantity_change) || 0) < 0 ? 'rpt-col-red' : 'rpt-col-grn';
         const typeClass = {
@@ -616,7 +616,7 @@ function _rptUpdateAsOfLabel() {
     const raw = key ? localStorage.getItem(key) : null;
     if (raw) {
         const d = new Date(raw);
-        el.textContent = 'As of last sync: ' + d.toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' });
+        el.textContent = 'As of last sync: ' + _toPKT(d, {year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',hour12:true});
     } else {
         el.textContent = 'As of last sync: — (not yet synced)';
     }
@@ -729,7 +729,7 @@ function _printStaffReport() {
         return ['<tr>', '<td style="' + cs + '">' + avatar + '<strong>' + _escHtml(name) + '</strong></td>', '<td style="' + cs + 'text-align:center;">' + v.count + '</td>', '<td style="' + cs + 'text-align:right;font-weight:700;color:' + color + ';">' + cur + v.sales.toFixed(2) + '</td>', '<td style="' + cs + 'text-align:right;color:#b45309;">' + cur + v.discount.toFixed(2) + '</td>', '<td style="' + cs + 'text-align:right;">' + pct + '%</td>', '</tr>'].join('');
     }).join('');
     const emptyRow = invoices.length === 0 ? '<tr><td colspan="5" style="padding:24px;text-align:center;color:#aaa;">No invoices found for this period.</td></tr>' : '';
-    const printedAt = new Date().toLocaleString();
+    const printedAt = _toPKT(new Date());
     const reportCSS = ['*{box-sizing:border-box;margin:0;padding:0;}', 'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1e1e2e;background:#fff;padding:28px 36px;font-size:12px;}', 'h1{font-size:20px;font-weight:800;margin-bottom:3px;}', '.sub{font-size:11px;color:#888;margin-bottom:20px;}', '.summary{display:flex;gap:14px;margin-bottom:24px;}', '.card{flex:1;border:1.5px solid #e5e7eb;border-radius:8px;padding:12px 14px;}', '.card .val{font-size:22px;font-weight:800;}', '.card .lbl{font-size:10px;color:#888;margin-top:2px;}', 'table{width:100%;border-collapse:collapse;}', 'thead th{background:#f8f9fa;padding:8px 10px;text-align:left;font-size:10px;font-weight:700;color:#888;text-transform:uppercase;border-bottom:2px solid #e5e7eb;}', 'thead th:not(:first-child){text-align:right;}', 'thead th:nth-child(2){text-align:center;}', 'tfoot td{padding:8px 10px;font-weight:800;border-top:2px solid #1e1e2e;}', 'tfoot td:not(:first-child){text-align:right;}', 'tfoot td:nth-child(2){text-align:center;}', '.footer{margin-top:28px;font-size:9px;color:#aaa;border-top:1px solid #f1f3f5;padding-top:10px;}', '@media print{body{padding:12px 16px;}@page{margin:1cm;}}'].join('');
     const summaryCards = ['<div class="card"><div class="val">' + totalBills + '</div><div class="lbl">Total Bills</div></div>', '<div class="card" style="border-color:#bbf7d0;"><div class="val" style="color:#1a7a4a;">' + cur + totalSales.toFixed(2) + '</div><div class="lbl">Total Sales</div></div>', '<div class="card" style="border-color:#fde68a;"><div class="val" style="color:#b45309;">' + cur + totalDiscount.toFixed(2) + '</div><div class="lbl">Total Discount</div></div>'].join('');
     const tfootRow = ['<tfoot><tr>', '<td>Totals</td>', '<td style="text-align:center;">' + totalBills + '</td>', '<td>' + cur + totalSales.toFixed(2) + '</td>', '<td>' + cur + totalDiscount.toFixed(2) + '</td>', '<td>100%</td>', '</tr></tfoot>'].join('');

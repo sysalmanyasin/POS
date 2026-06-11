@@ -83,19 +83,72 @@ const DevicesModule = (() => {
      * If yes → heartbeat. If no → show registration modal.
      * If deregistered (is_active = false) → show re-registration prompt.
      */
+    // ── Offline-safe local device cache ───────────────────────────────────
+    const LOCAL_DEVICE_CACHE_KEY = 'pharma_device_cache';
+
+    /** Read the locally-cached device row written after every successful cloud registration. */
+    function _getLocalDeviceCache() {
+        try {
+            const raw = localStorage.getItem(LOCAL_DEVICE_CACHE_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch(e) { return null; }
+    }
+
+    /** Persist a device row locally so offline reloads skip the cloud check. */
+    function _setLocalDeviceCache(row) {
+        try { localStorage.setItem(LOCAL_DEVICE_CACHE_KEY, JSON.stringify(row)); } catch(e) {}
+    }
+
+    /** Clear the local device cache (called after a purge). */
+    function _clearLocalDeviceCache() {
+        try { localStorage.removeItem(LOCAL_DEVICE_CACHE_KEY); } catch(e) {}
+    }
+
+    /** Returns true if the browser currently has internet connectivity. */
+    function _isOnline() {
+        return typeof navigator !== 'undefined' ? navigator.onLine : true;
+    }
+
     async function _registerOrUpdateDevice() {
         // POST-PURGE GUARD: if a global purge just ran on this device (issuing OR remote),
         // force the registration modal regardless of what the cloud devices table contains.
-        // This handles the case where the Supabase DELETE on the devices table failed
-        // silently (missing RLS policy / grant), leaving a stale row that would otherwise
-        // cause a heartbeat instead of re-registration.
         const isPostPurge = localStorage.getItem('pharma_post_purge') === '1';
         if (isPostPurge) {
             try { localStorage.removeItem('pharma_post_purge'); } catch(_e) {}
+            _clearLocalDeviceCache();
             _showRegistrationModal();
             return;
         }
 
+        // ── OFFLINE PATH ──────────────────────────────────────────────────
+        // If the browser has no connectivity, skip the Supabase round-trip entirely.
+        // Use the locally-cached device row written after the last successful cloud
+        // registration. This prevents the registration modal from appearing on every
+        // offline page reload for an already-registered device.
+        if (!_isOnline()) {
+            const cached = _getLocalDeviceCache();
+            if (cached) {
+                // Device was previously registered — carry on using cached identity.
+                console.info('[DevicesModule] Offline — using cached device identity:', cached.name);
+                // Keep StorageModule keys in sync with the cache.
+                StorageModule.set('pharma_device_name',       cached.name       || '');
+                StorageModule.set('pharma_device_role',       cached.role       || 'client');
+                StorageModule.set('pharma_device_counter_id', cached.counter_id || '');
+                // Update pharma_branch_identity so billing uses the right counter ID.
+                try {
+                    const bi = JSON.parse(localStorage.getItem('pharma_branch_identity') || '{}');
+                    if (cached.counter_id) { bi.counterId = cached.counter_id; }
+                    localStorage.setItem('pharma_branch_identity', JSON.stringify(bi));
+                } catch(e) {}
+                return; // skip heartbeat — we're offline
+            }
+            // No local cache → genuinely new device registering for the first time offline.
+            // _confirmRegistration will save locally and queue the cloud upsert for later.
+            _showRegistrationModal();
+            return;
+        }
+
+        // ── ONLINE PATH (original logic) ──────────────────────────────────
         const myDevice = await _fetchMyDevice();
 
         if (!myDevice) {
@@ -106,11 +159,13 @@ const DevicesModule = (() => {
 
         if (!myDevice.is_active) {
             // Device was removed by master → prompt re-registration
+            _clearLocalDeviceCache();
             _showDeregisteredModal();
             return;
         }
 
-        // Already registered and active — just heartbeat
+        // Already registered and active — refresh local cache and heartbeat.
+        _setLocalDeviceCache(myDevice);
         await _heartbeatUpdate();
     }
 
@@ -190,6 +245,52 @@ const DevicesModule = (() => {
         if (errEl)   errEl.textContent = '';
 
         try {
+            const now = new Date().toISOString();
+
+            // ── OFFLINE REGISTRATION ───────────────────────────────────────
+            // When there is no internet, skip cloud checks and save locally.
+            // The cloud upsert will be retried automatically when connectivity
+            // is restored (see window 'online' handler at the bottom of this file).
+            if (!_isOnline()) {
+                // Assign role from local cache; fall back to 'master' if this is
+                // the very first device (no cache = no prior devices known locally).
+                const cached = _getLocalDeviceCache();
+                const role = cached ? 'client' : 'master';
+                const row = {
+                    uuid:          _DEVICE_UUID,
+                    name:          name,
+                    counter_id:    counterId,
+                    role:          role,
+                    registered_at: now,
+                    last_seen_at:  now,
+                    is_active:     true
+                };
+                // Save to local cache and StorageModule keys.
+                _setLocalDeviceCache(row);
+                StorageModule.set('pharma_device_name',       name);
+                StorageModule.set('pharma_device_role',       role);
+                StorageModule.set('pharma_device_counter_id', counterId);
+                // Flag the row for cloud sync when connectivity returns.
+                try { localStorage.setItem('pharma_pending_registration', JSON.stringify(row)); } catch(e) {}
+                // Update pharma_branch_identity so billing uses the right counter ID.
+                try {
+                    const bi = JSON.parse(localStorage.getItem('pharma_branch_identity') || '{}');
+                    bi.counterId = counterId;
+                    localStorage.setItem('pharma_branch_identity', JSON.stringify(bi));
+                } catch(e) {}
+                const overlay = document.getElementById('deviceRegModal');
+                if (overlay) overlay.remove();
+                const roleLabel = role === 'master' ? '👑 Master' : '💻 Client';
+                if (typeof showToast === 'function') {
+                    showToast(`✅ Device "${name}" saved offline as ${roleLabel}. Will sync when online.`);
+                }
+                if (role === 'master' && typeof _checkAndInitMasterSetup === 'function') {
+                    setTimeout(() => _checkAndInitMasterSetup(), 800);
+                }
+                return;
+            }
+
+            // ── ONLINE REGISTRATION (original flow) ────────────────────────
             // Enforce max device limit
             const count = await _activeDeviceCount();
             if (count >= MAX_DEVICES) {
@@ -202,7 +303,6 @@ const DevicesModule = (() => {
             const hasMaster = await _masterExists();
             const role = hasMaster ? 'client' : 'master';
 
-            const now = new Date().toISOString();
             const row = {
                 uuid:          _DEVICE_UUID,
                 name:          name,
@@ -220,10 +320,13 @@ const DevicesModule = (() => {
                 return;
             }
 
-            // Persist role and name locally for quick access
-            StorageModule.set('pharma_device_name', name);
-            StorageModule.set('pharma_device_role', role);
+            // Persist role and name locally for quick access AND as cache.
+            StorageModule.set('pharma_device_name',       name);
+            StorageModule.set('pharma_device_role',       role);
             StorageModule.set('pharma_device_counter_id', counterId);
+            _setLocalDeviceCache(row);
+            // Clear any stale pending-registration flag.
+            try { localStorage.removeItem('pharma_pending_registration'); } catch(e) {}
 
             // Also update pharma_branch_identity counter so billing uses the same ID
             try {
@@ -283,9 +386,11 @@ const DevicesModule = (() => {
         const errEl = document.getElementById('devDeregErr');
         if (errEl) errEl.textContent = 'Checking network…';
         try {
-            // Clear local role so registration modal treats this as fresh
+            // Clear local role and cache so registration modal treats this as fresh
             StorageModule.remove('pharma_device_role');
             StorageModule.remove('pharma_device_name');
+            _clearLocalDeviceCache();
+            try { localStorage.removeItem('pharma_pending_registration'); } catch(e) {}
             const overlay = document.getElementById('deviceDeregModal');
             if (overlay) overlay.remove();
             _showRegistrationModal();
@@ -326,6 +431,11 @@ const DevicesModule = (() => {
             );
 
             StorageModule.set('pharma_device_role', 'master');
+            // Refresh local device cache with updated role.
+            try {
+                const cached = _getLocalDeviceCache();
+                if (cached) { cached.role = 'master'; _setLocalDeviceCache(cached); }
+            } catch(e) {}
             if (typeof showToast === 'function') showToast('👑 Master role claimed on this device.');
 
         } catch(e) {
@@ -842,7 +952,7 @@ const DevicesModule = (() => {
                                : seenMin < 60     ? seenMin + ' min ago'
                                : seenMin < 1440   ? Math.round(seenMin / 60) + ' hr ago'
                                : Math.round(seenMin / 1440) + ' day(s) ago';
-                const regDate  = d.registered_at ? new Date(d.registered_at).toLocaleDateString('en-PK') : '—';
+                const regDate  = d.registered_at ? _toPKT(new Date(d.registered_at), {year:'numeric',month:'numeric',day:'numeric',hour:undefined,minute:undefined}) : '—';
 
                 let cardBg     = 'background:var(--g50,#f8f9fa);';
                 let cardBorder = 'border:1px solid var(--g200,#e2e5ea);';
@@ -1138,9 +1248,35 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 window.addEventListener('online', function () {
-    setTimeout(function () {
-        if (StorageModule.get('_supabase_sync_on') === 'true') {
-            DevicesModule.start();
+    setTimeout(async function () {
+        if (StorageModule.get('_supabase_sync_on') !== 'true') return;
+
+        // ── Sync a pending offline registration to the cloud ─────────────
+        // If this device registered while offline, push the cached row now.
+        try {
+            const pendingRaw = localStorage.getItem('pharma_pending_registration');
+            if (pendingRaw) {
+                const row = JSON.parse(pendingRaw);
+                // Refresh last_seen_at so the row looks current in the dashboard.
+                row.last_seen_at = new Date().toISOString();
+                const { error } = await _dbUpsert('devices', row, 'uuid');
+                if (!error) {
+                    localStorage.removeItem('pharma_pending_registration');
+                    // Update the local cache with the now-synced row.
+                    try { localStorage.setItem('pharma_device_cache', JSON.stringify(row)); } catch(e) {}
+                    if (typeof showToast === 'function') {
+                        showToast('☁️ Device registration synced to cloud.');
+                    }
+                    console.info('[DevicesModule] Offline registration synced successfully.');
+                } else {
+                    console.warn('[DevicesModule] Pending registration sync failed:', error);
+                }
+            }
+        } catch(e) {
+            console.warn('[DevicesModule] Error syncing pending registration:', e);
         }
+
+        // Resume heartbeat and command polling.
+        DevicesModule.start();
     }, 3000);
 });

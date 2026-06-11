@@ -131,14 +131,10 @@ async function _loadLedgerCloud() {
                     // which can be one day behind local time (PKT = UTC+5).
                     // Convert to local time for both display and date-range filter.
                     timestamp:         row.billed_at
-                        ? new Date(row.billed_at).toLocaleString('en-PK', {
-                              year:'numeric', month:'numeric', day:'numeric',
-                              hour:'numeric', minute:'2-digit', hour12:true })
+                        ? _toPKT(row.billed_at)
                         : '',
                     date:              row.billed_at
-                        ? (d => d.getFullYear() + '-' +
-                              String(d.getMonth()+1).padStart(2,'0') + '-' +
-                              String(d.getDate()).padStart(2,'0'))(new Date(row.billed_at))
+                        ? _pktDateStr(new Date(row.billed_at))
                         : '',
                     createdAt:         row.created_at            || '',
                     details:           Array.isArray(row.invoice_items)
@@ -202,28 +198,41 @@ async function _populateDeviceDropdownCloud() {
     const sel = document.getElementById('historyDeviceFilter');
     if (!sel) return;
     const current = sel.value;
-    let codes = [];
+    let devices = [];
 
     if (typeof DevicesModule !== 'undefined' && typeof DevicesModule._fetchAllDevices === 'function') {
         try {
-            const devices = await DevicesModule._fetchAllDevices();
-            if (Array.isArray(devices) && devices.length > 0) {
-                codes = devices.map(d => d.counter_id || '').filter(Boolean).sort();
+            const fetched = await DevicesModule._fetchAllDevices();
+            if (Array.isArray(fetched) && fetched.length > 0) {
+                devices = fetched;
             }
         } catch(_e) { /* fall through */ }
     }
 
-    // Local scan fallback
-    if (codes.length === 0) {
-        codes = [...new Set(savedInvoicesLedger.map(inv => inv.deviceCode || '').filter(Boolean))].sort();
+    sel.innerHTML = '<option value="">All Devices</option>';
+
+    if (devices.length > 0) {
+        // Cloud path — show name + UUID, use UUID as value for precise matching
+        devices.slice().sort((a, b) => (a.counter_id || '').localeCompare(b.counter_id || '')).forEach(d => {
+            const opt = document.createElement('option');
+            const shortUuid = (d.uuid || '').slice(0, 8);
+            const name = d.name || d.counter_id || d.uuid;
+            opt.value = d.uuid || d.counter_id || '';
+            opt.textContent = name + ' (' + shortUuid + ')';
+            opt.dataset.uuid = d.uuid || '';
+            opt.dataset.code = d.counter_id || '';
+            sel.appendChild(opt);
+        });
+    } else {
+        // Local scan fallback — use counter_id
+        const codes = [...new Set(savedInvoicesLedger.map(inv => inv.deviceCode || '').filter(Boolean))].sort();
+        codes.forEach(code => {
+            const opt = document.createElement('option');
+            opt.value = code; opt.textContent = code;
+            sel.appendChild(opt);
+        });
     }
 
-    sel.innerHTML = '<option value="">All Devices</option>';
-    codes.forEach(code => {
-        const opt = document.createElement('option');
-        opt.value = code; opt.textContent = code;
-        sel.appendChild(opt);
-    });
     if (current) sel.value = current;
 }
 
@@ -245,10 +254,11 @@ function _restoreHistoryView() { // eslint-disable-line no-redeclare
 // HISTORY TABLE — pagination, filters, hold view, header stats
 // =========================================================================
 let _histPage = 1;
-const _HIST_PAGE_SIZE = 50;
+const _HIST_PAGE_SIZE = 10;
 let _histCurrentDataset = [];
-let _histSortCol = null;
-let _histSortDir = 1;
+let _histSortCol = 'date';   // default: newest first
+let _histSortDir = -1;
+let _histGroupByDevice = false; // device grouping toggle
 
 function sortHistBy(col) {
     if (_histSortCol === col) _histSortDir = -_histSortDir;
@@ -264,7 +274,7 @@ function sortHistBy(col) {
 }
 
 function _sortedHistDataset(dataset) {
-    if (!_histSortCol) return [...dataset].reverse();
+    if (!_histSortCol) return [...dataset]; // Supabase delivers billed_at DESC → already newest first
     return [...dataset].sort((a, b) => {
         let av, bv;
         if      (_histSortCol === 'id')    { av = a.id || '';              bv = b.id || ''; }
@@ -279,7 +289,23 @@ function _sortedHistDataset(dataset) {
     });
 }
 
-function renderHistoryCards(dataset) {
+function toggleHistDeviceGroup() {
+    _histGroupByDevice = !_histGroupByDevice;
+    _histPage = 1;
+    const btn = document.getElementById('histGroupDeviceBtn');
+    if (btn) {
+        if (_histGroupByDevice) {
+            btn.classList.add('hfb-group-active');
+            btn.title = 'Grouping ON — click to disable';
+        } else {
+            btn.classList.remove('hfb-group-active');
+            btn.title = 'Group rows by device';
+        }
+    }
+    _renderHistPageData();
+}
+
+
     _histCurrentDataset = dataset || [];
     _histPage = 1;
     _renderHistPageData();
@@ -298,89 +324,161 @@ function _renderHistPageData() {
     let total = 0; tbody.innerHTML = '';
     if (dataset.length === 0) {
         const tr = document.createElement('tr');
-        tr.innerHTML = '<td colspan="7" style="text-align:center;padding:32px;color:var(--g400);"><div style="font-size:26px;margin-bottom:6px">📊</div><div style="font-size:12px;font-weight:600">No history yet</div></td>';
+        tr.innerHTML = '<td colspan="7" class="ht-empty-cell"><div style="font-size:28px;margin-bottom:8px">📊</div><div style="font-size:12px;font-weight:700;color:var(--g600)">No invoices found</div><div style="font-size:10px;color:var(--g400);margin-top:3px">Try adjusting your filters</div></td>';
         tbody.appendChild(tr);
         document.getElementById('ledgerGrandTotalDisplay').textContent = '0.00';
         const cnt = document.getElementById('ledgerBillCountDisplay'); if (cnt) cnt.textContent = '0 invoices';
         const bar = document.getElementById('histPagination'); if (bar) bar.style.display = 'none';
         return;
     }
-    const totalPages = Math.max(1, Math.ceil(dataset.length / _HIST_PAGE_SIZE));
-    _histPage = Math.max(1, Math.min(_histPage, totalPages));
     const sorted = _sortedHistDataset(dataset);
-    const startIdx = (_histPage - 1) * _HIST_PAGE_SIZE;
-    const pageItems = sorted.slice(startIdx, startIdx + _HIST_PAGE_SIZE);
     sorted.forEach(inv => { total += (Number(inv.netTotal) || 0); });
     const cur = _getCurrency();
+
+    // Build display list — either flat (paginated) or grouped by device
     const frag = document.createDocumentFragment();
-    pageItems.forEach(inv => {
-        const tr = document.createElement('tr');
-        if (inv.isRefund) tr.style.opacity = '0.75';
-        if (inv.refunded) tr.style.textDecoration = 'line-through';
-        tr.ondblclick = () => launchInvoiceIsolatedWindow(inv.id);
-        tr.title = 'Double-click to view receipt';
-        const tdId = document.createElement('td'); tdId.className = 'ht-id'; tdId.textContent = inv.id;
-        if (inv.isManual)       { const mb = document.createElement('span'); mb.className = 'ht-badge ht-badge-manual';  mb.textContent = 'MANUAL';  tdId.appendChild(mb); }
-        if (inv.isEdit || inv.editedAt) { const eb = document.createElement('span'); eb.className = 'ht-badge ht-badge-edited'; eb.textContent = 'EDITED'; tdId.appendChild(eb); }
-        if (inv.isRefund)       { const rb = document.createElement('span'); rb.className = 'ht-badge ht-badge-refund';  rb.textContent = 'REFUND';  tdId.appendChild(rb); }
-        if (inv.isPartialRefund){ const pb = document.createElement('span'); pb.className = 'ht-badge ht-badge-refund';  pb.textContent = 'PART-REF'; tdId.appendChild(pb); }
-        if (inv.refunded)       { const fb = document.createElement('span'); fb.className = 'ht-badge ht-badge-manual';  fb.textContent = 'REFUNDED'; tdId.appendChild(fb); }
-        if (inv.isRefund || inv.isPartialRefund) tdId.style.color = 'var(--red)';
-        const tdTs  = document.createElement('td'); tdTs.className = 'ht-ts'; tdTs.textContent = inv.timestamp;
-        const tdCu  = document.createElement('td');
-        if (inv.customerName) { tdCu.className = 'ht-cust'; tdCu.textContent = '👤 ' + inv.customerName; }
-        else { tdCu.textContent = '—'; tdCu.style.color = 'var(--g300)'; }
-        const tdSt  = document.createElement('td'); tdSt.className = 'ht-staff-cell'; tdSt.textContent = inv.staffName || '—';
-        const _nt   = Number(inv.netTotal) || 0;
-        const tdTt  = document.createElement('td'); tdTt.className = 'ht-tot'; tdTt.textContent = cur + _nt.toFixed(2);
-        if (_nt < 0) tdTt.style.color = 'var(--red)';
-        const tdAc  = document.createElement('td'); tdAc.className = 'ht-acts';
-        const vBtn  = document.createElement('button'); vBtn.className = 'ht-btn ht-view'; vBtn.textContent = '👁 View';
-        vBtn.onclick = e => { e.stopPropagation(); launchInvoiceIsolatedWindow(inv.id); };
-        const eBtn  = document.createElement('button'); eBtn.className = 'ht-btn ht-edit'; eBtn.textContent = '✏️ Edit';
-        eBtn.onclick = e => { e.stopPropagation(); requestAdminAccess('UPDATE_BILL', inv.id); };
-        tdAc.appendChild(vBtn);
-        if (!inv.isRefund) {
-            tdAc.appendChild(eBtn);
-            const isPartiallyRefunded = Array.isArray(inv.partialRefunds) && inv.partialRefunds.length > 0 && !inv.refunded;
-            if (inv.refunded) {
-                const refTag = document.createElement('span'); refTag.className = 'ht-badge ht-badge-refund'; refTag.textContent = 'REFUNDED'; tdAc.appendChild(refTag);
-            } else if (isPartiallyRefunded) {
-                const prTag = document.createElement('span'); prTag.className = 'ht-badge ht-badge-partial'; prTag.textContent = 'PART. REFUNDED'; tdAc.appendChild(prTag);
-                const prBtn2 = document.createElement('button'); prBtn2.className = 'ht-btn ht-btn-refund'; prBtn2.textContent = '↩ More Refund';
-                prBtn2.onclick = e => { e.stopPropagation(); requestAdminAccess('REFUND_INVOICE', inv.id); };
-                tdAc.appendChild(prBtn2);
-            } else {
-                const rBtn = document.createElement('button'); rBtn.className = 'ht-btn ht-btn-refund'; rBtn.textContent = '↩ Refund';
-                rBtn.onclick = e => { e.stopPropagation(); requestAdminAccess('REFUND_INVOICE', inv.id); };
-                tdAc.appendChild(rBtn);
+
+    if (_histGroupByDevice) {
+        // Group mode: no pagination — show all grouped by deviceUuid
+        const groups = {};
+        const groupOrder = [];
+        sorted.forEach(inv => {
+            const key = inv.deviceUuid || inv.deviceCode || '—';
+            if (!groups[key]) { groups[key] = { inv, rows: [] }; groupOrder.push(key); }
+            groups[key].rows.push(inv);
+        });
+        groupOrder.forEach(key => {
+            const { rows } = groups[key];
+            const sample = rows[0];
+            const devName = sample.deviceCode || '—';
+            const devUuid = sample.deviceUuid || '—';
+            const shortUuid = devUuid.length > 8 ? devUuid.slice(0, 8) + '…' : devUuid;
+            const grpTotal = rows.reduce((s, i) => s + (Number(i.netTotal) || 0), 0);
+            // Group header row
+            const hdr = document.createElement('tr');
+            hdr.className = 'hist-group-hdr';
+            hdr.innerHTML = `<td colspan="7">
+                <div class="hist-group-hdr-inner">
+                    <span class="hist-group-device-icon">🖥</span>
+                    <span class="hist-group-name">${_escHtml ? _escHtml(devName) : devName}</span>
+                    <span class="hist-group-uuid">${_escHtml ? _escHtml(shortUuid) : shortUuid}</span>
+                    <span class="hist-group-full-uuid" title="${devUuid}">${devUuid}</span>
+                    <span class="hist-group-count">${rows.length} invoice${rows.length !== 1 ? 's' : ''}</span>
+                    <span class="hist-group-subtotal">${cur}${grpTotal.toFixed(2)}</span>
+                </div>
+            </td>`;
+            frag.appendChild(hdr);
+            rows.forEach(inv => frag.appendChild(_buildHistRow(inv, cur)));
+        });
+        const bar = document.getElementById('histPagination'); if (bar) bar.style.display = 'none';
+    } else {
+        // Paginated flat mode
+        const totalPages = Math.max(1, Math.ceil(sorted.length / _HIST_PAGE_SIZE));
+        _histPage = Math.max(1, Math.min(_histPage, totalPages));
+        const startIdx = (_histPage - 1) * _HIST_PAGE_SIZE;
+        const pageItems = sorted.slice(startIdx, startIdx + _HIST_PAGE_SIZE);
+        pageItems.forEach(inv => frag.appendChild(_buildHistRow(inv, cur)));
+
+        const bar = document.getElementById('histPagination');
+        if (!bar) { tbody.appendChild(frag); return; }
+        if (sorted.length <= _HIST_PAGE_SIZE) { bar.style.display = 'none'; }
+        else {
+            bar.style.display = 'flex';
+            const dispStart = startIdx + 1, dispEnd = Math.min(startIdx + _HIST_PAGE_SIZE, sorted.length);
+            // Build page number buttons (show up to 5 pages around current)
+            let pgBtns = '';
+            const winHalf = 2;
+            const lo = Math.max(1, _histPage - winHalf);
+            const hi = Math.min(totalPages, _histPage + winHalf);
+            if (lo > 1) pgBtns += '<button class="hist-pg-btn hist-pg-num" onclick="goHistPage(1)">1</button>' + (lo > 2 ? '<span class="hist-pg-ellipsis">…</span>' : '');
+            for (let p = lo; p <= hi; p++) {
+                pgBtns += `<button class="hist-pg-btn hist-pg-num${p === _histPage ? ' hist-pg-current' : ''}" onclick="goHistPage(${p})">${p}</button>`;
             }
+            if (hi < totalPages) pgBtns += (hi < totalPages - 1 ? '<span class="hist-pg-ellipsis">…</span>' : '') + `<button class="hist-pg-btn hist-pg-num" onclick="goHistPage(${totalPages})">${totalPages}</button>`;
+
+            bar.innerHTML =
+                `<button class="hist-pg-btn" onclick="goHistPage(${_histPage - 1})"${_histPage <= 1 ? ' disabled' : ''}>‹ Prev</button>` +
+                pgBtns +
+                `<button class="hist-pg-btn" onclick="goHistPage(${_histPage + 1})"${_histPage >= totalPages ? ' disabled' : ''}>Next ›</button>` +
+                `<span class="hist-pg-info">${dispStart}–${dispEnd} of ${sorted.length}</span>`;
         }
-        const tdDev = document.createElement('td'); tdDev.className = 'ht-dev-cell';
-        const _devCode = inv.deviceCode || '—'; const _opName = inv.staffName || '';
-        if (_opName) {
-            const _devSpan = document.createElement('span'); _devSpan.className = 'ht-dev-line'; _devSpan.textContent = _devCode;
-            const _opSpan  = document.createElement('span'); _opSpan.className = 'ht-dev-op';  _opSpan.textContent = _opName;
-            tdDev.appendChild(_devSpan); tdDev.appendChild(_opSpan);
-        } else { tdDev.textContent = _devCode; }
-        tr.appendChild(tdId); tr.appendChild(tdDev); tr.appendChild(tdTs); tr.appendChild(tdCu); tr.appendChild(tdSt); tr.appendChild(tdTt); tr.appendChild(tdAc);
-        frag.appendChild(tr);
-    });
+    }
+
     tbody.appendChild(frag);
     document.getElementById('ledgerGrandTotalDisplay').textContent = total.toFixed(2);
     document.querySelectorAll('.cur-lbl').forEach(el => el.textContent = cur);
     const cntEl = document.getElementById('ledgerBillCountDisplay');
     if (cntEl) cntEl.textContent = dataset.length + ' invoice' + (dataset.length !== 1 ? 's' : '');
-    const bar = document.getElementById('histPagination'); if (!bar) return;
-    if (dataset.length <= _HIST_PAGE_SIZE) { bar.style.display = 'none'; return; }
-    bar.style.display = 'flex';
-    const dispStart = startIdx + 1, dispEnd = Math.min(startIdx + _HIST_PAGE_SIZE, dataset.length);
-    bar.innerHTML =
-        '<button class="hist-pg-btn" onclick="goHistPage(1)"' + (_histPage === 1 ? ' disabled' : '') + '>«</button>' +
-        '<button class="hist-pg-btn" onclick="goHistPage(' + (_histPage - 1) + ')"' + (_histPage <= 1 ? ' disabled' : '') + '>‹ Prev</button>' +
-        '<span class="hist-pg-info">Page ' + _histPage + ' / ' + totalPages + ' &nbsp;·&nbsp; ' + dispStart + '–' + dispEnd + ' of ' + dataset.length + '</span>' +
-        '<button class="hist-pg-btn" onclick="goHistPage(' + (_histPage + 1) + ')"' + (_histPage >= totalPages ? ' disabled' : '') + '>Next ›</button>' +
-        '<button class="hist-pg-btn" onclick="goHistPage(' + totalPages + ')"' + (_histPage === totalPages ? ' disabled' : '') + '>»</button>';
+}
+
+/** Build a single <tr> for one invoice — extracted to keep _renderHistPageData readable. */
+function _buildHistRow(inv, cur) {
+    const tr = document.createElement('tr');
+    tr.className = 'hist-row' + (inv.isRefund ? ' hist-row-refund' : '') + (inv.refunded ? ' hist-row-refunded' : '');
+    tr.ondblclick = () => launchInvoiceIsolatedWindow(inv.id);
+    tr.title = 'Double-click to view receipt';
+
+    // Invoice ID cell
+    const tdId = document.createElement('td'); tdId.className = 'ht-id';
+    const idSpan = document.createElement('span'); idSpan.textContent = inv.id; tdId.appendChild(idSpan);
+    if (inv.isManual)        { const b = document.createElement('span'); b.className = 'ht-badge ht-badge-manual';  b.textContent = 'MANUAL';   tdId.appendChild(b); }
+    if (inv.isEdit || inv.editedAt) { const b = document.createElement('span'); b.className = 'ht-badge ht-badge-edited'; b.textContent = 'EDITED';   tdId.appendChild(b); }
+    if (inv.isRefund)        { const b = document.createElement('span'); b.className = 'ht-badge ht-badge-refund';  b.textContent = 'REFUND';   tdId.appendChild(b); }
+    if (inv.isPartialRefund) { const b = document.createElement('span'); b.className = 'ht-badge ht-badge-refund';  b.textContent = 'PART-REF'; tdId.appendChild(b); }
+    if (inv.refunded)        { const b = document.createElement('span'); b.className = 'ht-badge ht-badge-manual';  b.textContent = 'REFUNDED'; tdId.appendChild(b); }
+    if (inv.isRefund || inv.isPartialRefund) idSpan.style.color = 'var(--red)';
+
+    // Device cell — show device name + UUID
+    const tdDev = document.createElement('td'); tdDev.className = 'ht-dev-cell';
+    const devCode = inv.deviceCode || '—';
+    const devUuid = inv.deviceUuid || '';
+    const shortUuid = devUuid ? devUuid.slice(0, 8) : '';
+    const devNameSpan = document.createElement('span'); devNameSpan.className = 'ht-dev-line'; devNameSpan.textContent = devCode;
+    const devUuidSpan = document.createElement('span'); devUuidSpan.className = 'ht-dev-uuid'; devUuidSpan.textContent = shortUuid ? shortUuid : ''; devUuidSpan.title = devUuid;
+    tdDev.appendChild(devNameSpan);
+    if (shortUuid) tdDev.appendChild(devUuidSpan);
+
+    // Timestamp
+    const tdTs = document.createElement('td'); tdTs.className = 'ht-ts'; tdTs.textContent = inv.timestamp;
+
+    // Customer
+    const tdCu = document.createElement('td');
+    if (inv.customerName) { tdCu.className = 'ht-cust'; tdCu.textContent = '👤 ' + inv.customerName; }
+    else { tdCu.textContent = '—'; tdCu.style.color = 'var(--g300)'; }
+
+    // Staff
+    const tdSt = document.createElement('td'); tdSt.className = 'ht-staff-cell'; tdSt.textContent = inv.staffName || '—';
+
+    // Net total
+    const _nt = Number(inv.netTotal) || 0;
+    const tdTt = document.createElement('td'); tdTt.className = 'ht-tot'; tdTt.textContent = cur + _nt.toFixed(2);
+    if (_nt < 0) tdTt.style.color = 'var(--red)';
+
+    // Actions
+    const tdAc = document.createElement('td'); tdAc.className = 'ht-acts';
+    const vBtn = document.createElement('button'); vBtn.className = 'ht-btn ht-view'; vBtn.innerHTML = '👁 View';
+    vBtn.onclick = e => { e.stopPropagation(); launchInvoiceIsolatedWindow(inv.id); };
+    const eBtn = document.createElement('button'); eBtn.className = 'ht-btn ht-edit'; eBtn.innerHTML = '✏️ Edit';
+    eBtn.onclick = e => { e.stopPropagation(); requestAdminAccess('UPDATE_BILL', inv.id); };
+    tdAc.appendChild(vBtn);
+    if (!inv.isRefund) {
+        tdAc.appendChild(eBtn);
+        const isPartiallyRefunded = Array.isArray(inv.partialRefunds) && inv.partialRefunds.length > 0 && !inv.refunded;
+        if (inv.refunded) {
+            const t = document.createElement('span'); t.className = 'ht-badge ht-badge-refund'; t.textContent = 'REFUNDED'; tdAc.appendChild(t);
+        } else if (isPartiallyRefunded) {
+            const t = document.createElement('span'); t.className = 'ht-badge ht-badge-partial'; t.textContent = 'PART. REFUNDED'; tdAc.appendChild(t);
+            const b2 = document.createElement('button'); b2.className = 'ht-btn ht-btn-refund'; b2.textContent = '↩ More Refund';
+            b2.onclick = e => { e.stopPropagation(); requestAdminAccess('REFUND_INVOICE', inv.id); }; tdAc.appendChild(b2);
+        } else {
+            const rBtn = document.createElement('button'); rBtn.className = 'ht-btn ht-btn-refund'; rBtn.textContent = '↩ Refund';
+            rBtn.onclick = e => { e.stopPropagation(); requestAdminAccess('REFUND_INVOICE', inv.id); }; tdAc.appendChild(rBtn);
+        }
+    }
+
+    tr.appendChild(tdId); tr.appendChild(tdDev); tr.appendChild(tdTs);
+    tr.appendChild(tdCu); tr.appendChild(tdSt); tr.appendChild(tdTt); tr.appendChild(tdAc);
+    return tr;
 }
 
 // =========================================================================
@@ -567,9 +665,12 @@ function applyDateLedgerFilters() {
             (d.name || '').toLowerCase() === m2name || (d.code || '').toLowerCase() === m2code));
     }
     if (deviceFilter) {
+        const df = deviceFilter.toLowerCase();
         filtered = filtered.filter(inv =>
-            (inv.deviceCode || '').toUpperCase() === deviceFilter ||
-            (inv.id || '').toUpperCase().startsWith(deviceFilter));
+            (inv.deviceUuid || '').toLowerCase() === df ||
+            (inv.deviceUuid || '').toLowerCase().startsWith(df) ||
+            (inv.deviceCode || '').toUpperCase() === deviceFilter.toUpperCase() ||
+            (inv.id || '').toUpperCase().startsWith(deviceFilter.toUpperCase()));
     }
     if (invSearch) {
         filtered = filtered.filter(inv => (inv.id || '').toLowerCase().includes(invSearch));
@@ -583,12 +684,18 @@ function resetLedgerFilters() {
     document.getElementById('filterEndDate').value   = today;
     const devEl = document.getElementById('historyDeviceFilter'); if (devEl) devEl.value = '';
     const invSearchEl = document.getElementById('histInvSearch'); if (invSearchEl) invSearchEl.value = '';
-    _histSortCol = null; _histSortDir = 1;
+    _histSortCol = 'date'; _histSortDir = -1;
     document.querySelectorAll('.hist-table thead th[data-sort-col]').forEach(th => {
-        th.textContent = th.textContent.replace(/\s*[↕▲▼]$/, '').trim() + ' ↕';
-        th.classList.remove('hist-th-sorted');
+        const c = th.dataset.sortCol;
+        const base = th.textContent.replace(/\s*[↕▲▼]$/, '').trim();
+        th.textContent = base + ' ' + (c === 'date' ? '▼' : '↕');
+        th.classList.toggle('hist-th-sorted', c === 'date');
     });
     if (typeof _histMedFiltersReset === 'function') _histMedFiltersReset();
+    // Reset device grouping
+    _histGroupByDevice = false;
+    const gBtn = document.getElementById('histGroupDeviceBtn');
+    if (gBtn) gBtn.classList.remove('hfb-group-active');
     const bar = document.getElementById('histSubFilterBar');
     if (bar && bar.classList.contains('open')) {
         bar.classList.remove('open'); bar.style.display = 'none';
@@ -709,14 +816,10 @@ async function launchInvoiceIsolatedWindow(invoiceID) {
                     isManual:         !!row.is_manual,
                     originalId:       row.original_invoice_id || null,
                     timestamp:        row.billed_at
-                        ? new Date(row.billed_at).toLocaleString('en-PK', {
-                              year:'numeric', month:'numeric', day:'numeric',
-                              hour:'numeric', minute:'2-digit', hour12:true })
+                        ? _toPKT(row.billed_at)
                         : '',
                     date:             row.billed_at
-                        ? (d => d.getFullYear() + '-' +
-                              String(d.getMonth()+1).padStart(2,'0') + '-' +
-                              String(d.getDate()).padStart(2,'0'))(new Date(row.billed_at))
+                        ? _pktDateStr(new Date(row.billed_at))
                         : '',
                     details:          Array.isArray(row.invoice_items)
                         ? row.invoice_items.map(li => ({

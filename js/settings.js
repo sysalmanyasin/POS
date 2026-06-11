@@ -678,7 +678,7 @@ async function exportFullBackup() {
         const fname = 'FDPP_BACKUP_' + now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate()) + '_' + pad(now.getHours()) + '-' + pad(now.getMinutes()) + '.json';
         const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([json],{type:'application/json'})); a.download = fname; a.click(); URL.revokeObjectURL(a.href);
         StorageModule.set('pharma_last_backup_time', String(Date.now())); updateBackupReminderBanner();
-        const st = document.getElementById('backupStatus'); if (st) st.textContent = '✓ Saved: ' + new Date().toLocaleTimeString();
+        const st = document.getElementById('backupStatus'); if (st) st.textContent = '✓ Saved: ' + _toPKT(new Date(), {year:undefined,month:undefined,day:undefined,hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
         showToast('💾 Backup exported: ' + fname);
     } catch(e) { showToast('❌ Backup failed: ' + e.message, true); }
 }
@@ -1236,7 +1236,7 @@ async function openSyncDashboard() {
     const COLORS = { PASS:'#16a34a', FAIL:'#dc2626', WARN:'#d97706', INFO:'#3b82f6' };
     const el = document.getElementById('_sdres');
     if (el) { el.innerHTML = results.map(r => '<div style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid '+border+';"><span style="font-size:15px;flex-shrink:0;margin-top:1px;">'+(ICONS[r.status]||'•')+'</span><div style="min-width:0;"><strong style="color:'+(COLORS[r.status]||clr)+'">'+_escHtml(r.name)+'</strong><br><span style="color:'+muted+';word-break:break-all;font-size:12px;">'+_escHtml(String(r.message))+'</span></div></div>').join(''); }
-    const ts = document.getElementById('_sdts'); if (ts) ts.textContent = 'Updated: ' + new Date().toLocaleTimeString();
+    const ts = document.getElementById('_sdts'); if (ts) ts.textContent = 'Updated: ' + _toPKT(new Date(), {year:undefined,month:undefined,day:undefined,hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
 }
 
 // ── Receipt preview attachment ────────────────────────────────────────────
@@ -1446,7 +1446,7 @@ function _buildSettDevCard(d, now) {
                    :                      Math.round(seenMins / 1440) + ' day' + (Math.round(seenMins / 1440) !== 1 ? 's' : '') + ' ago';
 
     const regDate  = d.registered_at || d.registeredAt
-                   ? new Date(d.registered_at || d.registeredAt).toLocaleDateString() : '—';
+                   ? _toPKT(new Date(d.registered_at || d.registeredAt), {year:'numeric',month:'numeric',day:'numeric',hour:undefined,minute:undefined}) : '—';
     const shortId  = (d.uuid || '').slice(0, 8);
 
     const card = document.createElement('div');
@@ -1571,8 +1571,8 @@ function _openDevDetailDrawer(d) {
         ['Role',          (d.role         || 'client').toUpperCase()],
         ['Status',        (d.status       || 'active').toUpperCase()],
         ['Connectivity',  isOnline ? 'Online' : isRecent ? 'Recent' : 'Offline'],
-        ['Last Seen',     lastSeen ? new Date(lastSeen).toLocaleString() : '—'],
-        ['Registered At', (d.registered_at||d.registeredAt) ? new Date(d.registered_at||d.registeredAt).toLocaleString() : '—'],
+        ['Last Seen',     lastSeen ? _toPKT(new Date(lastSeen)) : '—'],
+        ['Registered At', (d.registered_at||d.registeredAt) ? _toPKT(new Date(d.registered_at||d.registeredAt)) : '—'],
         ['Bills Today',   d.today_bills != null ? String(d.today_bills) : '—'],
         ['Active Staff',  d.active_staff  || '—'],
         ['Full UUID',     d.uuid          || '—'],

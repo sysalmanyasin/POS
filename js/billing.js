@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     (function tickAll() {
         const now = new Date();
         const sbClock = document.getElementById('statusClock');
-        if (sbClock) sbClock.textContent = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        if (sbClock) sbClock.textContent = _toPKT(now, {year:undefined,month:undefined,day:undefined,hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         const panelDate = document.getElementById('panelDate');
         const panelTime = document.getElementById('panelTime');
@@ -816,7 +816,7 @@ function holdCurrentBill() {
 function cancelHoldBill() { document.getElementById('holdLabelModal').classList.remove('visible'); document.getElementById('holdLabelInput').value = ''; }
 function confirmHoldBill() {
     const tag = (document.getElementById('holdLabelInput').value || '').trim() || ('Bill #' + (temporaryHeldBills.length + 1));
-    const bill = { tag, timestamp: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}), items: JSON.parse(JSON.stringify(activeCartItems)), discountPct: parseFloat(discountInput.value) || 0, customerName: document.getElementById('customerNameInput').value.trim(), customerPhone: document.getElementById('customerPhoneInput').value.trim() };
+    const bill = { tag, timestamp: _nowPKTTimeStr(), items: JSON.parse(JSON.stringify(activeCartItems)), discountPct: parseFloat(discountInput.value) || 0, customerName: document.getElementById('customerNameInput').value.trim(), customerPhone: document.getElementById('customerPhoneInput').value.trim() };
     temporaryHeldBills.push(bill);
     StorageModule.saveHeldBills(temporaryHeldBills);
     activeCartItems = []; selectedProductRef = null; discountInput.value = '0';
@@ -1024,7 +1024,7 @@ async function finalizeAndPrintBill() {
         currentlyEditingInvoiceId = null;
     } else { invoiceID = getNextInvoiceNumber(); }
 
-    const nowStr = new Date().toLocaleString([], { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    const nowStr = _nowPKTStr({ year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:true });
     const timestamp = (isEdit && originalTimestamp) ? originalTimestamp : nowStr;
 
     // ── STEP 1: Read capturedVersion for every cart line from IDB ─────────
@@ -1097,7 +1097,7 @@ async function finalizeAndPrintBill() {
 
     const _newInvoice = Object.assign(
         { id:invoiceID, deviceCode: (isEdit && originalDeviceCode) ? originalDeviceCode : _getDeviceCode(),
-          date:new Date(Date.now() + _getClockOffset()).toISOString().split('T')[0], timestamp,
+          date:_pktDateStr(new Date(Date.now() + _getClockOffset())), timestamp,
           customerName:custName, customerPhone:custPhone, itemCount:finalDetails.length,
           netTotal:rounded, staffName:staffNameTag, discountPct:disc,
           roundOffAmt: roStep > 0 ? roundOffAmt : 0, details:finalDetails,
@@ -1419,7 +1419,7 @@ function processFullRefund(invoiceId) {
     const refInvoice = {
         id: refId, deviceCode: _getDeviceCode(),
         date: new Date(Date.now() + _getClockOffset()).toISOString().split('T')[0],
-        timestamp: new Date().toLocaleString([], { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }),
+        timestamp: _nowPKTStr({ year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:true }),
         customerName: original.customerName || '', customerPhone: original.customerPhone || '',
         staffName: original.staffName || '', itemCount: original.itemCount,
         netTotal: -(Number(original.netTotal) || 0),
@@ -1991,7 +1991,7 @@ function submitPartialRefund() {
         id:           refId,
         deviceCode:   _getDeviceCode(),
         date:         new Date().toISOString().split('T')[0],
-        timestamp:    new Date().toLocaleString([], { year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }),
+        timestamp:    _nowPKTStr({ year:'numeric', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:true }),
         customerName: inv.customerName  || '',
         customerPhone:inv.customerPhone || '',
         staffName:    inv.staffName     || '',
