@@ -627,15 +627,21 @@ let _invSortCol  = 'name';
 let _invSortDir  = 1;
 let _invReady    = false;
 let _invFilters  = { code:'', name:'', generic:'', company:'', supplier:'', pack:'', price:'', stock:'' };
+// Pagination
+const _INV_PAGE_SIZE = 100;
+let _invCurrentPage  = 1;
+// Filter dropdown state
+let _invDropFilters = { company:'', supplier:'', generic:'' };
 let _invStockFilter = 'all';
 let _invSearchProduct = null;
 let _invGroupBy = 'none';
 
-function _invSetGroupBy(val) { _invGroupBy = val; if (_invReady) renderInventoryView(); }
+function _invSetGroupBy(val) { _invGroupBy = val; _invCurrentPage = 1; if (_invReady) renderInventoryView(); }
 
 function sortInvBy(col) {
     if (_invSortCol === col) _invSortDir = -_invSortDir;
     else { _invSortCol = col; _invSortDir = 1; }
+    _invCurrentPage = 1;
     if (_invReady) renderInventoryView();
 }
 
@@ -681,6 +687,7 @@ function generateInventoryReport() { _invReady = true; renderInventoryView(); }
 
 function _invSetFilter(col, val) {
     _invFilters[col] = val.trim().toLowerCase();
+    _invCurrentPage = 1;
     if (_invReady) renderInventoryView();
 }
 
@@ -689,6 +696,7 @@ function applyInvProductSearch() {
     _invFilters.name = (_invSearchProduct.name || '').toLowerCase();
     _invFilters.code = '';
     _invReady = true;
+    _invCurrentPage = 1;
     const res = document.getElementById('invSearchResults');
     if (res) res.style.display = 'none';
     renderInventoryView();
@@ -703,6 +711,7 @@ function clearInvProductSearch() {
     const res = document.getElementById('invSearchResults');
     if (res) res.style.display = 'none';
     _invFilters.name = '';
+    _invCurrentPage = 1;
     if (_invReady) renderInventoryView();
 }
 
@@ -781,6 +790,21 @@ function exportInventoryCSV() {
 
 function requestDeleteProduct(productCode) { requestAdminAccess('DELETE_PRODUCT', productCode); }
 
+function _invSetDropFilter(field, val) {
+    _invDropFilters[field] = val;
+    _invFilters[field] = val.trim().toLowerCase();
+    _invCurrentPage = 1;
+    if (_invReady) renderInventoryView();
+}
+
+function _invGoToPage(page) {
+    _invCurrentPage = page;
+    renderInventoryView();
+    // Scroll inventory content to top
+    const c = document.getElementById('inventoryViewContent');
+    if (c) c.scrollTop = 0;
+}
+
 function renderInventoryView() {
     const container = document.getElementById('inventoryViewContent');
     if (!container) return;
@@ -790,6 +814,11 @@ function renderInventoryView() {
         container.innerHTML = '<div class="inv-empty">No inventory items. Import a CSV via Data Hub to get started.</div>';
         return;
     }
+
+    // ── Build unique lists for dropdowns ─────────────────────────────────
+    const allCompanies  = [...new Set(items.map(x => x.company  || '').filter(Boolean))].sort();
+    const allSuppliers  = [...new Set(items.map(x => x.supplier || '').filter(Boolean))].sort();
+    const allGenerics   = [...new Set(items.map(x => x.generic  || '').filter(Boolean))].sort();
 
     let filtered = items.filter(it => {
         if (_invFilters.code    && !(it.code        ||'').toLowerCase().includes(_invFilters.code))    return false;
@@ -807,12 +836,11 @@ function renderInventoryView() {
     });
 
     if (filtered.length === 0) {
-        container.innerHTML = '<div class="inv-empty">No items match your filters. <button style="background:none;border:none;color:var(--teal);font-weight:700;cursor:pointer;font-size:12px;" onclick="_invClearAllFilters()" style="cursor:pointer;">Show all</button></div>';
+        container.innerHTML = '<div class="inv-empty">No items match your filters. <button style="background:none;border:none;color:var(--teal);font-weight:700;cursor:pointer;font-size:12px;" onclick="_invClearAllFilters()">Show all</button></div>';
         return;
     }
 
     filtered.sort((a, b) => {
-        // When grouping, primary sort is by the group key
         if (_invGroupBy !== 'none') {
             let gk = _invGroupBy === 'supplier' ? 'supplier' : _invGroupBy === 'generic' ? 'generic' : 'company';
             const ga = (a[gk] || '—').toLowerCase();
@@ -836,6 +864,76 @@ function renderInventoryView() {
 
     const cur = (typeof _getCurrency === 'function') ? _getCurrency() : 'Rs.';
 
+    // ── Pagination ────────────────────────────────────────────────────────
+    const totalFiltered = filtered.length;
+    const totalPages    = Math.max(1, Math.ceil(totalFiltered / _INV_PAGE_SIZE));
+    if (_invCurrentPage > totalPages) _invCurrentPage = totalPages;
+    if (_invCurrentPage < 1) _invCurrentPage = 1;
+    const pageStart = (_invCurrentPage - 1) * _INV_PAGE_SIZE;
+    const pageEnd   = Math.min(pageStart + _INV_PAGE_SIZE, totalFiltered);
+    const pageItems = filtered.slice(pageStart, pageEnd);
+
+    // ── Pagination bar HTML ───────────────────────────────────────────────
+    const _makePagination = () => {
+        if (totalPages <= 1) return '';
+        let pageNums = '';
+        const win = 2;
+        for (let p = 1; p <= totalPages; p++) {
+            const isActive = p === _invCurrentPage;
+            if (p === 1 || p === totalPages || (p >= _invCurrentPage - win && p <= _invCurrentPage + win)) {
+                pageNums += `<button class="inv-page-btn${isActive ? ' inv-page-btn-active' : ''}" onclick="_invGoToPage(${p})" title="Page ${p}">${p}</button>`;
+            } else if (p === _invCurrentPage - win - 1 || p === _invCurrentPage + win + 1) {
+                pageNums += `<span class="inv-page-ellipsis">…</span>`;
+            }
+        }
+        return `<div class="inv-pagination-bar">
+            <button class="inv-page-btn inv-page-nav" onclick="_invGoToPage(${_invCurrentPage - 1})" ${_invCurrentPage === 1 ? 'disabled' : ''} title="Previous page">‹ Prev</button>
+            <div class="inv-page-nums">${pageNums}</div>
+            <button class="inv-page-btn inv-page-nav" onclick="_invGoToPage(${_invCurrentPage + 1})" ${_invCurrentPage === totalPages ? 'disabled' : ''} title="Next page">Next ›</button>
+            <span class="inv-page-info">${pageStart + 1}–${pageEnd} of ${totalFiltered.toLocaleString()}</span>
+        </div>`;
+    };
+
+    // ── Filter dropdowns (collapsible) ────────────────────────────────────
+    const _isDropExpanded = () => {
+        return !!(document.getElementById('invDropFilterPanel') && document.getElementById('invDropFilterPanel').classList.contains('inv-dfp-open'));
+    };
+    const hasDropFilter = _invDropFilters.company || _invDropFilters.supplier || _invDropFilters.generic;
+    const dropPanelOpen = hasDropFilter; // auto-open if a filter is active
+
+    const _makeDropOption = (val, currentVal) => {
+        const sel = val === currentVal ? ' selected' : '';
+        return `<option value="${_escHtml(val)}"${sel}>${_escHtml(val)}</option>`;
+    };
+    const _makeDropSelect = (field, label, optList, currentVal) => {
+        const opts = ['<option value="">All ' + label + 's</option>', ...optList.map(v => _makeDropOption(v, currentVal))].join('');
+        return `<div class="inv-df-group">
+            <label class="inv-df-label">${label}</label>
+            <select class="inv-df-select" onchange="_invSetDropFilter('${field}',this.value)">
+                ${opts}
+            </select>
+            ${currentVal ? `<button class="inv-df-clear" onclick="_invSetDropFilter('${field}','')">×</button>` : ''}
+        </div>`;
+    };
+
+    const dropFilterHtml = `
+        <div class="inv-drop-filter-wrap" id="invDropFilterWrap">
+            <button class="inv-dfp-toggle" id="invDfpToggle" onclick="(function(){var p=document.getElementById('invDropFilterPanel');var t=document.getElementById('invDfpToggle');if(p.classList.toggle('inv-dfp-open')){t.classList.add('inv-dfp-toggle-open')}else{t.classList.remove('inv-dfp-toggle-open')}})()">
+                <span>🔽 Filter by Company / Supplier / Generic</span>
+                ${hasDropFilter ? `<span class="inv-dfp-badge">${[_invDropFilters.company, _invDropFilters.supplier, _invDropFilters.generic].filter(Boolean).length} active</span>` : ''}
+                <span class="inv-dfp-arrow" id="invDfpArrow">▼</span>
+            </button>
+            <div class="inv-dfp-panel ${dropPanelOpen ? 'inv-dfp-open' : ''}" id="invDropFilterPanel">
+                <div class="inv-df-row">
+                    ${_makeDropSelect('company',  'Company',  allCompanies,  _invDropFilters.company)}
+                    ${_makeDropSelect('supplier', 'Supplier', allSuppliers,  _invDropFilters.supplier)}
+                    ${_makeDropSelect('generic',  'Generic',  allGenerics,   _invDropFilters.generic)}
+                    ${hasDropFilter ? `<button class="inv-df-clear-all" onclick="_invClearDropFilters()">✕ Clear</button>` : ''}
+                </div>
+            </div>
+        </div>`;
+
+    // ── Column header builders ────────────────────────────────────────────
     const _thSF = (col, label, placeholder) => {
         const arrow = _invSortCol === col ? (_invSortDir > 0 ? '▲' : '▼') : '↕';
         const fval  = _escHtml(_invFilters[col] || '');
@@ -871,14 +969,19 @@ function renderInventoryView() {
     </th>`;
 
     const totalCount = items.length;
-    const shownCount = filtered.length;
+    const activeFilters = Object.values(_invFilters).some(v=>v) || _invStockFilter !== 'all';
 
-    // Build rows with optional group headers
-    const _makeRow = (item) => {
+    const filterBar = activeFilters
+        ? `<div class="inv-filter-bar"><span>Showing ${totalFiltered.toLocaleString()} of ${totalCount.toLocaleString()} (page ${_invCurrentPage}/${totalPages})</span><button onclick="_invClearAllFilters()">✕ Clear all filters</button><button class="inv-gen-btn" style="background:#0369a1;margin-left:auto;" onclick="deleteZeroStockItems()" title="Delete all zero-stock items from catalogue &amp; cloud">🧹 Delete Zero Stock</button><button class="inv-gen-btn" style="background:#dc2626;margin-left:6px;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All</button></div>`
+        : `<div class="inv-filter-bar inv-filter-bar-dim"><span>${totalCount.toLocaleString()} products · page ${_invCurrentPage}/${totalPages}</span><button class="inv-gen-btn" style="background:#0369a1;margin-left:auto;" onclick="deleteZeroStockItems()" title="Delete all zero-stock items from catalogue &amp; cloud">🧹 Delete Zero Stock</button><button class="inv-gen-btn" style="background:#dc2626;margin-left:6px;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All</button></div>`;
+
+    // ── Row builder ───────────────────────────────────────────────────────
+    const _makeRow = (item, rowNum) => {
         const s = Number(item.stock) || 0;
         const stockCls = s <= 0 ? 'inv-stock-zero' : s <= 10 ? 'inv-stock-low' : 'inv-stock-ok';
         const codeEsc = _escHtml(item.code);
         return `<tr class="inv-row" onclick="openItemHistoryDrawer('${codeEsc}')" title="View movement history">
+            <td class="inv-td inv-td-num">${(pageStart + rowNum + 1).toLocaleString()}</td>
             <td class="inv-td inv-td-code">${_escHtml(item.code)}</td>
             <td class="inv-td inv-td-name">${_escHtml(item.name || '—')}</td>
             <td class="inv-td inv-td-generic">${_escHtml(item.generic || '—')}</td>
@@ -894,39 +997,39 @@ function renderInventoryView() {
         </tr>`;
     };
 
+    // ── Build rows for current page (with optional group headers) ─────────
     let rows = '';
     if (_invGroupBy !== 'none') {
         const gk = _invGroupBy === 'supplier' ? 'supplier' : _invGroupBy === 'generic' ? 'generic' : 'company';
         const gLabel = _invGroupBy === 'supplier' ? '🚚 Supplier' : _invGroupBy === 'generic' ? '💊 Generic' : '🏭 Company';
         let lastGroup = null;
-        filtered.forEach(item => {
+        pageItems.forEach((item, i) => {
             const gval = item[gk] || '—';
             if (gval !== lastGroup) {
                 const groupItems = filtered.filter(x => (x[gk] || '—') === gval);
                 const groupStock = groupItems.reduce((s, x) => s + (Number(x.stock)||0), 0);
                 rows += `<tr class="inv-group-header">
-                    <td colspan="9" class="inv-group-cell">
+                    <td colspan="10" class="inv-group-cell">
                         <span class="inv-group-label">${gLabel}: <strong>${_escHtml(gval)}</strong></span>
                         <span class="inv-group-meta">${groupItems.length} item${groupItems.length!==1?'s':''} · ${groupStock} units</span>
                     </td>
                 </tr>`;
                 lastGroup = gval;
             }
-            rows += _makeRow(item);
+            rows += _makeRow(item, pageStart + i);
         });
     } else {
-        rows = filtered.map(_makeRow).join('');
+        rows = pageItems.map((item, i) => _makeRow(item, i)).join('');
     }
 
-    const activeFilters = Object.values(_invFilters).some(v=>v) || _invStockFilter !== 'all';
-    const filterBar = activeFilters
-        ? `<div class="inv-filter-bar"><span>Showing ${shownCount} of ${totalCount}</span><button onclick="_invClearAllFilters()">✕ Clear all filters</button><button class="inv-gen-btn" style="background:#0369a1;margin-left:auto;" onclick="deleteZeroStockItems()" title="Delete all zero-stock items from catalogue &amp; cloud">🧹 Delete Zero Stock</button><button class="inv-gen-btn" style="background:#dc2626;margin-left:6px;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All</button></div>`
-        : `<div class="inv-filter-bar inv-filter-bar-dim"><span>${totalCount} products</span><button class="inv-gen-btn" style="background:#0369a1;margin-left:auto;" onclick="deleteZeroStockItems()" title="Delete all zero-stock items from catalogue &amp; cloud">🧹 Delete Zero Stock</button><button class="inv-gen-btn" style="background:#dc2626;margin-left:6px;" onclick="openPurgeInventoryModal()" title="Purge all local inventory data (requires password)">🗑 Purge All</button></div>`;
+    const paginationBar = _makePagination();
 
-    container.innerHTML = filterBar + `
+    container.innerHTML = filterBar + dropFilterHtml + paginationBar + `
+        <div class="inv-table-scroll-x">
         <table class="inv-table inv-table-full">
             <thead>
                 <tr>
+                    <th class="inv-th inv-th-num">#</th>
                     ${_thSF('code',     'Code',     'code…')}
                     ${_thSF('name',     'Name',     'name…')}
                     ${_thSF('generic',  'Generic',  'generic…')}
@@ -939,14 +1042,26 @@ function renderInventoryView() {
                 </tr>
             </thead>
             <tbody>${rows}</tbody>
-        </table>`;
+        </table>
+        </div>` + paginationBar;
 }
 
-function _invSetStockStatus(val) { _invStockFilter = val; if (_invReady) renderInventoryView(); }
+function _invClearDropFilters() {
+    _invDropFilters = { company:'', supplier:'', generic:'' };
+    _invFilters.company  = '';
+    _invFilters.supplier = '';
+    _invFilters.generic  = '';
+    _invCurrentPage = 1;
+    if (_invReady) renderInventoryView();
+}
+
+function _invSetStockStatus(val) { _invStockFilter = val; _invCurrentPage = 1; if (_invReady) renderInventoryView(); }
 
 function _invClearAllFilters() {
     _invFilters = { code:'', name:'', generic:'', company:'', supplier:'', pack:'', price:'', stock:'' };
+    _invDropFilters = { company:'', supplier:'', generic:'' };
     _invStockFilter = 'all';
+    _invCurrentPage = 1;
     clearInvProductSearch();
     renderInventoryView();
 }
@@ -1919,7 +2034,9 @@ async function _executePurgeInventory() {
     }
     
     // Compare with stored hash in localStorage
-    const storedHash = localStorage.getItem('pharma_master_password_hash');
+    // Primary key: 'sys_admin_pass_hash' (written by auth.js _persistPassword)
+    // Fallback: 'pharma_master_password_hash' (legacy key used by older builds)
+    const storedHash = StorageModule.get('sys_admin_pass_hash') || localStorage.getItem('pharma_master_password_hash');
     if (!storedHash || hashedInput !== storedHash) {
         if (statusEl) { statusEl.textContent = '❌ Invalid password.'; statusEl.style.color = '#dc2626'; }
         showToast('❌ Invalid master password. Purge cancelled.', true);
