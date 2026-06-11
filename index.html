@@ -453,7 +453,8 @@
       </div>
 
       <!-- SETTINGS VIEW -->
-      <div id="settingsView" class="view">
+<div id="settingsView" class="view">
+        <!-- Settings header -->
         <div class="sett-view-hdr">
           <div class="sett-view-title">⚙️ System Settings</div>
           <div class="sett-hdr-actions">
@@ -461,19 +462,44 @@
             <button class="sett-back-btn" onclick="switchTab('billingView',document.getElementById('tab-billing'))">← Back to Billing</button>
           </div>
         </div>
-        <div class="sett-layout">
 
-          <!-- Column 1: Branch + Receipt + Thermal + Backup -->
-          <div>
-            <div class="sett-card">
-              <div class="sett-sec">Branch Identity</div>
+        <!-- Drag-to-reorder accordion stacks -->
+        <div class="sett-stacks-container" id="settStacksContainer">
+
+          <!-- 1 · Branch Identity -->
+          <div class="sett-stack" data-stack-id="branch-identity" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-branch">🏢</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Branch Identity</div>
+                <div class="sett-stack-desc">Business name, branch, counter ID and operator name</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
               <div class="sett-row"><span class="sett-lbl">Business Name</span><input type="text" class="sett-inp" id="settingBusinessName" placeholder="e.g. Fazal Din's Pharma Plus" autocomplete="off" maxlength="60"></div>
               <div class="sett-row"><span class="sett-lbl">Branch Name</span><input type="text" class="sett-inp" id="settingBranchName" placeholder="e.g. Bahria Town" autocomplete="off" maxlength="50"></div>
               <div class="sett-row"><span class="sett-lbl">Counter ID</span><input type="text" class="sett-inp" id="settingCounterId" placeholder="e.g. C-01" autocomplete="off" maxlength="20"></div>
               <div class="sett-row"><span class="sett-lbl">Operator</span><input type="text" class="sett-inp" id="settingOperatorName" placeholder="e.g. Salman" autocomplete="off" maxlength="40"></div>
               <button class="sett-save" onclick="saveBranchIdentity()">Save Identity Settings</button>
+            </div>
+          </div>
 
-              <div class="sett-sec sett-sec-mt">Receipt Customization</div>
+          <!-- 2 · Receipt Customization -->
+          <div class="sett-stack" data-stack-id="receipt-customization" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-receipt">🧾</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Receipt Customization</div>
+                <div class="sett-stack-desc">Header text, address, phone, footer and print mode</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
               <div class="sett-row"><span class="sett-lbl">Receipt Header</span><input type="text" class="sett-inp" id="settingReceiptHeader" placeholder="Override receipt title (blank = Business Name)" autocomplete="off" maxlength="80"></div>
               <div class="sett-row"><span class="sett-lbl">Address</span><input type="text" class="sett-inp" id="settingReceiptAddress" placeholder="e.g. 12 Main Blvd, Bahria Town" autocomplete="off" maxlength="80"></div>
               <div class="sett-row"><span class="sett-lbl">Phone</span><input type="text" class="sett-inp" id="settingReceiptPhone" placeholder="e.g. 0300-1234567" autocomplete="off" maxlength="40"></div>
@@ -483,9 +509,23 @@
                 <button id="paperModeBtn" class="sett-toggle-btn sett-toggle-off" onclick="togglePaperMode()">🧾 Thermal</button>
               </div>
               <button class="sett-save" onclick="saveReceiptSettings()">Save Receipt Settings</button>
+            </div>
+          </div>
 
-              <div class="sett-sec sett-sec-mt">🖨️ Thermal Printer Settings</div>
-              <div class="sett-thermal-hint">Controls the physical print layout. Changes apply on next print.</div>
+          <!-- 3 · Thermal Printer Settings -->
+          <div class="sett-stack" data-stack-id="thermal-printer" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-printer">🖨️</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Thermal Printer Settings</div>
+                <div class="sett-stack-desc">Paper width, fonts, spacing, dividers and receipt rows</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <div class="sett-thermal-hint" style="margin-bottom:10px;">Controls the physical print layout. Changes apply on next print.</div>
               <div class="sett-row"><span class="sett-lbl">Paper Width</span>
                 <select class="sett-inp sett-sel" id="settingPaperWidth">
                   <option value="58">58 mm</option><option value="72" selected>72 mm (default)</option>
@@ -546,9 +586,21 @@
               <div class="sett-row sett-row-sb"><div><span class="sett-lbl sett-lbl-auto">Show Footer Message</span><div class="sett-hint">Thank you / policy text</div></div><button id="printShowFooterBtn" class="sett-toggle-btn sett-toggle-on" onclick="togglePrintSetting('showFooter')">ON</button></div>
               <button class="sett-save sett-save-teal sett-save-mt8" onclick="saveThermalSettings()">💾 Save Printer Settings</button>
             </div>
+          </div>
 
-            <div class="sett-card sett-card-mt">
-              <div class="sett-sec">Data &amp; Backup</div>
+          <!-- 4 · Data & Backup -->
+          <div class="sett-stack" data-stack-id="data-backup" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-backup">💾</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Data &amp; Backup</div>
+                <div class="sett-stack-desc">Export backups, restore from file, auto-backup schedule</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
               <div class="bk-row">
                 <button class="bk-btn bk-export" onclick="exportFullBackup()">💾 Export Backup<span class="bk-meta" id="backupStatus"> </span></button>
                 <button class="bk-btn bk-restore" onclick="document.getElementById('restoreFileInput').click()">↩ Restore Backup<span class="bk-meta">from .json</span></button>
@@ -561,10 +613,19 @@
             </div>
           </div>
 
-          <!-- Column 2: Billing + Security + Staff -->
-          <div>
-            <div class="sett-card">
-              <div class="sett-sec">Billing Settings</div>
+          <!-- 5 · Billing Settings -->
+          <div class="sett-stack" data-stack-id="billing-settings" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-billing">💳</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Billing Settings</div>
+                <div class="sett-stack-desc">Currency, invoice prefix, discount limits and presets</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
               <div class="sett-row"><span class="sett-lbl">Inv. Prefix</span><input type="text" class="sett-inp sett-inp-sm" id="settingInvPrefix" placeholder="e.g. Inv-, FDP-" autocomplete="off" maxlength="10"></div>
               <div class="sett-row"><span class="sett-lbl">Currency</span><input type="text" class="sett-inp sett-inp-sm" id="settingCurrencyLabel" placeholder="e.g. Rs., PKR, $" autocomplete="off" maxlength="10"></div>
               <div class="sett-row"><span class="sett-lbl">Max Disc%</span><input type="number" class="sett-inp sett-inp-sm" id="settingMaxDiscount" placeholder="0=off" min="0" max="100" inputmode="numeric"></div>
@@ -581,16 +642,42 @@
                 <button id="overstockSettingBtn" class="sett-toggle-btn sett-toggle-off" onclick="toggleOverstockSetting()">OFF</button>
               </div>
               <button class="sett-save" onclick="saveBillingSettings()">Save Billing Settings</button>
+            </div>
+          </div>
 
-              <div class="sett-sec sett-sec-mt">Appearance</div>
+          <!-- 6 · Appearance -->
+          <div class="sett-stack" data-stack-id="appearance" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-appear">🎨</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Appearance</div>
+                <div class="sett-stack-desc">Dark mode, theme, and display preferences</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
               <div class="sett-row sett-row-sb">
                 <span class="sett-lbl sett-lbl-auto">Dark Mode</span>
                 <button id="darkModeToggleBtn" class="sett-toggle-btn sett-toggle-off" onclick="toggleDarkMode()">Auto</button>
               </div>
             </div>
+          </div>
 
-            <div class="sett-card sett-card-mt">
-              <div class="sett-sec">Staff Management</div>
+          <!-- 7 · Staff Management -->
+          <div class="sett-stack" data-stack-id="staff-management" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-staff">👥</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Staff Management</div>
+                <div class="sett-stack-desc">Add or remove staff, manage User IDs and bill-save PIN</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
               <button class="sett-save sett-save-teal sett-save-mb" onclick="toggleShowUserIds()">👁 Show / Hide User IDs</button>
               <div id="staffListSettings" class="sett-save-mb"></div>
               <div class="sett-row sett-row-gap">
@@ -599,7 +686,6 @@
               </div>
               <button class="sett-save sett-save-grn" onclick="addNewStaffMember()">+ Add Staff Member</button>
               <button class="sett-save sett-save-violet sett-save-mt-sm" onclick="requestOwnerPinChange()">🔐 Change Owner User ID</button>
-
               <div class="sett-row sett-row-sb sett-row-mt">
                 <div>
                   <span class="sett-lbl sett-lbl-auto">Require PIN on Bill Save</span>
@@ -607,8 +693,23 @@
                 </div>
                 <button id="requireStaffPinBtn" class="sett-toggle-btn sett-toggle-off" onclick="toggleRequireStaffPin()">OFF</button>
               </div>
+            </div>
+          </div>
 
-              <div class="sett-sec sett-sec-mt" id="securitySectionTitle">Security — Change Admin Password</div>
+          <!-- 8 · Security -->
+          <div class="sett-stack" data-stack-id="security" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-security">🔒</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Security</div>
+                <div class="sett-stack-desc">Admin password, access controls and PIN policies</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <div class="sett-sec" id="securitySectionTitle" style="margin-top:0;">Security — Change Admin Password</div>
               <input type="password" class="sett-inp sett-inp-pw" id="currentAdminPasswordInput" placeholder="Current admin password" autocomplete="off" style="display:none;">
               <input type="password" class="sett-inp sett-inp-pw" id="oldPassInput" placeholder="Current password" autocomplete="off" style="display:none;">
               <input type="password" class="sett-inp sett-inp-pw" id="newPassInput" placeholder="New password (8 digits)" autocomplete="off">
@@ -616,30 +717,67 @@
               <button class="sett-save sett-save-pur" onclick="processPasswordModification()" id="updatePassBtn">Update Password</button>
             </div>
           </div>
-        </div><!-- /sett-layout -->
 
-        <!-- ══ Device Manager (Task 4) ══════════════════════════════════ -->
-        <div class="sett-card sett-card-mt-lg" id="deviceManagerSection">
-          <div class="sett-sec">📱 Device Manager</div>
-          <p style="font-size:10px;color:var(--g500);margin:0 0 10px;line-height:1.5;">
-            All devices registered to this workspace.
-            <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
-              <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;"></span>Online (&lt;2 min)
-            </span>
-            <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
-              <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>Recent (&lt;10 min)
-            </span>
-            <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
-              <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>Offline
-            </span>
-            — Double-click a card for full details.
-          </p>
-          <div id="settDeviceGrid" class="dev-card-grid">
-            <div style="font-size:11px;color:var(--g400);padding:10px 0;">Loading devices…</div>
+          <!-- 9 · Device Manager -->
+          <div class="sett-stack" data-stack-id="device-manager" draggable="true" id="deviceManagerSection">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-devices">📱</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Device Manager</div>
+                <div class="sett-stack-desc">Registered devices, online status, master/client roles</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <p style="font-size:10px;color:var(--g500);margin:0 0 10px;line-height:1.5;">
+                All devices registered to this workspace.
+                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;"></span>Online (&lt;2 min)
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>Recent (&lt;10 min)
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>Offline
+                </span>
+                — Double-click a card for full details.
+              </p>
+              <div id="settDeviceGrid" class="dev-card-grid">
+                <div style="font-size:11px;color:var(--g400);padding:10px 0;">Loading devices…</div>
+              </div>
+              <button class="sett-save" style="margin-top:10px;background:var(--g200);color:var(--g700);font-size:11px;" onclick="renderSettingsDeviceManager()">↺ Refresh Devices</button>
+              <button class="sett-save" style="margin-top:8px;background:#7c3aed;color:#fff;font-size:11px;" onclick="openMasterReclaimModal()">👑 Master Reclaim</button>
+            </div>
           </div>
-          <button class="sett-save" style="margin-top:10px;background:var(--g200);color:var(--g700);font-size:11px;" onclick="renderSettingsDeviceManager()">↺ Refresh Devices</button>
-          <button class="sett-save" style="margin-top:8px;background:#7c3aed;color:#fff;font-size:11px;" onclick="openMasterReclaimModal()">👑 Master Reclaim</button>
-        </div>
+
+          <!-- 10 · Live Receipt Preview -->
+          <div class="sett-stack" data-stack-id="live-receipt-preview" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-preview">👁️</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Live Receipt Preview</div>
+                <div class="sett-stack-desc">Real-time preview of your receipt with current printer settings</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <div class="live-preview-hdr">
+                <div>
+                  <div class="live-preview-subtitle" style="margin-top:4px;">Reflects your current printer settings.</div>
+                </div>
+                <button class="live-preview-refresh" onclick="_renderReceiptPreview()">↺ Refresh</button>
+              </div>
+              <div id="receiptPreviewStage" class="receipt-preview-stage">
+                <div id="receiptPreviewPaper" class="receipt-preview-paper"></div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /sett-stacks-container -->
 
         <!-- Device Detail Drawer (Task 4) -->
         <div id="devDetailDrawer" class="dev-detail-drawer" role="dialog" aria-modal="true" aria-label="Device Details">
@@ -652,19 +790,6 @@
           </div>
         </div>
 
-        <!-- Live Receipt Preview -->
-        <div class="sett-card sett-card-mt-lg">
-          <div class="live-preview-hdr">
-            <div>
-              <div class="sett-sec sett-sec-preview">🖨️ Live Receipt Preview</div>
-              <div class="live-preview-subtitle">Reflects your current printer settings.</div>
-            </div>
-            <button class="live-preview-refresh" onclick="_renderReceiptPreview()">↺ Refresh</button>
-          </div>
-          <div id="receiptPreviewStage" class="receipt-preview-stage">
-            <div id="receiptPreviewPaper" class="receipt-preview-paper"></div>
-          </div>
-        </div>
       </div><!-- /settingsView -->
 
       <!-- ═══ SYNC HUB VIEW (F10) ═══════════════════════════════════════════
