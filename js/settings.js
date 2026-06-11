@@ -772,30 +772,70 @@ function openPurgeOldModal() {
 }
 function _openPurgeOldModalConfirmed() {
     const modal = document.getElementById('purgeOldModal'); if (!modal) return;
-    const preview = document.getElementById('purgeOldPreview');
-    if (preview && typeof savedInvoicesLedger !== 'undefined') preview.textContent = 'You currently have ' + savedInvoicesLedger.length + ' invoice(s) stored.';
+    // Default date to 90 days ago if not already set
+    const dateInp = document.getElementById('purgeBeforeDate');
+    if (dateInp && !dateInp.value) {
+        const d = new Date(); d.setDate(d.getDate() - 90);
+        dateInp.value = d.toISOString().split('T')[0];
+    }
+    _updatePurgePreview();
     modal.classList.add('visible');
+    if (dateInp) setTimeout(() => dateInp.focus(), 80);
 }
-function closePurgeOldModal() { const modal = document.getElementById('purgeOldModal'); if (modal) modal.classList.remove('visible'); }
-async function executePurgeOld(keepDays) {
-    closePurgeOldModal();
+function _updatePurgePreview() {
+    const preview = document.getElementById('purgePreviewCount'); // FIX: matches HTML id (was 'purgeOldPreview')
+    const dateInp = document.getElementById('purgeBeforeDate');
+    if (!preview) return;
+    const cutoffStr = dateInp ? dateInp.value : '';
+    if (!cutoffStr) { preview.textContent = ''; return; }
+    if (typeof savedInvoicesLedger === 'undefined') { preview.textContent = ''; return; }
+    const count = savedInvoicesLedger.filter(inv => (inv.date || '') < cutoffStr).length;
+    const total = savedInvoicesLedger.length;
+    if (count === 0) {
+        preview.style.color = 'var(--g500)';
+        preview.textContent = 'No invoices found before ' + cutoffStr + '.';
+    } else {
+        preview.style.color = 'var(--red, #dc2626)';
+        preview.textContent = count + ' invoice' + (count === 1 ? '' : 's') + ' will be deleted (' + (total - count) + ' kept).';
+    }
+}
+function closePurgeOldModal() {
+    const modal = document.getElementById('purgeOldModal'); if (modal) modal.classList.remove('visible');
+    const preview = document.getElementById('purgePreviewCount'); if (preview) preview.textContent = '';
+}
+// FIX: executePurgeOldInvoices() — called by the HTML button but was never defined (silent no-op)
+function executePurgeOldInvoices() {
+    const dateInp = document.getElementById('purgeBeforeDate');
+    const cutoffStr = dateInp ? dateInp.value : '';
+    if (!cutoffStr) { showToast('⚠️ Select a cutoff date first.', true); return; }
     if (typeof savedInvoicesLedger === 'undefined') return;
-    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - keepDays);
-    const cutoffStr = cutoff.toISOString().split('T')[0];
     const toDelete = savedInvoicesLedger.filter(inv => (inv.date || '') < cutoffStr);
-    if (toDelete.length === 0) { showToast('ℹ️ No invoices older than ' + keepDays + ' days found.'); return; }
+    if (toDelete.length === 0) { showToast('ℹ️ No invoices before ' + cutoffStr + '.'); closePurgeOldModal(); return; }
+    closePurgeOldModal();
     showConfirmModal(
-        'Delete ' + toDelete.length + ' invoice(s) older than ' + keepDays + ' days?\n\nA backup will be downloaded first.',
+        'Delete ' + toDelete.length + ' invoice' + (toDelete.length === 1 ? '' : 's') + ' older than ' + cutoffStr + '?\n\nA backup will be downloaded first.',
         async () => {
             try { await exportFullBackup(); } catch(e) { showToast('❌ Backup failed — purge aborted.', true); return; }
             savedInvoicesLedger = savedInvoicesLedger.filter(inv => (inv.date || '') >= cutoffStr);
             try { StorageModule.saveInvoices(savedInvoicesLedger); } catch(e) { showToast('❌ Could not save after purge: ' + (e.message || ''), true); return; }
             if (typeof renderHistoryCards === 'function') renderHistoryCards(savedInvoicesLedger);
+            if (typeof StorageModule.pruneAuditLog === 'function') {
+                const daysBefore = Math.round((Date.now() - new Date(cutoffStr).getTime()) / 86400000);
+                StorageModule.pruneAuditLog(daysBefore);
+            }
+            if (typeof _auditWrite === 'function') _auditWrite('PURGE', 'Purged ' + toDelete.length + ' invoice(s) before ' + cutoffStr);
             updateStatsCounters(); updateHdrStats(); checkStorageUsage();
-            showToast('✅ ' + toDelete.length + ' old invoice(s) deleted. Storage freed.');
+            showToast('✅ ' + toDelete.length + ' invoice' + (toDelete.length === 1 ? '' : 's') + ' deleted. Storage freed.');
         },
         () => showToast('Purge cancelled.'), 'Delete & Free Up', true
     );
+}
+// Legacy alias kept for any caller that passes keepDays as a number
+async function executePurgeOld(keepDays) {
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - keepDays);
+    const dateInp = document.getElementById('purgeBeforeDate');
+    if (dateInp) dateInp.value = cutoff.toISOString().split('T')[0];
+    executePurgeOldInvoices();
 }
 
 // ── Data Hub ──────────────────────────────────────────────────────────────
