@@ -1956,3 +1956,259 @@ window._mrOtpKey    = _mrOtpKey;
 window._mrOtpBack   = _mrOtpBack;
 window._mrOtpClear  = _mrOtpClear;
 
+
+// =========================================================================
+// SETTINGS STACKS — Expandable / Collapsible + Drag-to-Reorder
+// =========================================================================
+
+(function() {
+    'use strict';
+
+    const STORAGE_KEY_ORDER  = 'pharma_settings_stack_order';
+    const STORAGE_KEY_OPEN   = 'pharma_settings_stack_open';
+
+    // ── Toggle accordion open / closed ───────────────────────────────────
+    window.toggleStack = function(headerEl) {
+        // Ignore clicks that originated on the drag handle
+        const stack = headerEl.closest('.sett-stack');
+        if (!stack) return;
+        const isOpen = stack.classList.contains('stack-open');
+        stack.classList.toggle('stack-open', !isOpen);
+        _persistOpenStates();
+
+        // Trigger receipt preview render when that stack is opened
+        if (!isOpen && stack.dataset.stackId === 'live-receipt-preview') {
+            if (typeof _renderReceiptPreview === 'function') {
+                setTimeout(_renderReceiptPreview, 320); // after CSS transition
+            }
+        }
+        // Trigger device manager load when opened
+        if (!isOpen && stack.dataset.stackId === 'device-manager') {
+            if (typeof renderSettingsDeviceManager === 'function') {
+                setTimeout(renderSettingsDeviceManager, 100);
+            }
+        }
+    };
+
+    // ── Persist / restore open states ────────────────────────────────────
+    function _persistOpenStates() {
+        const container = document.getElementById('settStacksContainer');
+        if (!container) return;
+        const open = [];
+        container.querySelectorAll('.sett-stack').forEach(el => {
+            if (el.classList.contains('stack-open')) open.push(el.dataset.stackId);
+        });
+        try { localStorage.setItem(STORAGE_KEY_OPEN, JSON.stringify(open)); } catch(e) {}
+    }
+
+    function _restoreOpenStates() {
+        let open = [];
+        try { open = JSON.parse(localStorage.getItem(STORAGE_KEY_OPEN) || '[]'); } catch(e) {}
+        // Default: open the first stack if nothing saved
+        if (!open.length) open = ['branch-identity'];
+        const container = document.getElementById('settStacksContainer');
+        if (!container) return;
+        container.querySelectorAll('.sett-stack').forEach(el => {
+            el.classList.toggle('stack-open', open.includes(el.dataset.stackId));
+        });
+    }
+
+    // ── Persist / restore order ───────────────────────────────────────────
+    function _persistOrder() {
+        const container = document.getElementById('settStacksContainer');
+        if (!container) return;
+        const order = [];
+        container.querySelectorAll('.sett-stack').forEach(el => order.push(el.dataset.stackId));
+        try { localStorage.setItem(STORAGE_KEY_ORDER, JSON.stringify(order)); } catch(e) {}
+    }
+
+    function _restoreOrder() {
+        let order = [];
+        try { order = JSON.parse(localStorage.getItem(STORAGE_KEY_ORDER) || '[]'); } catch(e) {}
+        if (!order.length) return;
+        const container = document.getElementById('settStacksContainer');
+        if (!container) return;
+        // Build a map id → element
+        const map = {};
+        container.querySelectorAll('.sett-stack').forEach(el => { map[el.dataset.stackId] = el; });
+        // Re-append in saved order (any new stacks not in saved order go at end)
+        const placed = new Set();
+        order.forEach(id => {
+            if (map[id]) { container.appendChild(map[id]); placed.add(id); }
+        });
+        // Append any stacks not in the saved order
+        Object.keys(map).forEach(id => { if (!placed.has(id)) container.appendChild(map[id]); });
+    }
+
+    // ── Drag-to-reorder ───────────────────────────────────────────────────
+    let _dragSrc  = null;
+    let _dropLine = null;
+
+    function _getDropLine() {
+        if (!_dropLine) {
+            _dropLine = document.createElement('div');
+            _dropLine.className = 'sett-stack-drop-line';
+        }
+        return _dropLine;
+    }
+
+    function _initDrag(container) {
+        container.addEventListener('dragstart', function(e) {
+            // Only start drag from the handle
+            const handle = e.target.closest('.sett-stack-drag');
+            const stack  = e.target.closest('.sett-stack');
+            if (!handle || !stack) { e.preventDefault(); return; }
+
+            _dragSrc = stack;
+            stack.classList.add('stack-dragging');
+
+            // Minimal ghost
+            try {
+                const ghost = document.createElement('div');
+                ghost.style.cssText = 'position:fixed;top:-999px;left:-999px;background:var(--blu);color:#fff;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;pointer-events:none;';
+                ghost.textContent = stack.querySelector('.sett-stack-title')?.textContent || 'Stack';
+                document.body.appendChild(ghost);
+                e.dataTransfer.setDragImage(ghost, 0, 0);
+                setTimeout(() => ghost.remove(), 0);
+            } catch (_) {}
+
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', stack.dataset.stackId);
+        });
+
+        container.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const target = e.target.closest('.sett-stack');
+            if (!target || target === _dragSrc) return;
+
+            const rect   = target.getBoundingClientRect();
+            const midY   = rect.top + rect.height / 2;
+            const before = e.clientY < midY;
+
+            // Insert drop-line
+            const dl = _getDropLine();
+            dl.classList.add('visible');
+            if (before) {
+                target.before(dl);
+            } else {
+                target.after(dl);
+            }
+        });
+
+        container.addEventListener('dragleave', function(e) {
+            if (!container.contains(e.relatedTarget)) {
+                _getDropLine().classList.remove('visible');
+                _getDropLine().remove();
+            }
+        });
+
+        container.addEventListener('drop', function(e) {
+            e.preventDefault();
+            const dl = _getDropLine();
+            dl.classList.remove('visible');
+
+            const target = e.target.closest('.sett-stack');
+            if (!_dragSrc || !target || target === _dragSrc) {
+                dl.remove();
+                return;
+            }
+
+            const rect   = target.getBoundingClientRect();
+            const before = e.clientY < rect.top + rect.height / 2;
+
+            // Insert with a brief flash animation
+            _dragSrc.style.opacity = '0.7';
+            if (before) {
+                target.before(_dragSrc);
+            } else {
+                target.after(_dragSrc);
+            }
+            dl.remove();
+
+            requestAnimationFrame(() => {
+                _dragSrc.style.transition = 'opacity .2s';
+                _dragSrc.style.opacity = '1';
+                setTimeout(() => { if (_dragSrc) _dragSrc.style.transition = ''; }, 200);
+            });
+
+            _persistOrder();
+        });
+
+        container.addEventListener('dragend', function() {
+            if (_dragSrc) {
+                _dragSrc.classList.remove('stack-dragging');
+                _dragSrc = null;
+            }
+            _getDropLine().classList.remove('visible');
+            try { _getDropLine().remove(); } catch(_) {}
+        });
+
+        // Prevent header click during drag on the handle
+        container.addEventListener('mousedown', function(e) {
+            const handle = e.target.closest('.sett-stack-drag');
+            if (handle) {
+                // Stop the click from propagating to the header toggle
+                const header = handle.closest('.sett-stack-header');
+                if (header) {
+                    const stop = function(ev) { ev.stopImmediatePropagation(); header.removeEventListener('click', stop, true); };
+                    header.addEventListener('click', stop, true);
+                }
+            }
+        });
+    }
+
+    // ── Keyboard shortcut: Ctrl+click header to collapse all others ───────
+    function _initCollapseAll(container) {
+        container.addEventListener('click', function(e) {
+            if (!e.ctrlKey && !e.metaKey) return;
+            const header = e.target.closest('.sett-stack-header');
+            if (!header) return;
+            const stack = header.closest('.sett-stack');
+            container.querySelectorAll('.sett-stack').forEach(el => {
+                if (el !== stack) el.classList.remove('stack-open');
+            });
+            _persistOpenStates();
+        });
+    }
+
+    // ── Init on DOMContentLoaded ──────────────────────────────────────────
+    function _initStacksUI() {
+        const container = document.getElementById('settStacksContainer');
+        if (!container) return;
+        _restoreOrder();
+        _restoreOpenStates();
+        _initDrag(container);
+        _initCollapseAll(container);
+    }
+
+    // Run after DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _initStacksUI);
+    } else {
+        // DOM already ready (script loaded late)
+        _initStacksUI();
+    }
+
+    // Also re-init when the settings tab is opened (in case of late render)
+    const _origSwitchTab = window.switchTab;
+    if (typeof _origSwitchTab === 'function') {
+        window._stacksInitialized = false;
+    }
+    // Hook into _loadSettingsForm to re-apply open states after form reload
+    const _prevLoadForm = window._loadSettingsForm;
+    window._loadSettingsForm = function() {
+        if (typeof _prevLoadForm === 'function') _prevLoadForm.apply(this, arguments);
+        // Small delay to let the DOM settle
+        setTimeout(function() {
+            _restoreOpenStates();
+        }, 30);
+    };
+
+    // Expose reset helper for debugging
+    window._resetStacksLayout = function() {
+        try { localStorage.removeItem(STORAGE_KEY_ORDER); localStorage.removeItem(STORAGE_KEY_OPEN); } catch(_) {}
+        location.reload();
+    };
+
+})();
