@@ -2179,3 +2179,236 @@
   transition: none;
 }
 
+
+/* ================================================================
+   INVENTORY — PAGINATION BAR
+================================================================ */
+.inv-pagination-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    background: var(--g50);
+    border-bottom: 1px solid var(--g150);
+    border-top: 1px solid var(--g150);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.inv-page-nums {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: calc(100vw - 200px);
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.inv-page-nums::-webkit-scrollbar { display: none; }
+.inv-page-btn {
+    min-width: 30px;
+    height: 26px;
+    padding: 0 7px;
+    border: 1px solid var(--g200);
+    border-radius: 5px;
+    background: var(--white);
+    color: var(--g700);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .12s, border-color .12s, color .12s;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.inv-page-btn:hover:not(:disabled) {
+    background: var(--teal-lt);
+    border-color: var(--teal);
+    color: var(--teal);
+}
+.inv-page-btn-active {
+    background: var(--teal) !important;
+    border-color: var(--teal) !important;
+    color: #fff !important;
+    font-weight: 800;
+}
+.inv-page-btn:disabled {
+    opacity: .35;
+    cursor: not-allowed;
+}
+.inv-page-nav {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 0 10px;
+}
+.inv-page-ellipsis {
+    font-size: 11px;
+    color: var(--g400);
+    padding: 0 2px;
+    user-select: none;
+}
+.inv-page-info {
+    font-size: 10px;
+    color: var(--g500);
+    font-weight: 600;
+    margin-left: 6px;
+    white-space: nowrap;
+}
+[data-theme="dark"] .inv-page-btn {
+    background: var(--g100);
+    border-color: var(--g250);
+    color: var(--g700);
+}
+[data-theme="dark"] .inv-page-btn:hover:not(:disabled) {
+    background: rgba(20,184,166,.15);
+    border-color: var(--teal);
+}
+
+/* ================================================================
+   INVENTORY — ROW # column
+================================================================ */
+.inv-th-num, .inv-td-num {
+    width: 36px;
+    min-width: 36px;
+    text-align: right;
+    font-size: 10px;
+    color: var(--g400);
+    padding-right: 6px !important;
+    user-select: none;
+}
+
+/* ================================================================
+   INVENTORY — HORIZONTAL SCROLL WRAPPER
+================================================================ */
+.inv-table-scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+}
+.inv-table-scroll-x::-webkit-scrollbar { height: 6px; }
+.inv-table-scroll-x::-webkit-scrollbar-track { background: var(--g100); }
+.inv-table-scroll-x::-webkit-scrollbar-thumb { background: var(--g300); border-radius: 3px; }
+.inv-table-scroll-x::-webkit-scrollbar-thumb:hover { background: var(--teal); }
+
+/* ================================================================
+   INVENTORY — DROP FILTER PANEL (collapsible)
+================================================================ */
+.inv-drop-filter-wrap {
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--g150);
+}
+.inv-dfp-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    background: var(--g50);
+    border: none;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--g700);
+    text-align: left;
+    transition: background .12s;
+    user-select: none;
+}
+.inv-dfp-toggle:hover { background: var(--teal-lt); color: var(--teal); }
+.inv-dfp-arrow {
+    margin-left: auto;
+    font-size: 9px;
+    color: var(--g400);
+    transition: transform .2s;
+}
+.inv-dfp-open ~ * .inv-dfp-arrow,
+.inv-dfp-toggle-open .inv-dfp-arrow { transform: rotate(180deg); }
+.inv-dfp-badge {
+    display: inline-block;
+    background: var(--teal);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 800;
+    border-radius: 20px;
+    padding: 1px 7px;
+    letter-spacing: .3px;
+}
+.inv-dfp-panel {
+    display: none;
+    padding: 10px 12px;
+    background: var(--white);
+    border-top: 1px solid var(--g150);
+    animation: dfp-slide-in .15s ease;
+}
+.inv-dfp-panel.inv-dfp-open { display: block; }
+@keyframes dfp-slide-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.inv-df-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.inv-df-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 160px;
+    flex: 1;
+    position: relative;
+}
+.inv-df-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--g500);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+}
+.inv-df-select {
+    height: 28px;
+    padding: 0 6px;
+    border: 1px solid var(--g300);
+    border-radius: 5px;
+    font-size: 11px;
+    background: var(--white);
+    color: var(--g800);
+    cursor: pointer;
+    outline: none;
+    width: 100%;
+    transition: border-color .12s;
+}
+.inv-df-select:focus { border-color: var(--teal); }
+.inv-df-clear {
+    position: absolute;
+    right: 4px;
+    bottom: 5px;
+    background: none;
+    border: none;
+    color: var(--g400);
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+}
+.inv-df-clear:hover { color: var(--red); }
+.inv-df-clear-all {
+    align-self: flex-end;
+    padding: 6px 12px;
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    height: 28px;
+    white-space: nowrap;
+    transition: background .12s;
+}
+.inv-df-clear-all:hover { background: #fecaca; }
+[data-theme="dark"] .inv-dfp-toggle { background: var(--g100); }
+[data-theme="dark"] .inv-dfp-panel { background: var(--g75); border-top-color: var(--g200); }
+[data-theme="dark"] .inv-df-select { background: var(--g100); border-color: var(--g250); color: var(--g800); }
+
