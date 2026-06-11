@@ -784,7 +784,12 @@ function _renderReceiptModal(inv) {
     const _rvBi = _getBranchIdentity();
     hdr.textContent = (_rvBi.receiptHeader || _rvBi.businessName || _rvBi.branchName || 'PHARMA POS').toUpperCase();
     content.appendChild(hdr);
-    const ab = document.createElement('div'); ab.className = 'rv-archive-badge'; ab.textContent = '🔒 ARCHIVE DUPLICATE'; content.appendChild(ab);
+    // FIX: badge was unconditional — showed on every invoice. Only render when
+    // the invoice is actually flagged as an archive duplicate.
+    if (inv.isArchive || inv.isDuplicate) {
+        const ab = document.createElement('div'); ab.className = 'rv-archive-badge';
+        ab.textContent = '🔒 ARCHIVE DUPLICATE'; content.appendChild(ab);
+    }
     const addRow = (l, v, cls) => {
         const r = document.createElement('div'); r.className = 'rv-row' + (cls ? ' ' + cls : '');
         const le = document.createElement('span'); le.textContent = l;

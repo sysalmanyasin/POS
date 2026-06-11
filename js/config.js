@@ -149,8 +149,17 @@ async function _dbUpsert(table, rows, onConflict = 'uuid') {
         // column to use for the "merge-duplicates" upsert. Without it, PostgREST
         // on some Supabase versions silently falls back to INSERT-only, creating
         // duplicate rows instead of updating existing ones.
+        // FIX: encodeURIComponent encodes commas as %2C, which breaks composite
+        // conflict keys like 'invoice_number,product_code' — PostgREST does not
+        // decode %2C back to a comma and treats the whole string as an unknown
+        // column, causing the upsert to silently fail with a 400 error.
+        // Fix: encode each column name individually, rejoin with a literal comma.
+        const encodedConflict = onConflict
+            .split(',')
+            .map(c => encodeURIComponent(c.trim()))
+            .join(',');
         const url = _SUPA_URL + '/rest/v1/' + table +
-                    (onConflict ? '?on_conflict=' + encodeURIComponent(onConflict) : '');
+                    (onConflict ? '?on_conflict=' + encodedConflict : '');
         const r = await fetch(url, {
             method:  'POST',
             headers: {
