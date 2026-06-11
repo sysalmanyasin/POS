@@ -127,8 +127,19 @@ async function _loadLedgerCloud() {
                     originalInvoiceId: row.original_invoice_id  || '',
                     refundReason:      row.refund_reason         || '',
                     billedAt:          row.billed_at             || '',
-                    timestamp:         row.billed_at             || '',
-                    date:              row.billed_at ? row.billed_at.slice(0, 10) : '',
+                    // FIX: raw billed_at is UTC ISO — slice(0,10) gives UTC date
+                    // which can be one day behind local time (PKT = UTC+5).
+                    // Convert to local time for both display and date-range filter.
+                    timestamp:         row.billed_at
+                        ? new Date(row.billed_at).toLocaleString('en-PK', {
+                              year:'numeric', month:'numeric', day:'numeric',
+                              hour:'numeric', minute:'2-digit', hour12:true })
+                        : '',
+                    date:              row.billed_at
+                        ? (d => d.getFullYear() + '-' +
+                              String(d.getMonth()+1).padStart(2,'0') + '-' +
+                              String(d.getDate()).padStart(2,'0'))(new Date(row.billed_at))
+                        : '',
                     createdAt:         row.created_at            || '',
                     details:           Array.isArray(row.invoice_items)
                         ? row.invoice_items.map(li => ({
@@ -697,8 +708,16 @@ async function launchInvoiceIsolatedWindow(invoiceID) {
                     isEdit:           !!row.is_edit,
                     isManual:         !!row.is_manual,
                     originalId:       row.original_invoice_id || null,
-                    timestamp:        row.billed_at         || '',
-                    date:             row.billed_at ? row.billed_at.slice(0, 10) : '',
+                    timestamp:        row.billed_at
+                        ? new Date(row.billed_at).toLocaleString('en-PK', {
+                              year:'numeric', month:'numeric', day:'numeric',
+                              hour:'numeric', minute:'2-digit', hour12:true })
+                        : '',
+                    date:             row.billed_at
+                        ? (d => d.getFullYear() + '-' +
+                              String(d.getMonth()+1).padStart(2,'0') + '-' +
+                              String(d.getDate()).padStart(2,'0'))(new Date(row.billed_at))
+                        : '',
                     details:          Array.isArray(row.invoice_items)
                         ? row.invoice_items.map(li => ({
                             code:        li.product_code  || '',
