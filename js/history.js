@@ -317,11 +317,26 @@ function goHistPage(page) {
     const wrap = document.querySelector('.hist-table-wrap');
     if (wrap) wrap.scrollTop = 0;
 }
+// Tracks whether the refund section is expanded.  Persisted across re-renders
+// within the same session so toggling a filter doesn't collapse it.
+let _histRefundSectionOpen = false;
+
+function _toggleHistRefundSection() {
+    _histRefundSectionOpen = !_histRefundSectionOpen;
+    // Update chevron + row visibility without full re-render
+    const chev = document.querySelector('.hist-refund-chevron');
+    if (chev) chev.classList.toggle('open', _histRefundSectionOpen);
+    document.querySelectorAll('.hist-refund-data-row').forEach(tr => {
+        tr.style.display = _histRefundSectionOpen ? '' : 'none';
+    });
+}
+
 function _renderHistPageData() {
     const dataset = _histCurrentDataset;
     const tbody = document.getElementById('historyCards');
     if (!tbody) return;
-    let total = 0; tbody.innerHTML = '';
+    tbody.innerHTML = '';
+
     if (dataset.length === 0) {
         const tr = document.createElement('tr');
         tr.innerHTML = '<td colspan="7" class="ht-empty-cell"><div style="font-size:28px;margin-bottom:8px">📊</div><div style="font-size:12px;font-weight:700;color:var(--g600)">No invoices found</div><div style="font-size:10px;color:var(--g400);margin-top:3px">Try adjusting your filters</div></td>';
@@ -331,84 +346,123 @@ function _renderHistPageData() {
         const bar = document.getElementById('histPagination'); if (bar) bar.style.display = 'none';
         return;
     }
-    const sorted = _sortedHistDataset(dataset);
-    sorted.forEach(inv => { total += (Number(inv.netTotal) || 0); });
-    const cur = _getCurrency();
 
-    // Build display list — either flat (paginated) or grouped by device
+    // Split: refunds go to the collapsible section; sales render normally
+    const sorted = _sortedHistDataset(dataset);
+    const salesRows   = sorted.filter(inv => !inv.isRefund && !inv.isPartialRefund);
+    const refundRows  = sorted.filter(inv => inv.isRefund  ||  inv.isPartialRefund);
+
+    // Grand total = sales only (refunds are shown separately)
+    let salesTotal  = 0; salesRows.forEach(inv => { salesTotal += (Number(inv.netTotal) || 0); });
+    let refundTotal = 0; refundRows.forEach(inv => { refundTotal += (Number(inv.netTotal) || 0); });
+    const cur = _getCurrency();
     const frag = document.createDocumentFragment();
 
     if (_histGroupByDevice) {
-        // Group mode: no pagination — show all grouped by deviceUuid
-        const groups = {};
-        const groupOrder = [];
-        sorted.forEach(inv => {
-            const key = inv.deviceUuid || inv.deviceCode || '—';
-            if (!groups[key]) { groups[key] = { inv, rows: [] }; groupOrder.push(key); }
-            groups[key].rows.push(inv);
-        });
-        groupOrder.forEach(key => {
-            const { rows } = groups[key];
-            const sample = rows[0];
-            const devName = sample.deviceCode || '—';
-            const devUuid = sample.deviceUuid || '—';
-            const shortUuid = devUuid.length > 8 ? devUuid.slice(0, 8) + '…' : devUuid;
-            const grpTotal = rows.reduce((s, i) => s + (Number(i.netTotal) || 0), 0);
-            // Group header row
-            const hdr = document.createElement('tr');
-            hdr.className = 'hist-group-hdr';
-            hdr.innerHTML = `<td colspan="7">
-                <div class="hist-group-hdr-inner">
+        // ── Group-by-device mode ──────────────────────────────────────────
+        // Sales group first, then refund section
+        const _renderDeviceGroups = (rows) => {
+            const groups = {}, groupOrder = [];
+            rows.forEach(inv => {
+                const key = inv.deviceUuid || inv.deviceCode || '—';
+                if (!groups[key]) { groups[key] = { rows: [] }; groupOrder.push(key); }
+                groups[key].rows.push(inv);
+            });
+            groupOrder.forEach(key => {
+                const { rows } = groups[key];
+                const sample = rows[0];
+                const devName = sample.deviceCode || '—';
+                const devUuid = sample.deviceUuid || '—';
+                const shortUuid = devUuid.length > 8 ? devUuid.slice(0, 8) + '…' : devUuid;
+                const grpTotal = rows.reduce((s, i) => s + (Number(i.netTotal) || 0), 0);
+                const hdr = document.createElement('tr');
+                hdr.className = 'hist-group-hdr';
+                hdr.innerHTML = `<td colspan="7"><div class="hist-group-hdr-inner">
                     <span class="hist-group-device-icon">🖥</span>
                     <span class="hist-group-name">${_escHtml ? _escHtml(devName) : devName}</span>
                     <span class="hist-group-uuid">${_escHtml ? _escHtml(shortUuid) : shortUuid}</span>
                     <span class="hist-group-full-uuid" title="${devUuid}">${devUuid}</span>
                     <span class="hist-group-count">${rows.length} invoice${rows.length !== 1 ? 's' : ''}</span>
                     <span class="hist-group-subtotal">${cur}${grpTotal.toFixed(2)}</span>
-                </div>
-            </td>`;
-            frag.appendChild(hdr);
-            rows.forEach(inv => frag.appendChild(_buildHistRow(inv, cur)));
-        });
+                </div></td>`;
+                frag.appendChild(hdr);
+                rows.forEach(inv => frag.appendChild(_buildHistRow(inv, cur)));
+            });
+        };
+        _renderDeviceGroups(salesRows);
         const bar = document.getElementById('histPagination'); if (bar) bar.style.display = 'none';
     } else {
-        // Paginated flat mode
-        const totalPages = Math.max(1, Math.ceil(sorted.length / _HIST_PAGE_SIZE));
+        // ── Paginated flat mode (sales only) ─────────────────────────────
+        const totalPages = Math.max(1, Math.ceil(salesRows.length / _HIST_PAGE_SIZE));
         _histPage = Math.max(1, Math.min(_histPage, totalPages));
-        const startIdx = (_histPage - 1) * _HIST_PAGE_SIZE;
-        const pageItems = sorted.slice(startIdx, startIdx + _HIST_PAGE_SIZE);
+        const startIdx  = (_histPage - 1) * _HIST_PAGE_SIZE;
+        const pageItems = salesRows.slice(startIdx, startIdx + _HIST_PAGE_SIZE);
         pageItems.forEach(inv => frag.appendChild(_buildHistRow(inv, cur)));
 
         const bar = document.getElementById('histPagination');
-        if (!bar) { tbody.appendChild(frag); return; }
-        if (sorted.length <= _HIST_PAGE_SIZE) { bar.style.display = 'none'; }
-        else {
-            bar.style.display = 'flex';
-            const dispStart = startIdx + 1, dispEnd = Math.min(startIdx + _HIST_PAGE_SIZE, sorted.length);
-            // Build page number buttons (show up to 5 pages around current)
-            let pgBtns = '';
-            const winHalf = 2;
-            const lo = Math.max(1, _histPage - winHalf);
-            const hi = Math.min(totalPages, _histPage + winHalf);
-            if (lo > 1) pgBtns += '<button class="hist-pg-btn hist-pg-num" onclick="goHistPage(1)">1</button>' + (lo > 2 ? '<span class="hist-pg-ellipsis">…</span>' : '');
-            for (let p = lo; p <= hi; p++) {
-                pgBtns += `<button class="hist-pg-btn hist-pg-num${p === _histPage ? ' hist-pg-current' : ''}" onclick="goHistPage(${p})">${p}</button>`;
+        if (bar) {
+            if (salesRows.length <= _HIST_PAGE_SIZE) { bar.style.display = 'none'; }
+            else {
+                bar.style.display = 'flex';
+                const dispStart = startIdx + 1, dispEnd = Math.min(startIdx + _HIST_PAGE_SIZE, salesRows.length);
+                let pgBtns = '';
+                const winHalf = 2;
+                const lo = Math.max(1, _histPage - winHalf);
+                const hi = Math.min(totalPages, _histPage + winHalf);
+                if (lo > 1) pgBtns += '<button class="hist-pg-btn hist-pg-num" onclick="goHistPage(1)">1</button>' + (lo > 2 ? '<span class="hist-pg-ellipsis">…</span>' : '');
+                for (let p = lo; p <= hi; p++) {
+                    pgBtns += `<button class="hist-pg-btn hist-pg-num${p === _histPage ? ' hist-pg-current' : ''}" onclick="goHistPage(${p})">${p}</button>`;
+                }
+                if (hi < totalPages) pgBtns += (hi < totalPages - 1 ? '<span class="hist-pg-ellipsis">…</span>' : '') + `<button class="hist-pg-btn hist-pg-num" onclick="goHistPage(${totalPages})">${totalPages}</button>`;
+                bar.innerHTML =
+                    `<button class="hist-pg-btn" onclick="goHistPage(${_histPage - 1})"${_histPage <= 1 ? ' disabled' : ''}>‹ Prev</button>` +
+                    pgBtns +
+                    `<button class="hist-pg-btn" onclick="goHistPage(${_histPage + 1})"${_histPage >= totalPages ? ' disabled' : ''}>Next ›</button>` +
+                    `<span class="hist-pg-info">${dispStart}–${dispEnd} of ${salesRows.length}</span>`;
             }
-            if (hi < totalPages) pgBtns += (hi < totalPages - 1 ? '<span class="hist-pg-ellipsis">…</span>' : '') + `<button class="hist-pg-btn hist-pg-num" onclick="goHistPage(${totalPages})">${totalPages}</button>`;
-
-            bar.innerHTML =
-                `<button class="hist-pg-btn" onclick="goHistPage(${_histPage - 1})"${_histPage <= 1 ? ' disabled' : ''}>‹ Prev</button>` +
-                pgBtns +
-                `<button class="hist-pg-btn" onclick="goHistPage(${_histPage + 1})"${_histPage >= totalPages ? ' disabled' : ''}>Next ›</button>` +
-                `<span class="hist-pg-info">${dispStart}–${dispEnd} of ${sorted.length}</span>`;
         }
     }
 
+    // ── Collapsible refund section (appended after sales / groups) ────────
+    if (refundRows.length > 0) {
+        // Header row — acts as the toggle
+        const hdrTr = document.createElement('tr');
+        hdrTr.className = 'hist-refund-section-hdr';
+        hdrTr.style.cursor = 'pointer';
+        hdrTr.onclick = _toggleHistRefundSection;
+        const refNetStr = (refundTotal < 0 ? '-' : '') + cur + Math.abs(refundTotal).toFixed(2);
+        hdrTr.innerHTML = `<td colspan="7" style="padding:0;border:none;background:transparent;">
+            <div class="hist-refund-section-inner">
+                <span style="font-size:13px;">↩</span>
+                <span class="hist-refund-label">Refunds / Partial Refunds</span>
+                <span class="hist-refund-count">${refundRows.length} invoice${refundRows.length !== 1 ? 's' : ''}</span>
+                <span class="hist-refund-subtotal">${refNetStr}</span>
+                <span class="hist-refund-chevron${_histRefundSectionOpen ? ' open' : ''}">▼</span>
+            </div>
+        </td>`;
+        frag.appendChild(hdrTr);
+
+        // Data rows — hidden unless expanded
+        refundRows.forEach(inv => {
+            const tr = _buildHistRow(inv, cur);
+            tr.classList.add('hist-refund-data-row');
+            if (!_histRefundSectionOpen) tr.style.display = 'none';
+            frag.appendChild(tr);
+        });
+    }
+
     tbody.appendChild(frag);
-    document.getElementById('ledgerGrandTotalDisplay').textContent = total.toFixed(2);
+
+    // Update totals — show sales total in the main bar
+    document.getElementById('ledgerGrandTotalDisplay').textContent = salesTotal.toFixed(2);
     document.querySelectorAll('.cur-lbl').forEach(el => el.textContent = cur);
     const cntEl = document.getElementById('ledgerBillCountDisplay');
-    if (cntEl) cntEl.textContent = dataset.length + ' invoice' + (dataset.length !== 1 ? 's' : '');
+    if (cntEl) {
+        const salesCount = salesRows.length;
+        let label = salesCount + ' invoice' + (salesCount !== 1 ? 's' : '');
+        if (refundRows.length > 0) label += ' + ' + refundRows.length + ' refund' + (refundRows.length !== 1 ? 's' : '');
+        cntEl.textContent = label;
+    }
 }
 
 /** Build a single <tr> for one invoice — extracted to keep _renderHistPageData readable. */
@@ -679,7 +733,10 @@ function applyDateLedgerFilters() {
 }
 
 function resetLedgerFilters() {
-    const today = new Date().toISOString().split('T')[0];
+    // Use local date (PKT = UTC+5) so "today" is always correct regardless of time zone
+    const _now = new Date();
+    const _pad = n => String(n).padStart(2, '0');
+    const today = _now.getFullYear() + '-' + _pad(_now.getMonth() + 1) + '-' + _pad(_now.getDate());
     document.getElementById('filterStartDate').value = today;
     document.getElementById('filterEndDate').value   = today;
     const devEl = document.getElementById('historyDeviceFilter'); if (devEl) devEl.value = '';

@@ -1024,11 +1024,6 @@ async function renderSyncHubView() {
       <button class="sh-btn sh-btn-teal" id="shRefreshBtn" onclick="refreshSyncHub()">
         <span id="shRefreshIcon">↺</span> Refresh
       </button>
-      <button class="sh-btn sh-btn-teal" id="shOccSimBtn"
-              onclick="window.PharmaOCCTest && window.PharmaOCCTest.runSimulation()"
-              title="Fire two overlapping checkouts against the same captured version and verify OCC integrity.">
-        🧪 OCC Simulation
-      </button>
       <button class="sh-btn sh-btn-stop" id="shOfflineModeBtn"
               onclick="toggleOfflineWorkMode()"
               title="Stop all background sync so you can import and work fully offline. When done, click to push everything to cloud.">
@@ -1069,16 +1064,7 @@ async function renderSyncHubView() {
         <span id="forceSyncIcon">⚡</span> Force Sync Now
       </button>
 
-      <!-- Repair Invoice Items button -->
-      <button class="sh-btn" id="repairInvoiceItemsBtn"
-              onclick="repairInvoiceItems()"
-              style="margin-top:8px;width:100%;justify-content:center;background:#0e7490;color:#fff;"
-              title="Re-pushes line items for all local invoices to Supabase. Fixes 'Invoice details missing' on other devices.">
-        🔧 Repair Invoice Line-Items
-      </button>
-      <div style="font-size:10px;color:var(--g500);margin-top:4px;padding:0 2px;">
-        Run once after applying the SQL fix if older invoices can&#39;t be viewed/edited/refunded on other devices.
-      </div>
+
 
       <!-- Inline progress bar -->
       <div class="sh-progress-wrap" id="shProgressWrap">
@@ -1187,6 +1173,54 @@ async function renderSyncHubView() {
 
   <!-- ── ☢️ Danger Zone ──────────────────────────────────────────────────── -->
   <div class="sh-section" style="margin-top:20px;border:1.5px solid #fca5a5;background:#fff5f5;">
+
+  <!-- ── Maintenance Tools (collapsible) ─────────────────────────────── -->
+  <div class="sh-section" style="margin-bottom:16px;">
+    <div class="sh-section-hdr sh-collapsible" onclick="_shToggle('shMaintenanceBody','shMaintenanceChevron')"
+         title="Click to expand / collapse">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="sh-chevron collapsed" id="shMaintenanceChevron">▾</span>
+        <span style="font-size:15px;">🔧</span>
+        <div>
+          <span class="sh-section-title">Maintenance &amp; Developer Tools</span>
+          <span class="sh-section-sub" style="margin-left:10px;">One-shot repair tools and concurrency testing — not for daily use</span>
+        </div>
+      </div>
+    </div>
+    <div id="shMaintenanceBody" class="sh-collapsible-body sh-body-closed">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;padding:16px;">
+
+        <!-- Repair Invoice Line-Items -->
+        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px 16px;">
+          <div style="font-size:11px;font-weight:800;color:#0369a1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">🔧 Repair Invoice Line-Items</div>
+          <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
+            Re-pushes line items for all local invoices to Supabase. Run <strong>once</strong> after applying the SQL migration fix if older invoices can&apos;t be viewed, edited, or refunded on other devices.
+          </div>
+          <button class="sh-btn" id="repairInvoiceItemsBtn"
+                  onclick="repairInvoiceItems()"
+                  style="width:100%;justify-content:center;background:#0e7490;color:#fff;"
+                  title="Re-pushes line items for all local invoices to Supabase.">
+            🔧 Repair Invoice Line-Items
+          </button>
+        </div>
+
+        <!-- OCC Simulation -->
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px 16px;">
+          <div style="font-size:11px;font-weight:800;color:#15803d;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">🧪 OCC Simulation</div>
+          <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
+            Fires two overlapping checkouts against the same captured stock version to verify Optimistic Concurrency Control is working correctly. For testing only.
+          </div>
+          <button class="sh-btn sh-btn-teal" id="shOccSimBtn"
+                  onclick="window.PharmaOCCTest && window.PharmaOCCTest.runSimulation()"
+                  style="width:100%;justify-content:center;"
+                  title="Fire two overlapping checkouts and verify OCC integrity.">
+            🧪 Run OCC Simulation
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
 
     <!-- Section header -->
     <div class="sh-section-hdr sh-danger-hdr" style="background:#fff1f2;border-bottom:1px solid #fca5a5;"
