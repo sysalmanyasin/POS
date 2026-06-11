@@ -1907,11 +1907,49 @@
 
 /* Container */
 .sett-stacks-container {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  align-items: start;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 4px;
+}
+
+/* Each column is a flex-column of cards */
+.sett-col {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  max-width: 860px;
-  margin: 0 auto;
+  gap: 8px;
+  min-height: 60px;
+  border-radius: 10px;
+  transition: background .15s;
+}
+.sett-col.col-drag-over {
+  background: var(--blu-lt, #e8f0fe);
+  outline: 2px dashed var(--blu, #1a73e8);
+  outline-offset: -2px;
+}
+
+/* Tablet: 2 columns */
+@media (max-width: 900px) {
+  .sett-stacks-container {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+}
+
+/* Mobile: single scrollable column */
+@media (max-width: 600px) {
+  .sett-stacks-container {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    overflow-x: visible;
+  }
+  .sett-col {
+    overflow-y: auto;
+    max-height: none;
+  }
 }
 
 /* Individual stack */
@@ -1926,6 +1964,7 @@
   user-select: none;
 }
 .sett-stack:last-child { margin-bottom: 0; }
+.sett-col .sett-stack { margin-bottom: 0; }  /* gap handles spacing in column layout */
 .sett-stack.stack-open { border-color: var(--g300); box-shadow: 0 4px 16px rgba(0,0,0,.07); }
 .sett-stack.stack-dragging {
   box-shadow: 0 12px 36px rgba(0,0,0,.22);
@@ -2101,10 +2140,30 @@
   height: 3px;
   background: var(--blu);
   border-radius: 999px;
-  margin: -4px 20px 0;
+  margin: -4px 8px 0;
   display: none;
   position: relative;
   z-index: 2;
 }
 .sett-stack-drop-line.visible { display: block; }
+
+/* Touch-drag ghost */
+.sett-touch-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  opacity: .88;
+  box-shadow: 0 16px 48px rgba(0,0,0,.28);
+  border-radius: 10px;
+  border: 2px solid var(--blu);
+  background: var(--white);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--g800);
+  min-width: 160px;
+  max-width: 260px;
+  transform: translate(-50%, -50%);
+  transition: none;
+}
 
