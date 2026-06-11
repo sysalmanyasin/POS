@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pharmapos-cache-v18.8';
+const CACHE_NAME = 'pharmapos-cache-v18.9';
 
 // Explicit structural cache list to guarantee the system works offline instantly on day one
 const CORE_ASSETS = [
