@@ -1768,31 +1768,43 @@ async function repairInvoiceItems() {
         if (details.length === 0) { skipped++; continue; }
 
         // ── FIX A: Upsert invoice header first (required by FK constraint) ──
+        // NOTE: Local IDB invoices are stored in camelCase by billing.js:
+        //   netTotal, discountPct, roundOffAmt, deviceCode, deviceUuid,
+        //   customerName, customerPhone, staffName, paymentMethod, etc.
+        // There is no local 'subtotal' field — compute it from netTotal + discount.
         try {
+            const _netTotal    = Number(inv.netTotal)    || 0;
+            const _discPct     = Number(inv.discountPct) || 0;
+            const _roundOff    = Number(inv.roundOffAmt) || 0;
+            // Back-calculate subtotal: netTotal = subtotal*(1-disc/100) + roundOff
+            // If discPct is 0, subtotal === netTotal - roundOff
+            const _subtotal    = _discPct > 0
+                ? parseFloat(((_netTotal - _roundOff) / (1 - _discPct / 100)).toFixed(2))
+                : parseFloat((_netTotal - _roundOff).toFixed(2));
+            const _discAmount  = parseFloat((_subtotal * _discPct / 100).toFixed(2));
             const headerRow = {
-                invoice_number:     invNum,
-                device_uuid:        inv.deviceUuid   || (typeof _DEVICE_UUID !== 'undefined' ? _DEVICE_UUID : ''),
-                counter_id:         inv.deviceCode   || '',
-                customer_name:      inv.customerName  || '',
-                customer_phone:     inv.customerPhone || '',
-                staff_name:         inv.staffName     || '',
-                subtotal:           Number(inv.subtotal)      || 0,
-                discount_pct:       Number(inv.discountPct)   || 0,
-                discount_amount:    Number(inv.discountAmount) || 0,
-                round_off_amt:      Number(inv.roundOffAmt)   || 0,
-                net_total:          Number(inv.netTotal)       || 0,
-                payment_method:     inv.paymentMethod  || 'cash',
-                cash_received:      Number(inv.cashReceived)   || 0,
-                change_amount:      Number(inv.changeAmount)   || 0,
-                is_refund:          !!inv.isRefund,
-                is_partial_refund:  !!inv.isPartialRefund,
-                is_manual:          !!inv.isManual,
-                is_fully_refunded:  !!inv.isFullyRefunded,
-                original_invoice_id: inv.originalInvoiceId || null,
-                refund_reason:      inv.refundReason   || '',
-                is_edit:            !!inv.isEdit,
-                billed_at:          inv.billedAt || inv.timestamp || new Date().toISOString(),
-                created_at:         inv.createdAt || inv.billedAt || new Date().toISOString()
+                invoice_number:      invNum,
+                device_uuid:         inv.deviceUuid || inv.device_uuid || (typeof _DEVICE_UUID !== 'undefined' ? _DEVICE_UUID : ''),
+                counter_id:          inv.deviceCode  || inv.counter_id  || '',
+                customer_name:       inv.customerName  || inv.customer_name  || '',
+                customer_phone:      inv.customerPhone || inv.customer_phone || '',
+                staff_name:          inv.staffName     || inv.staff_name     || '',
+                subtotal:            _subtotal,
+                discount_pct:        _discPct,
+                discount_amount:     _discAmount,
+                round_off_amt:       _roundOff,
+                net_total:           _netTotal,
+                payment_method:      inv.paymentMethod  || inv.payment_method  || 'cash',
+                cash_received:       Number(inv.cashReceived)  || Number(inv.cash_received)  || 0,
+                change_amount:       Number(inv.changeAmount)  || Number(inv.change_amount)  || 0,
+                is_refund:           !!inv.isRefund,
+                is_partial_refund:   !!inv.isPartialRefund,
+                is_manual:           !!inv.isManual,
+                is_fully_refunded:   !!inv.isFullyRefunded,
+                original_invoice_id: inv.originalId || inv.originalInvoiceId || inv.original_invoice_id || null,
+                refund_reason:       inv.refundReason  || inv.refund_reason  || '',
+                is_edit:             !!inv.isEdit,
+                billed_at:           inv.billedAt || inv.billed_at || inv.timestamp || new Date().toISOString()
             };
             await _dbUpsert('invoices', headerRow, 'invoice_number');
         } catch(_he) {
