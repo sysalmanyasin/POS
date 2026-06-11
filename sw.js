@@ -1,9 +1,20 @@
-const CACHE_NAME = 'pharmapos-cache-v19.4';
+// ============================================================
+// DuaPharmaPos — Service Worker
+// Strategy: Cache-First for app shell, Network-bypass for
+//           Supabase, EmailJS, and all external API traffic.
+// ============================================================
 
-// Explicit structural cache list to guarantee the system works offline instantly on day one
+const CACHE_NAME = 'pharmapos-cache-v19.4';
+// ⚠️ CACHE_NAME is auto-updated by GitHub Actions on every deploy.
+// Do NOT manually edit the version number — it will be overwritten.
+
+// ── App shell: every file the app needs to run offline ──────
 const CORE_ASSETS = [
     '/',
     '/index.html',
+    '/manifest.json',
+
+    // JavaScript modules
     '/js/config.js',
     '/js/storage.js',
     '/js/auth.js',
@@ -14,81 +25,131 @@ const CORE_ASSETS = [
     '/js/settings.js',
     '/js/reporting.js',
     '/js/devices.js',
-    '/js/syncHub.js',      // FIX: was missing — sync engine must be cached for offline use
-    '/js/auditLog.js',     // FIX: was missing — audit log module must load offline
+    '/js/syncHub.js',
+    '/js/auditLog.js',
+
+    // Stylesheets
     '/css/tokens.css',
     '/css/layout.css',
     '/css/components.css',
     '/css/print.css',
-    '/manifest.json'
+
+    // Icons (fixes blank icon on Android home screen add)
+    '/icons/icon-192.png',
+    '/icons/icon-512.png',
+    '/icons/shortcut-sync.png'
 ];
 
-// 1. INSTALL: Populate the cache storage instantly so it functions offline from a cold start
+// ── Domains that must NEVER be intercepted by the SW ────────
+// Supabase REST, realtime, auth + EmailJS CDN
+const BYPASS_HOSTS = [
+    'supabase.co',
+    'emailjs.com',
+    'jsdelivr.net'
+];
+
+// ── Helper: should this request bypass the SW? ──────────────
+function shouldBypass(url) {
+    if (url.pathname.includes('/rest/v1/'))   return true;
+    if (url.pathname.includes('/realtime/'))  return true;
+    if (url.pathname.includes('/auth/v1/'))   return true;
+    return BYPASS_HOSTS.some(host => url.hostname.includes(host));
+}
+
+// ============================================================
+// 1. INSTALL — cache all core assets in one shot
+// ============================================================
 self.addEventListener('install', (event) => {
-    console.log('[SW] Initializing structural asset capture loop...');
+    console.log('[SW] Installing — caching core assets...');
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => {
-            // Using map + individual puts guarantees that one missing icon won't crash the entire installation
             return Promise.all(
-                CORE_ASSETS.map(url => {
-                    return fetch(url, { cache: 'reload' })
+                CORE_ASSETS.map(url =>
+                    fetch(url, { cache: 'reload' })
                         .then(res => {
                             if (res.ok) return cache.put(url, res);
-                            throw new Error(`Asset fetch rejected: ${url}`);
+                            console.warn('[SW] Skipped (not OK):', url);
                         })
-                        .catch(err => console.warn(`[SW Install Warning] Skipping non-critical asset entry:`, err));
-                })
+                        .catch(err => console.warn('[SW] Skipped (fetch failed):', url, err.message))
+                )
             );
         })
     );
-    // Intentionally omitting self.skipWaiting() to honor the app's idle update checks
+    // skipWaiting is intentionally NOT called here.
+    // The app sends SKIP_WAITING only when no active transaction is open.
 });
 
-// 2. MESSAGE: Listen for the safety clearance from index.html runtime tracking
+// ============================================================
+// 2. MESSAGE — app signals it's safe to swap the SW
+// ============================================================
 self.addEventListener('message', (event) => {
     if (event.data && event.data.type === 'SKIP_WAITING') {
-        console.log('[SW] Idle clearance received. Swapping execution contexts safely...');
-        self.skipWaiting(); 
+        console.log('[SW] Safe swap signal received — activating new SW.');
+        self.skipWaiting();
     }
 });
 
-// 3. ACTIVATE: Clear out old cache versions cleanly and claim client control instantly
+// ============================================================
+// 3. ACTIVATE — delete old caches, take control immediately
+// ============================================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW] System activation sequence engaged.');
+    console.log('[SW] Activating — removing old caches...');
     event.waitUntil(
-        caches.keys().then((keys) => Promise.all(
-            keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
-        )).then(() => self.clients.claim())
+        caches.keys()
+            .then(keys => Promise.all(
+                keys
+                    .filter(key => key !== CACHE_NAME)
+                    .map(key => {
+                        console.log('[SW] Deleted old cache:', key);
+                        return caches.delete(key);
+                    })
+            ))
+            .then(() => self.clients.claim())
     );
 });
 
-// 4. FETCH: Intelligent Split-Strategy (Instant Cache UI + Invisible Network Revalidation)
+// ============================================================
+// 4. FETCH — Cache-First with background revalidation
+// ============================================================
 self.addEventListener('fetch', (event) => {
+    // Only handle GET requests
     if (event.request.method !== 'GET') return;
 
     const url = new URL(event.request.url);
 
-    // CRITICAL GUARD: Completely insulate real-time Supabase replication and authentication traffic
-    if (url.pathname.includes('/rest/v1/') || url.hostname.includes('supabase.co')) {
-        return; 
+    // Let Supabase, EmailJS, and CDN traffic go directly to network
+    if (shouldBypass(url)) return;
+
+    // Navigation requests (typing URL, clicking link) → serve index.html
+    // This makes the PWA work correctly as a single-page app
+    if (event.request.mode === 'navigate') {
+        event.respondWith(
+            caches.match('/index.html')
+                .then(cached => cached || fetch(event.request))
+                .catch(() => caches.match('/index.html'))
+        );
+        return;
     }
 
+    // All other requests: serve from cache instantly, revalidate in background
     event.respondWith(
         caches.open(CACHE_NAME).then(async (cache) => {
-            const cachedResponse = await cache.match(event.request, { ignoreSearch: true });
-            
-            // Asynchronous background task: fetches fresh files from GitHub CDN and updates the cache silently
-            const fetchPromise = fetch(event.request).then((networkResponse) => {
-                if (networkResponse.ok) {
-                    cache.put(event.request, networkResponse.clone());
-                }
-                return networkResponse;
-            }).catch((err) => {
-                console.log('[SW Network State] Terminal disconnected; running smoothly on local asset cache.', err.message);
-            });
+            const cached = await cache.match(event.request, { ignoreSearch: true });
 
-            // Return the cached file immediately for maximum counter performance. Fall back to network if missing.
-            return cachedResponse || fetchPromise;
+            // Background revalidation — silently update cache with fresh file
+            const revalidate = fetch(event.request)
+                .then(networkRes => {
+                    if (networkRes.ok) {
+                        cache.put(event.request, networkRes.clone());
+                    }
+                    return networkRes;
+                })
+                .catch(() => {
+                    // Network unavailable — offline mode, cache will serve
+                });
+
+            // Return cached version immediately if available, otherwise wait for network
+            return cached || revalidate;
         })
     );
 });
