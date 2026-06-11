@@ -367,9 +367,15 @@ async function _processInvoiceItem(item, deviceUuid) {
 
         if (itemRows.length > 0) {
             try {
-                const { error: iiErr } = await _dbInsertIgnore(
+                // FIX: switched from _dbInsertIgnore to _dbUpsert now that
+                // invoice_items has UNIQUE(invoice_number, product_code) + FK to invoices.
+                // _dbInsertIgnore was doing a plain INSERT with no conflict resolution,
+                // meaning re-syncs accumulated duplicate rows and the PostgREST join
+                // *,invoice_items(*) failed silently (no FK → no join → details:[]).
+                const { error: iiErr } = await _dbUpsert(
                     'invoice_items',
-                    itemRows
+                    itemRows,
+                    'invoice_number,product_code'   // matches UNIQUE constraint
                 );
                 if (iiErr) {
                     // Non-fatal: log but continue — inventory deduction still proceeds
@@ -1061,6 +1067,17 @@ async function renderSyncHubView() {
         <span id="forceSyncIcon">⚡</span> Force Sync Now
       </button>
 
+      <!-- Repair Invoice Items button -->
+      <button class="sh-btn" id="repairInvoiceItemsBtn"
+              onclick="repairInvoiceItems()"
+              style="margin-top:8px;width:100%;justify-content:center;background:#0e7490;color:#fff;"
+              title="Re-pushes line items for all local invoices to Supabase. Fixes 'Invoice details missing' on other devices.">
+        🔧 Repair Invoice Line-Items
+      </button>
+      <div style="font-size:10px;color:var(--g500);margin-top:4px;padding:0 2px;">
+        Run once after applying the SQL fix if older invoices can&#39;t be viewed/edited/refunded on other devices.
+      </div>
+
       <!-- Inline progress bar -->
       <div class="sh-progress-wrap" id="shProgressWrap">
         <div class="sh-progress-bar-track">
@@ -1666,6 +1683,81 @@ function _countUnsyncedMovements() {
 //   4. syncOfflineQueue()  — drain the structured offline_sync_queue (INVOICE etc.) (85%)
 //   5. Refresh widget + grid                                                    (100%)
 // =========================================================================
+
+// =========================================================================
+// repairInvoiceItems — One-shot backfill for pre-existing invoices
+// that are missing their invoice_items rows in Supabase.
+//
+// Older invoices were synced before FK + UNIQUE constraint existed, so
+// *,invoice_items(*) join returned nothing (no FK = no PostgREST join).
+// Reads ALL local IDB invoices with non-empty details[] and upserts their
+// line items to Supabase. Safe to run multiple times (idempotent upsert).
+// =========================================================================
+async function repairInvoiceItems() {
+    if (typeof showToast === 'function') showToast('🔧 Repairing invoice line-items on cloud…');
+    let pushed = 0, skipped = 0, failed = 0;
+
+    let allInvoices = [];
+    try {
+        if (typeof StorageModule !== 'undefined' && typeof StorageModule.loadInvoices === 'function') {
+            allInvoices = await StorageModule.loadInvoices();
+        }
+    } catch(_e) {
+        if (typeof showToast === 'function') showToast('❌ Repair failed — could not read local invoices.', true);
+        return;
+    }
+
+    if (!Array.isArray(allInvoices) || allInvoices.length === 0) {
+        if (typeof showToast === 'function') showToast('ℹ️ No local invoices found to repair.', true);
+        return;
+    }
+
+    for (const inv of allInvoices) {
+        const invNum = inv.id || inv.invoiceNumber;
+        if (!invNum) { skipped++; continue; }
+        const details = Array.isArray(inv.details) ? inv.details : [];
+        if (details.length === 0) { skipped++; continue; }
+
+        // Aggregate duplicate product codes (same logic as syncOfflineQueue)
+        const _aggMap = new Map();
+        details.filter(li => li.code).forEach(li => {
+            const key = li.code;
+            if (_aggMap.has(key)) {
+                const ex = _aggMap.get(key);
+                ex.qty   += parseInt(li.qty   || 0, 10);
+                ex.total += parseFloat(li.total || 0);
+            } else {
+                _aggMap.set(key, {
+                    invoice_number: invNum,
+                    product_code:   li.code,
+                    product_name:   li.name        || '',
+                    pack_size:      li.packDetails || '',
+                    unit_price:     parseFloat(li.unitPrice || 0),
+                    qty:            parseInt(li.qty || 0, 10),
+                    total:          parseFloat(li.total || 0)
+                });
+            }
+        });
+        const itemRows = [..._aggMap.values()];
+        if (itemRows.length === 0) { skipped++; continue; }
+
+        try {
+            const { error } = await _dbUpsert(
+                'invoice_items',
+                itemRows,
+                'invoice_number,product_code'   // requires UNIQUE constraint in Supabase
+            );
+            if (error) { console.warn('[Repair] invoice_items failed for', invNum, error); failed++; }
+            else { pushed += itemRows.length; }
+        } catch(_e) { failed++; }
+    }
+
+    const msg = '✅ Repair done: ' + pushed + ' line-item rows pushed, ' +
+                skipped + ' skipped (no details), ' + failed + ' errors.';
+    if (typeof showToast === 'function') showToast(msg);
+    console.log('[repairInvoiceItems]', msg);
+}
+
 async function forceSyncNow() {
     if (_forceSyncRunning) {
         if (typeof showToast === 'function') showToast('⚠️ Sync already in progress — please wait.', true);
