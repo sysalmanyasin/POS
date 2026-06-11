@@ -1474,10 +1474,15 @@ function processFullRefund(invoiceId) {
                 subtotal:         Number(original.netTotal) || 0,
                 net_total:        Number(original.netTotal) || 0,
                 round_off_amt:    original.roundOffAmt   || 0,
-                payment_method:   original.paymentMethod || 'cash',  // FIX: NOT NULL in schema
-                cash_received:    null,
-                change_amount:    null,
-                line_items:       refLineItems
+                payment_method:      original.paymentMethod || 'cash',  // FIX: NOT NULL in schema
+                cash_received:       null,
+                change_amount:       null,
+                is_refund:           true,                // FIX: was missing — caused refund to appear as normal invoice after sync
+                is_partial_refund:   false,
+                is_manual:           original.isManual || false,
+                original_invoice_id: invoiceId,
+                refund_reason:       '',
+                line_items:          refLineItems
             };
             StorageModule.pushToSyncQueue('INVOICE', refPayload, maxVer).catch(e => {
                 console.warn('[FullRefund] pushToSyncQueue failed (non-fatal):', e);
@@ -2068,6 +2073,7 @@ function submitPartialRefund() {
                 payment_method:      inv.paymentMethod || 'cash',  // FIX: NOT NULL in schema
                 cash_received:       null,
                 change_amount:       null,
+                is_refund:           isFullViaModal,      // FIX: explicit — full-via-modal = true, partial = false
                 is_partial_refund:   !isFullViaModal,
                 is_manual:           inv.isManual || false,
                 original_invoice_id: _prfInvoiceId,
