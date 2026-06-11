@@ -1729,7 +1729,34 @@ async function repairInvoiceItems() {
         if (!invNum) { skipped++; continue; }
         let details = Array.isArray(inv.details) ? inv.details : [];
 
-        // ── FIX B: Remote invoice with empty details — fetch from Supabase ──
+        // ── FIX B: Empty details — try three recovery sources in order ─────
+        if (details.length === 0) {
+            // Source 1: offline_sync_queue — has original billing payload with line_items
+            // This is the most reliable source when IDB was overwritten by cloud pull.
+            try {
+                const queueItems = await StorageModule.getSyncQueueOrdered();
+                if (Array.isArray(queueItems)) {
+                    const queueEntry = queueItems.find(q =>
+                        q.type === 'INVOICE' &&
+                        (q.payload?.invoice_number === invNum)
+                    );
+                    if (queueEntry && Array.isArray(queueEntry.payload?.line_items) &&
+                        queueEntry.payload.line_items.length > 0) {
+                        details = queueEntry.payload.line_items.map(li => ({
+                            code:        li.product_code || '',
+                            name:        li.name         || '',
+                            packDetails: li.packDetails  || li.pack_size || '',
+                            unitPrice:   Number(li.unitPrice || li.unit_price) || 0,
+                            qty:         Number(li.quantity  || li.qty)        || 0,
+                            total:       Number(li.total)    || 0
+                        }));
+                        inv.details = details;
+                    }
+                }
+            } catch(_qe) { /* non-fatal */ }
+        }
+
+        // Source 2: Supabase invoice_items (already pushed by another device)
         if (details.length === 0 && navigator.onLine) {
             try {
                 const { data: remoteRows, error: fetchErr } = await _dbSelect(
@@ -1740,7 +1767,6 @@ async function repairInvoiceItems() {
                 if (!fetchErr && Array.isArray(remoteRows) && remoteRows.length > 0) {
                     const remoteItems = remoteRows[0].invoice_items;
                     if (Array.isArray(remoteItems) && remoteItems.length > 0) {
-                        // Patch local IDB record with fetched items
                         details = remoteItems.map(li => ({
                             code:        li.product_code  || '',
                             name:        li.product_name  || '',
@@ -1756,14 +1782,14 @@ async function repairInvoiceItems() {
                                 .catch(() => {});
                         }
                         patched++;
-                        // Items already in Supabase — no need to push again
-                        continue;
+                        continue; // Items already in Supabase — no need to push again
                     }
                 }
-            } catch(_fe) { /* non-fatal — fall through to skip */ }
-            skipped++;
-            continue;  // truly no items anywhere — skip
+            } catch(_fe) { /* non-fatal */ }
         }
+
+        // Source 3: nothing found anywhere — skip
+        if (details.length === 0) { skipped++; continue; }
 
         if (details.length === 0) { skipped++; continue; }
 
