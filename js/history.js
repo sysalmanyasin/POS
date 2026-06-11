@@ -305,7 +305,7 @@ function toggleHistDeviceGroup() {
     _renderHistPageData();
 }
 
-
+function loadHistoryData(dataset) {
     _histCurrentDataset = dataset || [];
     _histPage = 1;
     _renderHistPageData();
@@ -1026,4 +1026,12 @@ function updateHdrStats() {
     const newRevenue = cur + (revenue >= 1000 ? (revenue / 1000).toFixed(1) + 'k' : Math.round(revenue).toLocaleString('en-PK'));
     if (be) { const ch = be.textContent !== newBills;    be.textContent = newBills;    if (ch) { be.classList.remove('stat-pop'); void be.offsetWidth; be.classList.add('stat-pop'); } }
     if (re) { const ch = re.textContent !== newRevenue;  re.textContent = newRevenue;  if (ch) { re.classList.remove('stat-pop'); void re.offsetWidth; re.classList.add('stat-pop'); } }
+}
+
+// =========================================================================
+// COMPAT SHIM — renderHistoryCards was the old public API; all callers in
+// billing.js / settings.js still use it.  Route them through loadHistoryData.
+// =========================================================================
+function renderHistoryCards(dataset) {
+    loadHistoryData(dataset);
 }

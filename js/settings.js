@@ -2358,6 +2358,22 @@ window._mrOtpClear  = _mrOtpClear;
         }, { passive: true });
     }
 
+    // ── Collapse-all button (optional UI element) ─────────────────────────
+    function _initCollapseAll(container) {
+        // Wire up a "collapse all" button if one exists in the DOM.
+        // Stacks use inline onclick="toggleStack(this)", so this only handles
+        // a dedicated collapse-all control.  Safe no-op if button absent.
+        const btn = document.getElementById('settCollapseAllBtn');
+        if (!btn) return;
+        btn.addEventListener('click', function() {
+            if (!container) return;
+            container.querySelectorAll('.sett-stack').forEach(function(el) {
+                el.classList.remove('stack-open');
+            });
+            _persistOpenStates();
+        });
+    }
+
     // ── Init on DOMContentLoaded ──────────────────────────────────────────
     function _initStacksUI() {
         const container = document.getElementById('settStacksContainer');
