@@ -218,6 +218,18 @@
 .hist-group-name:hover + .hist-group-uuid + .hist-group-full-uuid{display:inline;}
 .hist-group-count{font-size:9px;font-weight:600;color:var(--g500);margin-left:2px;}
 .hist-group-subtotal{font-size:12px;font-weight:900;color:var(--grn);margin-left:auto;}
+/* Refund collapsible section */
+.hist-refund-section-hdr td{padding:0!important;border:none!important;background:transparent!important;}
+.hist-refund-section-inner{display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;user-select:none;
+  background:linear-gradient(90deg,var(--red-lt) 0%,var(--g50) 100%);
+  border-top:2px solid var(--red);border-bottom:1px solid rgba(183,28,28,.15);}
+.hist-refund-section-inner:hover{filter:brightness(.97);}
+.hist-refund-chevron{font-size:10px;color:var(--red);transition:transform .2s;margin-left:2px;display:inline-block;}
+.hist-refund-chevron.open{transform:rotate(180deg);}
+.hist-refund-label{font-size:11px;font-weight:800;color:var(--red);}
+.hist-refund-count{font-size:9px;font-weight:600;color:var(--g500);background:var(--g100);
+  border:1px solid var(--g200);border-radius:3px;padding:1px 6px;}
+.hist-refund-subtotal{font-size:12px;font-weight:900;color:var(--red);margin-left:auto;}
 /* Sort headers */
 .hist-table th[data-sort-col]{cursor:pointer;user-select:none;}
 .hist-table th[data-sort-col]:hover{color:var(--blu);background:var(--blu-lt);}
