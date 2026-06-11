@@ -1,9 +1,4 @@
-/**
- * Dua Pharma POS - Enterprise Production Service Worker
- * Version: pharmapos-cache-v12.4 (Added syncHub.js + auditLog.js to offline cache)
- */
-
-const CACHE_NAME = 'pharmapos-cache-v18.5';
+const CACHE_NAME = 'pharmapos-cache-v18.6';
 
 // Explicit structural cache list to guarantee the system works offline instantly on day one
 const CORE_ASSETS = [
