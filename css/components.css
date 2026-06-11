@@ -1861,3 +1861,211 @@
 [data-theme="dark"] .app-stale-banner.warning  { background:#451a03; color:#fcd34d; border-color:#92400e; }
 [data-theme="dark"] .app-stale-banner.critical { background:#450a0a; color:#fca5a5; border-color:#991b1b; }
 [data-theme="dark"] .inv-stock-neg { background:#7f1d1d; color:#fecaca; box-shadow: 0 0 0 2px #f87171; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SETTINGS STACKS — Expandable / Collapsible + Drag-to-Reorder
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Container */
+.sett-stacks-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+/* Individual stack */
+.sett-stack {
+  background: var(--white);
+  border: 1.5px solid var(--g200);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  transition: box-shadow .2s, border-color .2s, transform .15s;
+  position: relative;
+  user-select: none;
+}
+.sett-stack:last-child { margin-bottom: 0; }
+.sett-stack.stack-open { border-color: var(--g300); box-shadow: 0 4px 16px rgba(0,0,0,.07); }
+.sett-stack.stack-dragging {
+  box-shadow: 0 12px 36px rgba(0,0,0,.22);
+  border-color: var(--blu);
+  z-index: 1000;
+  transform: scale(1.015);
+  opacity: .96;
+}
+.sett-stack.stack-drag-over {
+  border-color: var(--blu);
+  border-style: dashed;
+  background: var(--blu-lt);
+}
+
+/* Stack header (always visible) */
+.sett-stack-header {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  cursor: pointer;
+  min-height: 58px;
+  position: relative;
+  transition: background .15s;
+}
+.sett-stack-header:hover { background: var(--g50); }
+.sett-stack.stack-open .sett-stack-header { background: var(--g50); }
+
+/* Drag handle */
+.sett-stack-drag {
+  width: 36px;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: grab;
+  color: var(--g400);
+  font-size: 13px;
+  transition: color .15s;
+}
+.sett-stack-drag:hover { color: var(--g600); }
+.sett-stack-drag:active { cursor: grabbing; }
+
+/* Icon blob */
+.sett-stack-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-right: 12px;
+  transition: transform .2s;
+}
+.sett-stack-header:hover .sett-stack-icon,
+.sett-stack.stack-open .sett-stack-icon { transform: scale(1.08); }
+
+/* Text block */
+.sett-stack-meta {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0;
+}
+.sett-stack-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--g900);
+  line-height: 1.25;
+  letter-spacing: -.01em;
+}
+.sett-stack-desc {
+  font-size: 10.5px;
+  color: var(--g500);
+  margin-top: 2px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* Status badge (optional) */
+.sett-stack-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-right: 10px;
+  flex-shrink: 0;
+  letter-spacing: .2px;
+}
+.badge-ok  { background: var(--grn-lt);  color: var(--grn); }
+.badge-warn{ background: var(--amb-lt);  color: var(--amb); }
+.badge-off { background: var(--g200);    color: var(--g600); }
+
+/* Chevron */
+.sett-stack-chevron {
+  width: 36px;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--g400);
+  font-size: 11px;
+  transition: transform .22s, color .15s;
+}
+.sett-stack.stack-open .sett-stack-chevron { transform: rotate(180deg); color: var(--blu); }
+
+/* Body (collapsible) */
+.sett-stack-body {
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height .3s cubic-bezier(.4,0,.2,1), padding .3s;
+  padding: 0 16px;
+}
+.sett-stack.stack-open .sett-stack-body {
+  max-height: 2400px;
+  padding: 4px 16px 18px;
+}
+
+/* Inner divider */
+.sett-stack-divider {
+  height: 1px;
+  background: var(--g200);
+  margin: 0 16px;
+  display: none;
+}
+.sett-stack.stack-open .sett-stack-divider { display: block; }
+
+/* Icon palettes per section */
+.icon-branch   { background: #EFF6FF; }
+.icon-receipt  { background: #ECFDF5; }
+.icon-printer  { background: #F5F3FF; }
+.icon-backup   { background: #FFF7ED; }
+.icon-billing  { background: #FEF9C3; }
+.icon-appear   { background: #F0F9FF; }
+.icon-staff    { background: #FDF4FF; }
+.icon-security { background: #FFF1F2; }
+.icon-devices  { background: #F0FDF4; }
+.icon-preview  { background: #FAFAF9; }
+
+/* ── Dark mode overrides ── */
+[data-theme="dark"] .sett-stack {
+  background: var(--g100);
+  border-color: var(--g300);
+}
+[data-theme="dark"] .sett-stack.stack-open {
+  border-color: var(--g400);
+  box-shadow: 0 4px 16px rgba(0,0,0,.28);
+}
+[data-theme="dark"] .sett-stack-header:hover,
+[data-theme="dark"] .sett-stack.stack-open .sett-stack-header {
+  background: var(--g200);
+}
+[data-theme="dark"] .sett-stack-title  { color: var(--g900); }
+[data-theme="dark"] .sett-stack-desc   { color: var(--g600); }
+[data-theme="dark"] .sett-stack-divider { background: var(--g300); }
+[data-theme="dark"] .sett-stack.stack-drag-over { background: var(--blu-lt); }
+[data-theme="dark"] .icon-branch   { background: #0D2A4A; }
+[data-theme="dark"] .icon-receipt  { background: #062012; }
+[data-theme="dark"] .icon-printer  { background: #1E1040; }
+[data-theme="dark"] .icon-backup   { background: #2A1500; }
+[data-theme="dark"] .icon-billing  { background: #262000; }
+[data-theme="dark"] .icon-appear   { background: #0A2030; }
+[data-theme="dark"] .icon-staff    { background: #250030; }
+[data-theme="dark"] .icon-security { background: #300010; }
+[data-theme="dark"] .icon-devices  { background: #062012; }
+[data-theme="dark"] .icon-preview  { background: var(--g200); }
+
+/* ── Reorder drop-line indicator ── */
+.sett-stack-drop-line {
+  height: 3px;
+  background: var(--blu);
+  border-radius: 999px;
+  margin: -4px 20px 0;
+  display: none;
+  position: relative;
+  z-index: 2;
+}
+.sett-stack-drop-line.visible { display: block; }
+
