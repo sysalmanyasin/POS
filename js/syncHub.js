@@ -1694,8 +1694,20 @@ function _countUnsyncedMovements() {
 // line items to Supabase. Safe to run multiple times (idempotent upsert).
 // =========================================================================
 async function repairInvoiceItems() {
+    // ── v2: Fixes two problems from v1 ───────────────────────────────────
+    // Problem A — FK violation on invoice_items upsert:
+    //   invoice_items now has FK → invoices.invoice_number, so the invoice
+    //   header MUST exist in Supabase before we can insert its line items.
+    //   Fix: upsert the invoice header row first, then insert items.
+    //
+    // Problem B — "14 skipped (no details)" for remote invoices:
+    //   Invoices pulled FROM other devices are stored in this device's IDB
+    //   with details:[] because they were pulled before the FK+UNIQUE fix.
+    //   Fix: for invoices with empty details[], do an on-demand Supabase
+    //   fetch of invoice_items and patch the local IDB record.
+    // ─────────────────────────────────────────────────────────────────────
     if (typeof showToast === 'function') showToast('🔧 Repairing invoice line-items on cloud…');
-    let pushed = 0, skipped = 0, failed = 0;
+    let pushed = 0, patched = 0, skipped = 0, failed = 0;
 
     let allInvoices = [];
     try {
@@ -1715,10 +1727,80 @@ async function repairInvoiceItems() {
     for (const inv of allInvoices) {
         const invNum = inv.id || inv.invoiceNumber;
         if (!invNum) { skipped++; continue; }
-        const details = Array.isArray(inv.details) ? inv.details : [];
+        let details = Array.isArray(inv.details) ? inv.details : [];
+
+        // ── FIX B: Remote invoice with empty details — fetch from Supabase ──
+        if (details.length === 0 && navigator.onLine) {
+            try {
+                const { data: remoteRows, error: fetchErr } = await _dbSelect(
+                    'invoices',
+                    'invoice_number=eq.' + encodeURIComponent(invNum),
+                    '*,invoice_items(*)'
+                );
+                if (!fetchErr && Array.isArray(remoteRows) && remoteRows.length > 0) {
+                    const remoteItems = remoteRows[0].invoice_items;
+                    if (Array.isArray(remoteItems) && remoteItems.length > 0) {
+                        // Patch local IDB record with fetched items
+                        details = remoteItems.map(li => ({
+                            code:        li.product_code  || '',
+                            name:        li.product_name  || '',
+                            packDetails: li.pack_size     || '',
+                            unitPrice:   Number(li.unit_price) || 0,
+                            qty:         Number(li.qty)        || 0,
+                            total:       Number(li.total)      || 0
+                        }));
+                        inv.details = details;
+                        if (typeof StorageModule !== 'undefined' &&
+                            typeof StorageModule.putRemoteInvoice === 'function') {
+                            await StorageModule.putRemoteInvoice({ ...remoteRows[0], invoice_items: remoteItems })
+                                .catch(() => {});
+                        }
+                        patched++;
+                        // Items already in Supabase — no need to push again
+                        continue;
+                    }
+                }
+            } catch(_fe) { /* non-fatal — fall through to skip */ }
+            skipped++;
+            continue;  // truly no items anywhere — skip
+        }
+
         if (details.length === 0) { skipped++; continue; }
 
-        // Aggregate duplicate product codes (same logic as syncOfflineQueue)
+        // ── FIX A: Upsert invoice header first (required by FK constraint) ──
+        try {
+            const headerRow = {
+                invoice_number:     invNum,
+                device_uuid:        inv.deviceUuid   || (typeof _DEVICE_UUID !== 'undefined' ? _DEVICE_UUID : ''),
+                counter_id:         inv.deviceCode   || '',
+                customer_name:      inv.customerName  || '',
+                customer_phone:     inv.customerPhone || '',
+                staff_name:         inv.staffName     || '',
+                subtotal:           Number(inv.subtotal)      || 0,
+                discount_pct:       Number(inv.discountPct)   || 0,
+                discount_amount:    Number(inv.discountAmount) || 0,
+                round_off_amt:      Number(inv.roundOffAmt)   || 0,
+                net_total:          Number(inv.netTotal)       || 0,
+                payment_method:     inv.paymentMethod  || 'cash',
+                cash_received:      Number(inv.cashReceived)   || 0,
+                change_amount:      Number(inv.changeAmount)   || 0,
+                is_refund:          !!inv.isRefund,
+                is_partial_refund:  !!inv.isPartialRefund,
+                is_manual:          !!inv.isManual,
+                is_fully_refunded:  !!inv.isFullyRefunded,
+                original_invoice_id: inv.originalInvoiceId || null,
+                refund_reason:      inv.refundReason   || '',
+                is_edit:            !!inv.isEdit,
+                billed_at:          inv.billedAt || inv.timestamp || new Date().toISOString(),
+                created_at:         inv.createdAt || inv.billedAt || new Date().toISOString()
+            };
+            await _dbUpsert('invoices', headerRow, 'invoice_number');
+        } catch(_he) {
+            console.warn('[Repair] invoice header upsert failed for', invNum, _he);
+            failed++; continue;
+        }
+
+        // ── Aggregate duplicate product codes (same logic as syncOfflineQueue) ──
         const _aggMap = new Map();
         details.filter(li => li.code).forEach(li => {
             const key = li.code;
@@ -1742,18 +1824,26 @@ async function repairInvoiceItems() {
         if (itemRows.length === 0) { skipped++; continue; }
 
         try {
-            const { error } = await _dbUpsert(
+            const { error, data } = await _dbUpsert(
                 'invoice_items',
                 itemRows,
-                'invoice_number,product_code'   // requires UNIQUE constraint in Supabase
+                'invoice_number,product_code'
             );
-            if (error) { console.warn('[Repair] invoice_items failed for', invNum, error); failed++; }
-            else { pushed += itemRows.length; }
-        } catch(_e) { failed++; }
+            if (error) {
+                console.warn('[Repair] invoice_items failed for', invNum, error);
+                failed++;
+            } else {
+                pushed += itemRows.length;
+            }
+        } catch(_e) {
+            console.warn('[Repair] exception for', invNum, _e);
+            failed++;
+        }
     }
 
-    const msg = '✅ Repair done: ' + pushed + ' line-item rows pushed, ' +
-                skipped + ' skipped (no details), ' + failed + ' errors.';
+    const msg = '✅ Repair v2 done: ' + pushed + ' rows pushed, ' +
+                patched + ' remote invoices patched locally, ' +
+                skipped + ' skipped, ' + failed + ' errors.';
     if (typeof showToast === 'function') showToast(msg);
     console.log('[repairInvoiceItems]', msg);
 }
