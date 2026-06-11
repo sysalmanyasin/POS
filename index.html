@@ -1189,7 +1189,8 @@
     <div class="modal-title">🗑 Purge Old Invoices</div>
     <div class="modal-subtitle">Remove historical invoice records older than a certain date to free up storage space.</div>
     <label style="font-size:12px;font-weight:700;display:block;margin:14px 0 5px;">Purge invoices older than:</label>
-    <input type="date" id="purgeBeforeDate" class="sett-inp" style="width:100%;margin-bottom:10px;">
+    <input type="date" id="purgeBeforeDate" class="sett-inp" style="width:100%;margin-bottom:10px;"
+           onchange="if(typeof _updatePurgePreview==='function')_updatePurgePreview()">
     <div id="purgePreviewCount" style="font-size:12px;color:var(--g600);margin-bottom:14px;min-height:18px;"></div>
     <div class="modal-btn-row">
       <button class="btn-cancel" onclick="closePurgeOldModal()">Cancel</button>
@@ -1667,11 +1668,11 @@
 <!-- 5. Inventory (search, CSV import, movements) — must load before billing -->
 <script src="js/inventory.js?v=11"></script>
 <!-- 6. Billing (cart, invoice engine, keyboard shortcuts) -->
-<script src="js/billing.js?v=9"></script>
+<script src="js/billing.js?v=10"></script>
 <!-- 7. History (ledger table, filters, receipt viewer, hold view) -->
 <script src="js/history.js?v=9"></script>
 <!-- 8. Settings (branch, staff, backup, thermal, round-off, etc.) -->
-<script src="js/settings.js?v=10"></script>
+<script src="js/settings.js?v=11"></script>
 <!-- 9. Reporting (staff sales report) -->
 <script src="js/reporting.js?v=9"></script>
 <!-- 10. Devices dashboard (Task 4) -->
