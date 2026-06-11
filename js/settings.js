@@ -2053,36 +2053,22 @@ window._mrOtpClear  = _mrOtpClear;
         });
     }
 
-    // ── Persist / restore order ───────────────────────────────────────────
-    function _persistOrder() {
-        const container = document.getElementById('settStacksContainer');
-        if (!container) return;
-        const order = [];
-        container.querySelectorAll('.sett-stack').forEach(el => order.push(el.dataset.stackId));
-        try { localStorage.setItem(STORAGE_KEY_ORDER, JSON.stringify(order)); } catch(e) {}
-    }
+    // ── Persist / restore order — implemented below in drag block ──────────
+    // (Stubs kept so any external calls don't throw; real logic is column-aware.)
+    function _persistOrder() { /* overridden below */ }
+    function _restoreOrder() { /* overridden below */ }
 
-    function _restoreOrder() {
-        let order = [];
-        try { order = JSON.parse(localStorage.getItem(STORAGE_KEY_ORDER) || '[]'); } catch(e) {}
-        if (!order.length) return;
-        const container = document.getElementById('settStacksContainer');
-        if (!container) return;
-        // Build a map id → element
-        const map = {};
-        container.querySelectorAll('.sett-stack').forEach(el => { map[el.dataset.stackId] = el; });
-        // Re-append in saved order (any new stacks not in saved order go at end)
-        const placed = new Set();
-        order.forEach(id => {
-            if (map[id]) { container.appendChild(map[id]); placed.add(id); }
-        });
-        // Append any stacks not in the saved order
-        Object.keys(map).forEach(id => { if (!placed.has(id)) container.appendChild(map[id]); });
-    }
+    // ── Drag-to-reorder (cross-column, touch-enabled) ───────────────────────
+    // Supports:
+    //   • Desktop HTML5 drag-and-drop: grab handle → drag within or across columns
+    //   • Mobile touch drag: long-press handle → drag ghost → drop on column/card
+    // Column layout: 3 .sett-col divs inside #settStacksContainer.
+    // Order is persisted per-column in localStorage.
 
-    // ── Drag-to-reorder ───────────────────────────────────────────────────
-    let _dragSrc  = null;
-    let _dropLine = null;
+    let _dragSrc    = null;
+    let _dropLine   = null;
+    let _touchGhost = null;
+    let _touchSrc   = null;
 
     function _getDropLine() {
         if (!_dropLine) {
@@ -2092,9 +2078,55 @@ window._mrOtpClear  = _mrOtpClear;
         return _dropLine;
     }
 
-    function _initDrag(container) {
+    function _getColumns() {
+        return Array.from(document.querySelectorAll('#settStacksContainer .sett-col'));
+    }
+
+    // ── Persist column order ─────────────────────────────────────────────
+    function _persistOrder() {
+        const cols = _getColumns();
+        const colOrders = cols.map(col =>
+            Array.from(col.querySelectorAll(':scope > .sett-stack')).map(s => s.dataset.stackId)
+        );
+        try { localStorage.setItem(STORAGE_KEY_ORDER, JSON.stringify(colOrders)); } catch(e) {}
+    }
+
+    function _restoreOrder() {
+        let colOrders = null;
+        try { colOrders = JSON.parse(localStorage.getItem(STORAGE_KEY_ORDER) || 'null'); } catch(e) {}
+
+        // Legacy flat array support: if saved as flat array, skip
+        if (!colOrders || !Array.isArray(colOrders) || !Array.isArray(colOrders[0])) return;
+
+        const cols = _getColumns();
+        if (!cols.length) return;
+
+        // Build global id→element map
+        const map = {};
+        document.querySelectorAll('#settStacksContainer .sett-stack').forEach(el => {
+            map[el.dataset.stackId] = el;
+        });
+
+        const placed = new Set();
+        colOrders.forEach((ids, ci) => {
+            const col = cols[ci];
+            if (!col) return;
+            ids.forEach(id => {
+                if (map[id]) { col.appendChild(map[id]); placed.add(id); }
+            });
+        });
+        // Any new stacks not in saved order go into col 0
+        const col0 = cols[0];
+        if (col0) {
+            Object.keys(map).forEach(id => {
+                if (!placed.has(id)) col0.appendChild(map[id]);
+            });
+        }
+    }
+
+    // ── Desktop drag-and-drop ────────────────────────────────────────────
+    function _initDesktopDrag(container) {
         container.addEventListener('dragstart', function(e) {
-            // Only start drag from the handle
             const handle = e.target.closest('.sett-stack-drag');
             const stack  = e.target.closest('.sett-stack');
             if (!handle || !stack) { e.preventDefault(); return; }
@@ -2102,73 +2134,82 @@ window._mrOtpClear  = _mrOtpClear;
             _dragSrc = stack;
             stack.classList.add('stack-dragging');
 
-            // Minimal ghost
             try {
                 const ghost = document.createElement('div');
                 ghost.style.cssText = 'position:fixed;top:-999px;left:-999px;background:var(--blu);color:#fff;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:700;pointer-events:none;';
-                ghost.textContent = stack.querySelector('.sett-stack-title')?.textContent || 'Stack';
+                ghost.textContent = stack.querySelector('.sett-stack-title')?.textContent || 'Card';
                 document.body.appendChild(ghost);
                 e.dataTransfer.setDragImage(ghost, 0, 0);
                 setTimeout(() => ghost.remove(), 0);
-            } catch (_) {}
+            } catch(_) {}
 
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', stack.dataset.stackId);
         });
 
+        // Allow drop on columns (not just cards)
         container.addEventListener('dragover', function(e) {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
-            const target = e.target.closest('.sett-stack');
-            if (!target || target === _dragSrc) return;
+            if (!_dragSrc) return;
 
-            const rect   = target.getBoundingClientRect();
-            const midY   = rect.top + rect.height / 2;
-            const before = e.clientY < midY;
+            const targetStack = e.target.closest('.sett-stack');
+            const targetCol   = e.target.closest('.sett-col');
+            if (!targetCol) return;
 
-            // Insert drop-line
-            const dl = _getDropLine();
-            dl.classList.add('visible');
-            if (before) {
-                target.before(dl);
-            } else {
-                target.after(dl);
+            // Highlight column
+            _getColumns().forEach(c => c.classList.remove('col-drag-over'));
+            targetCol.classList.add('col-drag-over');
+
+            if (targetStack && targetStack !== _dragSrc) {
+                const rect   = targetStack.getBoundingClientRect();
+                const before = e.clientY < rect.top + rect.height / 2;
+                const dl = _getDropLine();
+                dl.classList.add('visible');
+                before ? targetStack.before(dl) : targetStack.after(dl);
+            } else if (!targetStack) {
+                // Dragging over empty space in a column → append drop line at end
+                const dl = _getDropLine();
+                dl.classList.add('visible');
+                targetCol.appendChild(dl);
             }
         });
 
         container.addEventListener('dragleave', function(e) {
             if (!container.contains(e.relatedTarget)) {
-                _getDropLine().classList.remove('visible');
-                _getDropLine().remove();
+                _getColumns().forEach(c => c.classList.remove('col-drag-over'));
+                const dl = _getDropLine();
+                dl.classList.remove('visible');
+                try { dl.remove(); } catch(_) {}
             }
         });
 
         container.addEventListener('drop', function(e) {
             e.preventDefault();
+            _getColumns().forEach(c => c.classList.remove('col-drag-over'));
             const dl = _getDropLine();
             dl.classList.remove('visible');
 
-            const target = e.target.closest('.sett-stack');
-            if (!_dragSrc || !target || target === _dragSrc) {
-                dl.remove();
-                return;
-            }
+            if (!_dragSrc) { try { dl.remove(); } catch(_) {} return; }
 
-            const rect   = target.getBoundingClientRect();
-            const before = e.clientY < rect.top + rect.height / 2;
+            const targetStack = e.target.closest('.sett-stack');
+            const targetCol   = e.target.closest('.sett-col');
+            if (!targetCol) { try { dl.remove(); } catch(_) {} return; }
 
-            // Insert with a brief flash animation
-            _dragSrc.style.opacity = '0.7';
-            if (before) {
-                target.before(_dragSrc);
+            if (targetStack && targetStack !== _dragSrc) {
+                const rect   = targetStack.getBoundingClientRect();
+                const before = e.clientY < rect.top + rect.height / 2;
+                before ? targetStack.before(_dragSrc) : targetStack.after(_dragSrc);
             } else {
-                target.after(_dragSrc);
+                targetCol.appendChild(_dragSrc);
             }
-            dl.remove();
 
+            try { dl.remove(); } catch(_) {}
+
+            _dragSrc.style.opacity = '0.7';
             requestAnimationFrame(() => {
                 _dragSrc.style.transition = 'opacity .2s';
-                _dragSrc.style.opacity = '1';
+                _dragSrc.style.opacity    = '1';
                 setTimeout(() => { if (_dragSrc) _dragSrc.style.transition = ''; }, 200);
             });
 
@@ -2180,15 +2221,16 @@ window._mrOtpClear  = _mrOtpClear;
                 _dragSrc.classList.remove('stack-dragging');
                 _dragSrc = null;
             }
-            _getDropLine().classList.remove('visible');
-            try { _getDropLine().remove(); } catch(_) {}
+            _getColumns().forEach(c => c.classList.remove('col-drag-over'));
+            const dl = _getDropLine();
+            dl.classList.remove('visible');
+            try { dl.remove(); } catch(_) {}
         });
 
-        // Prevent header click during drag on the handle
+        // Stop header click from firing when grabbing drag handle
         container.addEventListener('mousedown', function(e) {
             const handle = e.target.closest('.sett-stack-drag');
             if (handle) {
-                // Stop the click from propagating to the header toggle
                 const header = handle.closest('.sett-stack-header');
                 if (header) {
                     const stop = function(ev) { ev.stopImmediatePropagation(); header.removeEventListener('click', stop, true); };
@@ -2198,18 +2240,122 @@ window._mrOtpClear  = _mrOtpClear;
         });
     }
 
-    // ── Keyboard shortcut: Ctrl+click header to collapse all others ───────
-    function _initCollapseAll(container) {
-        container.addEventListener('click', function(e) {
-            if (!e.ctrlKey && !e.metaKey) return;
-            const header = e.target.closest('.sett-stack-header');
-            if (!header) return;
-            const stack = header.closest('.sett-stack');
-            container.querySelectorAll('.sett-stack').forEach(el => {
-                if (el !== stack) el.classList.remove('stack-open');
-            });
-            _persistOpenStates();
-        });
+    // ── Touch drag-and-drop ──────────────────────────────────────────────
+    // Long-press (300ms) on the drag handle activates touch drag.
+    // A floating ghost follows the finger; on release the card is dropped
+    // into the column/position under the touch point.
+
+    let _touchLongPressTimer = null;
+    let _touchStartX = 0;
+    let _touchStartY = 0;
+
+    function _createTouchGhost(stack) {
+        const g = document.createElement('div');
+        g.className = 'sett-touch-ghost';
+        g.textContent = stack.querySelector('.sett-stack-title')?.textContent || 'Card';
+        document.body.appendChild(g);
+        return g;
+    }
+
+    function _initTouchDrag(container) {
+        container.addEventListener('touchstart', function(e) {
+            const handle = e.target.closest('.sett-stack-drag');
+            const stack  = e.target.closest('.sett-stack');
+            if (!handle || !stack) return;
+
+            const touch = e.touches[0];
+            _touchStartX = touch.clientX;
+            _touchStartY = touch.clientY;
+
+            _touchLongPressTimer = setTimeout(() => {
+                _touchSrc = stack;
+                stack.classList.add('stack-dragging');
+                _touchGhost = _createTouchGhost(stack);
+                _touchGhost.style.left = _touchStartX + 'px';
+                _touchGhost.style.top  = _touchStartY + 'px';
+                // Light haptic if available
+                try { if (navigator.vibrate) navigator.vibrate(30); } catch(_) {}
+            }, 300);
+        }, { passive: true });
+
+        container.addEventListener('touchmove', function(e) {
+            // Cancel long-press if finger moved too much before timer fires
+            if (!_touchSrc && _touchLongPressTimer) {
+                const t = e.touches[0];
+                if (Math.abs(t.clientX - _touchStartX) > 8 || Math.abs(t.clientY - _touchStartY) > 8) {
+                    clearTimeout(_touchLongPressTimer);
+                    _touchLongPressTimer = null;
+                }
+            }
+            if (!_touchSrc || !_touchGhost) return;
+            e.preventDefault();
+
+            const touch = e.touches[0];
+            _touchGhost.style.left = touch.clientX + 'px';
+            _touchGhost.style.top  = touch.clientY + 'px';
+
+            // Highlight the column under the finger
+            const el = document.elementFromPoint(touch.clientX, touch.clientY);
+            const overCol = el ? el.closest('.sett-col') : null;
+            _getColumns().forEach(c => c.classList.toggle('col-drag-over', c === overCol));
+
+            // Show drop line
+            const overStack = el ? el.closest('.sett-stack') : null;
+            if (overStack && overStack !== _touchSrc) {
+                const rect   = overStack.getBoundingClientRect();
+                const before = touch.clientY < rect.top + rect.height / 2;
+                const dl = _getDropLine();
+                dl.classList.add('visible');
+                before ? overStack.before(dl) : overStack.after(dl);
+            } else if (overCol && !overStack) {
+                const dl = _getDropLine();
+                dl.classList.add('visible');
+                overCol.appendChild(dl);
+            }
+        }, { passive: false });
+
+        container.addEventListener('touchend', function(e) {
+            clearTimeout(_touchLongPressTimer);
+            _touchLongPressTimer = null;
+
+            if (!_touchSrc) return;
+
+            const touch = e.changedTouches[0];
+            const el    = document.elementFromPoint(touch.clientX, touch.clientY);
+            const dropStack = el ? el.closest('.sett-stack') : null;
+            const dropCol   = el ? el.closest('.sett-col')   : null;
+
+            if (dropCol) {
+                if (dropStack && dropStack !== _touchSrc) {
+                    const rect   = dropStack.getBoundingClientRect();
+                    const before = touch.clientY < rect.top + rect.height / 2;
+                    before ? dropStack.before(_touchSrc) : dropStack.after(_touchSrc);
+                } else {
+                    dropCol.appendChild(_touchSrc);
+                }
+                _persistOrder();
+            }
+
+            // Cleanup
+            _touchSrc.classList.remove('stack-dragging');
+            _touchSrc = null;
+            if (_touchGhost) { _touchGhost.remove(); _touchGhost = null; }
+            _getColumns().forEach(c => c.classList.remove('col-drag-over'));
+            const dl = _getDropLine();
+            dl.classList.remove('visible');
+            try { dl.remove(); } catch(_) {}
+        }, { passive: true });
+
+        container.addEventListener('touchcancel', function() {
+            clearTimeout(_touchLongPressTimer);
+            _touchLongPressTimer = null;
+            if (_touchSrc) { _touchSrc.classList.remove('stack-dragging'); _touchSrc = null; }
+            if (_touchGhost) { _touchGhost.remove(); _touchGhost = null; }
+            _getColumns().forEach(c => c.classList.remove('col-drag-over'));
+            const dl = _getDropLine();
+            dl.classList.remove('visible');
+            try { dl.remove(); } catch(_) {}
+        }, { passive: true });
     }
 
     // ── Init on DOMContentLoaded ──────────────────────────────────────────
@@ -2218,11 +2364,12 @@ window._mrOtpClear  = _mrOtpClear;
         if (!container) return;
         _restoreOrder();
         _restoreOpenStates();
-        _initDrag(container);
+        _initDesktopDrag(container);
+        _initTouchDrag(container);
         _initCollapseAll(container);
     }
 
-    // Run after DOM is ready
+        // Run after DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', _initStacksUI);
     } else {
