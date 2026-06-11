@@ -555,8 +555,10 @@ async function _callDeductInventoryAtomic(productCode, quantity, deviceUuid, inv
         p_invoice_number:   invoiceNumber,
         p_expected_version: expectedVersion
     };
-    // FIX: pass movement_type to RPC so it records REFUND/PARTIAL_REFUND correctly
-    if (movementType) _rpcBody.p_movement_type = movementType;
+    // Always send p_movement_type so PostgREST can unambiguously resolve the
+    // 6-param overload.  Omitting it causes PGRST203 when both a 5-param and
+    // 6-param overload exist.  Default to 'SALE' for normal billing.
+    _rpcBody.p_movement_type = movementType || 'SALE';
     const response = await fetch(
         (typeof _SUPA_URL !== 'undefined' ? _SUPA_URL : '') + '/rest/v1/rpc/deduct_inventory_atomic',
         {
