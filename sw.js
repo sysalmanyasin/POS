@@ -4,7 +4,7 @@
 //           Supabase, EmailJS, and all external API traffic.
 // ============================================================
 
-const CACHE_NAME = 'pharmapos-cache-v19.5';
+const CACHE_NAME = 'pharmapos-cache-v19.6';
 // ⚠️ CACHE_NAME is auto-updated by GitHub Actions on every deploy.
 // Do NOT manually edit the version number — it will be overwritten.
 
