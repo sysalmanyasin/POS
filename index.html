@@ -43,9 +43,119 @@
 
 <!-- EmailJS (Task 3) -->
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+<!-- ── PIN GATE STYLES ── -->
+<style>
+  #pin-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: linear-gradient(135deg, #08455A 0%, #0B5F7A 60%, #1A83A8 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    padding: 24px;
+    text-align: center;
+  }
+  #pin-gate.hidden { display: none; }
+
+  .gate-logo {
+    width: 84px; height: 84px;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 42px;
+    backdrop-filter: blur(4px);
+    box-shadow: inset 0 2px 4px rgba(255,255,255,0.1);
+  }
+  .gate-title { color: #fff; font-size: 17px; font-weight: 700; letter-spacing: 0.3px; }
+  .gate-sub { color: rgba(255,255,255,0.65); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; margin-top: -16px; }
+
+  #pin-dots { display: flex; gap: 14px; }
+  .pin-dot {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.5);
+    background: transparent;
+    transition: background 0.15s, transform 0.15s;
+  }
+  .pin-dot.filled { background: #fff; transform: scale(1.1); }
+  .pin-dot.error { border-color: #E74C3C; background: #E74C3C; }
+
+  #pin-gate.shake .gate-input-wrap { animation: pingate-shake 0.4s; }
+  @keyframes pingate-shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-8px); }
+    40%, 80% { transform: translateX(8px); }
+  }
+
+  .gate-input-wrap {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .gate-input {
+    width: 200px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-align: center;
+    text-transform: uppercase;
+    outline: none;
+  }
+  .gate-input::placeholder {
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 1px;
+    text-transform: none;
+    font-weight: 500;
+  }
+  .gate-input.error { border-color: #E74C3C; }
+
+  .gate-submit {
+    width: 48px; height: 48px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.12);
+    color: #fff;
+    font-size: 20px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+  .gate-submit:active { background: rgba(255,255,255,0.25); transform: scale(0.95); }
+
+  .gate-status {
+    min-height: 18px;
+    color: rgba(255,255,255,0.75);
+    font-size: 13px; font-weight: 600;
+  }
+  .gate-status.error-text { color: #ffd2cc; }
+</style>
 </head>
 
 <body>
+
+<!-- ── PIN GATE SPLASH ── -->
+<div id="pin-gate">
+  <div class="gate-logo">⚕</div>
+  <div>
+    <div class="gate-title">Fazal Din's Pharma Plus</div>
+    <div class="gate-sub">POS Terminal</div>
+  </div>
+  <div class="gate-input-wrap">
+    <input type="password" id="gate-input" class="gate-input" placeholder="Enter PIN" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20">
+    <div class="gate-submit" id="gate-submit">→</div>
+  </div>
+  <div class="gate-status" id="gate-status">Enter PIN</div>
+</div>
+
 <div id="appRoot">
 
 <!-- ═══ HEADER ═══ -->
@@ -1922,6 +2032,111 @@ if ('serviceWorker' in navigator) {
   // Poll every 5 s — auto-applies any deferred update the moment app is idle
   setInterval(_tryApplySwUpdate, 5000);
 }
+</script>
+<!-- ── PIN GATE LOGIC ── -->
+<script>
+  (function() {
+    // SHA-256 hash of the staff PIN (entered text is uppercased before hashing).
+    // To change the PIN, compute a new hash:
+    // crypto.subtle.digest('SHA-256', new TextEncoder().encode('YOURPIN'))
+    // then format the result as hex, and replace the value below.
+    const PIN_HASH = "092136c8fb3cb70d654532dde489d7605d1c9e6ca54374bfe2fcc3d28b98bdbe"; // PIN: SALMAN
+
+    const UNLOCK_KEY = 'pos_unlocked'; // unique per-app key
+    const MAX_ATTEMPTS = 3;
+    const COOLDOWN_SECONDS = 30;
+
+    const gate = document.getElementById('pin-gate');
+    const input = document.getElementById('gate-input');
+    const submit = document.getElementById('gate-submit');
+    const status = document.getElementById('gate-status');
+
+    let attempts = 0;
+    let cooldownTimer = null;
+
+    // Already unlocked on this device
+    if (localStorage.getItem(UNLOCK_KEY) === 'true') {
+      gate.classList.add('hidden');
+      return;
+    }
+
+    async function sha256(text) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function setInputEnabled(enabled) {
+      input.disabled = !enabled;
+      submit.style.pointerEvents = enabled ? 'auto' : 'none';
+      submit.style.opacity = enabled ? '1' : '0.4';
+      input.style.opacity = enabled ? '1' : '0.4';
+    }
+
+    function startCooldown() {
+      let remaining = COOLDOWN_SECONDS;
+      setInputEnabled(false);
+      status.classList.add('error-text');
+      status.textContent = `Too many attempts. Try again in ${remaining}s`;
+
+      cooldownTimer = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+          clearInterval(cooldownTimer);
+          cooldownTimer = null;
+          attempts = 0;
+          status.classList.remove('error-text');
+          status.textContent = 'Enter PIN';
+          input.value = '';
+          input.classList.remove('error');
+          setInputEnabled(true);
+          input.focus();
+        } else {
+          status.textContent = `Too many attempts. Try again in ${remaining}s`;
+        }
+      }, 1000);
+    }
+
+    async function checkPin() {
+      const value = input.value.trim().toUpperCase();
+      if (!value) return;
+
+      const hash = await sha256(value);
+      if (hash === PIN_HASH) {
+        localStorage.setItem(UNLOCK_KEY, 'true');
+        gate.classList.add('hidden');
+      } else {
+        attempts++;
+        input.classList.add('error');
+        gate.classList.add('shake');
+        setTimeout(() => gate.classList.remove('shake'), 400);
+
+        if (attempts >= MAX_ATTEMPTS) {
+          input.value = '';
+          startCooldown();
+        } else {
+          status.classList.add('error-text');
+          status.textContent = `Incorrect PIN (${MAX_ATTEMPTS - attempts} attempt${MAX_ATTEMPTS - attempts === 1 ? '' : 's'} left)`;
+          setTimeout(() => {
+            input.value = '';
+            input.classList.remove('error');
+            status.classList.remove('error-text');
+            status.textContent = 'Enter PIN';
+          }, 600);
+        }
+      }
+    }
+
+    submit.addEventListener('click', checkPin);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') checkPin();
+    });
+    input.addEventListener('input', () => {
+      input.classList.remove('error');
+    });
+
+    // Focus the field on load (mobile keyboards may need a tap first)
+    setTimeout(() => input.focus(), 100);
+  })();
 </script>
 </body>
 </html>
