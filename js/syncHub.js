@@ -36,7 +36,9 @@ let _forceSyncRunning       = false;  // guard against concurrent runs
 window.addEventListener('online', () => {
     // Small debounce — let the browser settle connectivity before we hammer
     setTimeout(() => {
-        if (navigator.onLine && localStorage.getItem('_pharma_offline_work_mode') !== 'true') {
+        if (navigator.onLine &&
+            localStorage.getItem('_pharma_offline_work_mode') !== 'true' &&
+            _isSupabaseConfigured()) {
             syncOfflineQueue(_DEVICE_UUID).catch(() => {});
         }
     }, 2000);
@@ -50,6 +52,7 @@ window.addEventListener('online', () => {
 setInterval(() => {
     if (!navigator.onLine || _forceSyncRunning) return;
     if (localStorage.getItem('_pharma_offline_work_mode') === 'true') return; // Offline Work Mode active
+    if (!_isSupabaseConfigured()) return; // No DB credentials — skip silently
     (async () => {
         try {
             // ── PUSH PHASE ───────────────────────────────────────────────

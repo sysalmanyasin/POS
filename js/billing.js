@@ -49,6 +49,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     updateSupabaseSyncUI('connecting');
     try {
+        // Only attempt cloud sync when Supabase credentials are actually configured.
+        // If mode is 'offline' or no URL/key are set, skip entirely so the
+        // device-registration trigger (which checks _supabase_sync_on) never fires
+        // against an unconfigured database.
+        if (!_isSupabaseConfigured()) {
+            StorageModule.set('_supabase_sync_on', 'false');
+            updateSupabaseSyncUI('offline');
+            throw new Error('No Supabase credentials configured — skipping cloud sync.');
+        }
         await _supaProbe();
         console.log('[Supabase] Cloud sync ready.');
         StorageModule.setSyncEnabled(true);

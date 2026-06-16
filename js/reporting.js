@@ -507,11 +507,17 @@ async function _rptLoadMovementAudit() {
 
     el.innerHTML = '<div class="rpt-placeholder">Loading movements…</div>';
 
+    // Audit trail lives only in Supabase — not available offline.
+    if (!_isSupabaseConfigured() || !navigator.onLine) {
+        el.innerHTML = '<div class="rpt-placeholder rpt-muted">📴 Audit trail requires a cloud database connection. Connect Supabase in Settings to use this feature.</div>';
+        return;
+    }
+
     const filter = `product_code=eq.${encodeURIComponent(code)}&order=moved_at.desc`;
     const { data, error } = await _dbSelect('inventory_movements', filter, '*');
     if (error) {
         showToast('⚠️ Audit load failed: ' + (error.message || error), 'error');
-        el.innerHTML = '<div class="rpt-placeholder rpt-muted">Failed to load.</div>';
+        el.innerHTML = '<div class="rpt-placeholder rpt-muted">Failed to load audit trail.</div>';
         return;
     }
 

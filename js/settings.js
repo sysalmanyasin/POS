@@ -1951,24 +1951,36 @@ async function _mrVerifyAndClaim() {
         const counterId  = (typeof StorageModule !== 'undefined')
             ? (StorageModule.get('pharma_device_counter_id') || 'Main') : 'Main';
 
-        const { error: upsertErr } = await _dbUpsert('devices', [{
-            uuid:          _DEVICE_UUID,
-            name:          deviceName,
-            counter_id:    counterId,
-            role:          'master',
-            is_active:     true,
-            registered_at: now,
-            last_seen_at:  now,
-            today_bills:   0,
-            active_staff:  null
-        }], 'uuid');
-
-        if (upsertErr) throw new Error('Supabase write failed: ' + upsertErr);
-
-        // Step 3: Update localStorage
+        // Step 2b: persist locally first so the role change survives offline
         if (typeof StorageModule !== 'undefined') {
             StorageModule.set('pharma_device_role', 'master');
         }
+        // Update local device cache so heartbeat uses the right role
+        try {
+            const cached = JSON.parse(localStorage.getItem('pharma_device_cache') || 'null');
+            if (cached) { cached.role = 'master'; localStorage.setItem('pharma_device_cache', JSON.stringify(cached)); }
+        } catch(_ce) {}
+
+        // Write to Supabase when available; silently skip if offline / not configured
+        if (_isSupabaseConfigured() && navigator.onLine) {
+            const { error: upsertErr } = await _dbUpsert('devices', [{
+                uuid:          _DEVICE_UUID,
+                name:          deviceName,
+                counter_id:    counterId,
+                role:          'master',
+                is_active:     true,
+                registered_at: now,
+                last_seen_at:  now,
+                today_bills:   0,
+                active_staff:  null
+            }], 'uuid');
+            if (upsertErr) {
+                if (typeof showToast === 'function')
+                    showToast('⚠️ Role saved locally but Supabase write failed: ' + upsertErr, true);
+            }
+        }
+
+        // Step 3: localStorage already updated above
 
         // Step 4: Refresh device manager
         if (typeof renderSettingsDeviceManager === 'function') {

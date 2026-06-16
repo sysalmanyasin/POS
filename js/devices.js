@@ -120,7 +120,40 @@ const DevicesModule = (() => {
             return;
         }
 
-        // ── OFFLINE PATH ──────────────────────────────────────────────────
+        const currentMode = localStorage.getItem('pharma_mode');
+
+        // ── CLOUD MODE BUT NO DB CONFIGURED ───────────────────────────────
+        // User chose cloud/Supabase mode but hasn't entered credentials yet
+        // (or they were cleared). Redirect to the setup screen instead of
+        // failing with "No database configured".
+        if (currentMode === 'cloud' && !_isSupabaseConfigured()) {
+            if (typeof showSetupScreen === 'function') showSetupScreen('supabase');
+            return;
+        }
+
+        // ── LOCAL-ONLY PATH (offline mode or no Supabase URL) ─────────────
+        // Use locally-cached device identity if available; skip cloud entirely.
+        if (currentMode === 'offline' || !_isSupabaseConfigured()) {
+            const cached = _getLocalDeviceCache();
+            if (cached) {
+                console.info('[DevicesModule] Local-only — using cached device identity:', cached.name);
+                StorageModule.set('pharma_device_name',       cached.name       || '');
+                StorageModule.set('pharma_device_role',       cached.role       || 'master');
+                StorageModule.set('pharma_device_counter_id', cached.counter_id || '');
+                try {
+                    const bi = JSON.parse(localStorage.getItem('pharma_branch_identity') || '{}');
+                    if (cached.counter_id) { bi.counterId = cached.counter_id; }
+                    localStorage.setItem('pharma_branch_identity', JSON.stringify(bi));
+                } catch(e) {}
+                return;
+            }
+            // No cache → first time on this device in offline mode; show registration modal.
+            // _confirmRegistration will handle saving locally.
+            _showRegistrationModal();
+            return;
+        }
+
+        // ── NO INTERNET PATH ──────────────────────────────────────────────
         // If the browser has no connectivity, skip the Supabase round-trip entirely.
         // Use the locally-cached device row written after the last successful cloud
         // registration. This prevents the registration modal from appearing on every
@@ -148,7 +181,7 @@ const DevicesModule = (() => {
             return;
         }
 
-        // ── ONLINE PATH (original logic) ──────────────────────────────────
+        // ── ONLINE + CLOUD PATH (original logic) ──────────────────────────
         const myDevice = await _fetchMyDevice();
 
         if (!myDevice) {
@@ -290,7 +323,43 @@ const DevicesModule = (() => {
                 return;
             }
 
-            // ── ONLINE REGISTRATION (original flow) ────────────────────────
+            // ── NO DB / OFFLINE-MODE REGISTRATION ─────────────────────────
+            // If Supabase URL is not configured (offline mode or cloud without
+            // credentials), save locally and skip all cloud calls.
+            if (!_SUPA_URL) {
+                const cached = _getLocalDeviceCache();
+                const role = cached ? 'client' : 'master';
+                const row = {
+                    uuid:          _DEVICE_UUID,
+                    name:          name,
+                    counter_id:    counterId,
+                    role:          role,
+                    registered_at: now,
+                    last_seen_at:  now,
+                    is_active:     true
+                };
+                _setLocalDeviceCache(row);
+                StorageModule.set('pharma_device_name',       name);
+                StorageModule.set('pharma_device_role',       role);
+                StorageModule.set('pharma_device_counter_id', counterId);
+                try {
+                    const bi = JSON.parse(localStorage.getItem('pharma_branch_identity') || '{}');
+                    bi.counterId = counterId;
+                    localStorage.setItem('pharma_branch_identity', JSON.stringify(bi));
+                } catch(e) {}
+                const overlay = document.getElementById('deviceRegModal');
+                if (overlay) overlay.remove();
+                const roleLabel = role === 'master' ? '👑 Master' : '💻 Client';
+                if (typeof showToast === 'function') {
+                    showToast(`✅ Device "${name}" registered as ${roleLabel} (local).`);
+                }
+                if (role === 'master' && typeof _checkAndInitMasterSetup === 'function') {
+                    setTimeout(() => _checkAndInitMasterSetup(), 800);
+                }
+                return;
+            }
+
+            // ── ONLINE REGISTRATION (cloud flow) ───────────────────────────
             // Enforce max device limit
             const count = await _activeDeviceCount();
             if (count >= MAX_DEVICES) {
@@ -1240,8 +1309,14 @@ document.addEventListener('DOMContentLoaded', function () {
     if (DevicesModule.checkStartupLock()) return;
 
     setTimeout(function () {
+        const mode = localStorage.getItem('pharma_mode');
         if (StorageModule.get('_supabase_sync_on') === 'true') {
+            // Cloud mode with configured DB — start heartbeat + command polling.
             DevicesModule.start();
+        }
+        // Always run device registration when a mode has been chosen.
+        // The function handles offline, local-only, and cloud paths internally.
+        if (mode) {
             DevicesModule._registerOrUpdateDevice().catch(() => {});
         }
     }, 3500);

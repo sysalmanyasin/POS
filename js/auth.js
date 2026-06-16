@@ -11,11 +11,15 @@ async function _hashPin(p)      { return await _sha256('FDPP_pin_' + p); }
 
 // ── Task 2: verify checks Supabase first, falls back to localStorage ────────
 async function _verifyPassword(entered) {
-    // 1. Try Supabase cloud hash
-    try {
-        const cloudHash = await _supaGet('pharma_master_password_hash');
-        if (cloudHash) return (await _hashPassword(entered)) === cloudHash;
-    } catch(e) {}
+    // 1. Try Supabase cloud hash — skip entirely in offline mode or when DB is
+    //    not configured to avoid a useless network round-trip on every PIN entry.
+    const _verifyMode = localStorage.getItem('pharma_mode');
+    if (_verifyMode !== 'offline' && _isSupabaseConfigured()) {
+        try {
+            const cloudHash = await _supaGet('pharma_master_password_hash');
+            if (cloudHash) return (await _hashPassword(entered)) === cloudHash;
+        } catch(e) {}
+    }
     // 2. Fall back to localStorage
     const storedHash = StorageModule.get('sys_admin_pass_hash');
     if (storedHash) return (await _hashPassword(entered)) === storedHash;
@@ -48,6 +52,24 @@ const _MASTER_DEVICE_KEY = 'pharma_master_device_id';
  * Sets up the EmailJS PIN distribution flow
  */
 async function _checkAndInitMasterSetup() {
+    const mode = localStorage.getItem('pharma_mode');
+    const hasEmailJS = !!(
+        localStorage.getItem('pharma_emailjs_service_id') &&
+        localStorage.getItem('pharma_emailjs_public_key') &&
+        localStorage.getItem('pharma_emailjs_reset_email')
+    );
+
+    // ── FAST PATH: offline mode or EmailJS not configured ─────────────────
+    // Skip the email-PIN ceremony entirely. Go straight to the standard
+    // first-launch password modal, which saves locally (and to Supabase
+    // when cloud is configured, thanks to _persistPassword's try/catch).
+    if (mode === 'offline' || !hasEmailJS) {
+        StorageModule.set('sys_is_master_device', 'true');
+        _showFirstLaunchPasswordSetup();
+        return;
+    }
+
+    // ── CLOUD + EMAILJS PATH ───────────────────────────────────────────────
     // Phase 2+: master identity is determined by the `devices` table, not the
     // legacy pharma_master_device_id KV key.  We check the table first; if
     // offline we fall back to the old KV key so the flow degrades gracefully.
@@ -851,6 +873,37 @@ async function _migrateSecretsOnStartup() {
         StorageModule.remove('sys_admin_pass');
     }
 
+    const mode = localStorage.getItem('pharma_mode');
+
+    // ── OFFLINE MODE OR NO DB CONFIGURED ─────────────────────────────────
+    // Skip Supabase entirely. Check local storage only and prompt for
+    // password setup if nothing is found.
+    if (mode === 'offline' || !_isSupabaseConfigured()) {
+        const localHash = StorageModule.get('sys_admin_pass_hash');
+        const hasFlag   = StorageModule.get('sys_has_password') === 'true';
+        if (!localHash && !hasFlag) {
+            const lastPurgeTime  = StorageModule.get('sys_last_purge_time');
+            const timeSincePurge = lastPurgeTime ? (Date.now() - parseInt(lastPurgeTime)) : null;
+            if (timeSincePurge && timeSincePurge < 5 * 60 * 1000) {
+                await _checkAndInitMasterSetup();
+            } else {
+                _showFirstLaunchPasswordSetup();
+            }
+        }
+        // Migrate staff PINs to hashed versions (offline-safe, no await needed)
+        const list = _getStaffList();
+        let changed = false;
+        list.forEach(s => {
+            if (s.pin && !s.pinHash) {
+                _hashPin(s.pin).then(h => { s.pinHash = h; });
+                changed = true;
+            }
+        });
+        if (changed) setTimeout(() => _saveStaffList(_getStaffList()), 500);
+        return;
+    }
+
+    // ── CLOUD MODE WITH DB CONFIGURED ────────────────────────────────────
     // Migrate localStorage hash → Supabase if not already there
     try {
         const cloudHash = await _supaGet('pharma_master_password_hash');
@@ -880,7 +933,7 @@ async function _migrateSecretsOnStartup() {
             StorageModule.set('sys_has_password', 'true');
         }
     } catch(e) {
-        // Offline — if we have a local hash that's fine, keep it
+        // Network error — if we have a local hash that's fine, keep it
         if (!StorageModule.get('sys_admin_pass_hash')) {
             _showFirstLaunchPasswordSetup();
         }
