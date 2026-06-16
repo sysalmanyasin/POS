@@ -137,12 +137,308 @@
     font-size: 13px; font-weight: 600;
   }
   .gate-status.error-text { color: #ffd2cc; }
+
+  /* ═══ CONNECTION BADGE (header) ═══ */
+  .pharma-conn-badge {
+    display: none;
+    align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 700; letter-spacing: .3px;
+    cursor: pointer; user-select: none;
+    border: 1px solid transparent;
+    transition: opacity .15s;
+  }
+  .pharma-conn-badge:hover { opacity: .8; }
+  .pcb-dot { width:8px;height:8px;border-radius:50%;flex-shrink:0; }
+  .pharma-conn-badge.offline   { background:rgba(234,179,8,.15);  border-color:rgba(234,179,8,.3);  color:#b45309; }
+  .pharma-conn-badge.offline   .pcb-dot { background:#f59e0b; }
+  .pharma-conn-badge.cloud     { background:rgba(16,185,129,.15); border-color:rgba(16,185,129,.3); color:#065f46; }
+  .pharma-conn-badge.cloud     .pcb-dot { background:#10b981; box-shadow:0 0 5px rgba(16,185,129,.6); }
+  .pharma-conn-badge.unconfigured { background:rgba(239,68,68,.12); border-color:rgba(239,68,68,.25); color:#991b1b; }
+  .pharma-conn-badge.unconfigured .pcb-dot { background:#ef4444; }
+  [data-theme="dark"] .pharma-conn-badge.offline   { color:#fcd34d; }
+  [data-theme="dark"] .pharma-conn-badge.cloud     { color:#6ee7b7; }
+  [data-theme="dark"] .pharma-conn-badge.unconfigured { color:#fca5a5; }
+
+  /* ═══ WELCOME SCREEN ═══ */
+  #welcome-screen {
+    position: fixed; inset: 0; z-index: 10001;
+    background: linear-gradient(135deg, #07374a 0%, #0a5068 55%, #126b88 100%);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 24px; gap: 32px;
+    transition: opacity .3s;
+  }
+  .ws-logo { font-size: 52px; line-height:1; }
+  .ws-title { color:#fff; font-size: 22px; font-weight:800; letter-spacing:.3px; text-align:center; }
+  .ws-sub   { color:rgba(255,255,255,.6); font-size:13px; margin-top:-20px; letter-spacing:.5px; text-transform:uppercase; font-weight:600; text-align:center; }
+  .ws-cards { display:flex; gap:20px; flex-wrap:wrap; justify-content:center; max-width:680px; width:100%; }
+  .ws-card {
+    flex:1; min-width:240px; max-width:300px;
+    background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.14);
+    border-radius:16px; padding:28px 24px;
+    display:flex; flex-direction:column; align-items:center;
+    gap:12px; text-align:center; cursor:pointer;
+    transition: background .2s, transform .15s, box-shadow .2s;
+  }
+  .ws-card:hover { background:rgba(255,255,255,.12); transform:translateY(-3px); box-shadow:0 12px 32px rgba(0,0,0,.3); }
+  .ws-card-icon { font-size:36px; }
+  .ws-card-title { color:#fff; font-size:17px; font-weight:800; }
+  .ws-card-desc { color:rgba(255,255,255,.65); font-size:12px; line-height:1.6; }
+  .ws-card-btn {
+    margin-top:8px; padding:10px 24px; border-radius:10px;
+    font-size:13px; font-weight:700; border:none; cursor:pointer;
+    transition:background .15s, transform .1s;
+  }
+  .ws-card-btn:active { transform:scale(.97); }
+  .ws-btn-offline { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.25); }
+  .ws-btn-offline:hover { background:rgba(255,255,255,.22); }
+  .ws-btn-cloud   { background:#0ea5e9; color:#fff; }
+  .ws-btn-cloud:hover { background:#0284c7; }
+  .ws-footer { color:rgba(255,255,255,.35); font-size:11px; text-align:center; }
+
+  /* ═══ SETUP SCREEN ═══ */
+  #setup-screen {
+    position: fixed; inset: 0; z-index: 10001;
+    background: linear-gradient(135deg, #07374a 0%, #0a5068 55%, #126b88 100%);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: flex-start;
+    padding: 40px 24px 32px; overflow-y: auto;
+    transition: opacity .3s;
+  }
+  .setup-inner { width:100%; max-width:560px; }
+  .setup-header { text-align:center; margin-bottom:24px; }
+  .setup-header-logo { font-size:40px; }
+  .setup-header-title { color:#fff; font-size:20px; font-weight:800; margin-top:8px; }
+  .setup-header-sub   { color:rgba(255,255,255,.6); font-size:12px; margin-top:4px; }
+  .setup-tabs { display:flex; gap:0; margin-bottom:20px; border-radius:10px; overflow:hidden; border:1px solid rgba(255,255,255,.15); }
+  .setup-tab {
+    flex:1; padding:10px; text-align:center;
+    color:rgba(255,255,255,.55); font-size:12px; font-weight:700;
+    background:rgba(255,255,255,.05); cursor:pointer; transition:background .15s;
+    border:none;
+  }
+  .setup-tab.active { background:rgba(255,255,255,.15); color:#fff; }
+  .setup-step { animation: fadeIn .2s; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+  .setup-card {
+    background:rgba(255,255,255,.08);
+    border:1px solid rgba(255,255,255,.13);
+    border-radius:14px; padding:24px;
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .setup-label { color:rgba(255,255,255,.85); font-size:12px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; margin-bottom:3px; }
+  .setup-input {
+    width:100%; box-sizing:border-box;
+    padding:11px 14px; border-radius:9px;
+    border:1px solid rgba(255,255,255,.18);
+    background:rgba(255,255,255,.07); color:#fff;
+    font-size:14px; outline:none;
+    transition:border-color .15s;
+  }
+  .setup-input:focus { border-color:rgba(255,255,255,.45); background:rgba(255,255,255,.1); }
+  .setup-input::placeholder { color:rgba(255,255,255,.3); }
+  .setup-btn-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .setup-btn {
+    padding:10px 20px; border-radius:9px; font-size:13px; font-weight:700;
+    border:none; cursor:pointer; transition:background .15s, transform .1s;
+  }
+  .setup-btn:active { transform:scale(.97); }
+  .setup-btn:disabled { opacity:.5; cursor:not-allowed; }
+  .setup-btn.primary   { background:#0ea5e9; color:#fff; }
+  .setup-btn.primary:hover:not(:disabled) { background:#0284c7; }
+  .setup-btn.secondary { background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.2); }
+  .setup-btn.secondary:hover { background:rgba(255,255,255,.18); }
+  .setup-btn.ghost     { background:transparent; color:rgba(255,255,255,.6); font-size:12px; padding:8px 12px; }
+  .setup-btn.ghost:hover { color:#fff; }
+  .setup-status { padding:10px 14px; border-radius:8px; font-size:13px; font-weight:600; display:none; }
+  .setup-status.testing    { display:block; background:rgba(255,255,255,.1); color:rgba(255,255,255,.8); }
+  .setup-status.success    { display:block; background:rgba(16,185,129,.2); color:#6ee7b7; border:1px solid rgba(16,185,129,.3); }
+  .setup-status.warning    { display:block; background:rgba(234,179,8,.15); color:#fcd34d; border:1px solid rgba(234,179,8,.25); }
+  .setup-status.error      { display:block; background:rgba(239,68,68,.15); color:#fca5a5; border:1px solid rgba(239,68,68,.25); }
+  .schema-accordion-btn {
+    width:100%; padding:11px 14px; border-radius:9px; text-align:left;
+    background:rgba(255,255,255,.07); color:rgba(255,255,255,.75);
+    border:1px solid rgba(255,255,255,.15); font-size:12px; font-weight:700;
+    cursor:pointer; transition:background .15s;
+  }
+  .schema-accordion-btn:hover { background:rgba(255,255,255,.12); }
+  .schema-body { margin-top:10px; }
+  .schema-sql-box {
+    width:100%; height:220px; box-sizing:border-box;
+    font-family:monospace; font-size:11px; line-height:1.5;
+    padding:12px; border-radius:8px;
+    background:rgba(0,0,0,.4); color:#a7f3d0;
+    border:1px solid rgba(255,255,255,.15);
+    resize:vertical; outline:none;
+  }
+  .setup-steps-hint { color:rgba(255,255,255,.5); font-size:11px; line-height:1.7; }
+  .setup-steps-hint ol { margin:6px 0 0 16px; padding:0; }
+  .setup-skip-link { color:rgba(255,255,255,.4); font-size:12px; text-decoration:underline; cursor:pointer; background:none; border:none; }
+  .setup-skip-link:hover { color:rgba(255,255,255,.7); }
+
+  /* ═══ SETTINGS CONNECTION CARD ═══ */
+  #dbConnectionCard { margin:0 0 20px; }
+  .conn-row {
+    display:flex; align-items:center; gap:12px;
+    padding:14px 16px; border-radius:10px; margin-bottom:4px;
+    flex-wrap:wrap;
+  }
+  .conn-dot { width:10px;height:10px;border-radius:50%;flex-shrink:0; }
+  .conn-dot.green  { background:#10b981; box-shadow:0 0 6px rgba(16,185,129,.5); }
+  .conn-dot.orange { background:#f59e0b; }
+  .conn-dot.grey   { background:#6b7280; }
+  .conn-connected   { background:rgba(16,185,129,.07); border:1px solid rgba(16,185,129,.2); }
+  .conn-offline     { background:rgba(234,179,8,.07); border:1px solid rgba(234,179,8,.2); }
+  .conn-unconfigured{ background:rgba(239,68,68,.06); border:1px solid rgba(239,68,68,.18); }
+  .conn-info { flex:1; min-width:140px; }
+  .conn-label { font-size:13px; font-weight:700; }
+  .conn-value { font-size:12px; opacity:.7; margin-top:2px; font-family:monospace; }
+  .conn-sub   { font-size:11px; opacity:.55; margin-top:1px; }
+  .conn-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .conn-btn {
+    padding:6px 14px; border-radius:7px; font-size:12px; font-weight:700;
+    cursor:pointer; border:none; transition:background .15s;
+  }
+  .conn-btn.primary { background:var(--teal,#0d9488); color:#fff; }
+  .conn-btn.primary:hover { background:#0f766e; }
+  .conn-btn.outline { background:transparent; border:1px solid currentColor; opacity:.75; }
+  .conn-btn.outline:hover { opacity:1; }
+  .conn-btn.danger  { background:transparent; border:1px solid rgba(239,68,68,.5); color:#ef4444; }
+  .conn-btn.danger:hover { background:rgba(239,68,68,.1); }
+  .sett-section-title { font-size:13px; font-weight:800; letter-spacing:.4px; text-transform:uppercase; opacity:.5; margin-bottom:10px; }
 </style>
 </head>
 
 <body>
 
 <!-- ── PIN GATE SPLASH ── -->
+
+<!-- ═══ WELCOME SCREEN — mode selection ═══ -->
+<div id="welcome-screen" style="display:none;">
+  <div class="ws-logo">⚕</div>
+  <div class="ws-title">Pharma POS</div>
+  <div class="ws-sub">Choose how you want to run your system</div>
+  <div class="ws-cards">
+    <div class="ws-card" onclick="chooseOfflineMode()">
+      <div class="ws-card-icon">💾</div>
+      <div class="ws-card-title">Offline Only</div>
+      <div class="ws-card-desc">
+        Works entirely on this device.<br>
+        No setup needed.<br>
+        No sync, full privacy.
+      </div>
+      <button class="ws-card-btn ws-btn-offline">Start Offline →</button>
+    </div>
+    <div class="ws-card" onclick="chooseCloudMode()">
+      <div class="ws-card-icon">☁️</div>
+      <div class="ws-card-title">Sync with Supabase</div>
+      <div class="ws-card-desc">
+        Connect your own Supabase project.<br>
+        Multi-device sync &amp; backup.<br>
+        You own your data completely.
+      </div>
+      <button class="ws-card-btn ws-btn-cloud">Connect Database →</button>
+    </div>
+  </div>
+  <div class="ws-footer">You can change this anytime from Settings → Database &amp; Email Connection</div>
+</div>
+
+<!-- ═══ SETUP SCREEN — credentials ═══ -->
+<div id="setup-screen">
+  <div class="setup-inner">
+    <div class="setup-header">
+      <div class="setup-header-logo">⚕</div>
+      <div class="setup-header-title">Database &amp; Email Setup</div>
+      <div class="setup-header-sub">Your credentials are saved locally — only you have access</div>
+    </div>
+    <div class="setup-tabs">
+      <button class="setup-tab active" data-step="supabase" onclick="showSetupStep('supabase')">1 · Supabase Database</button>
+      <button class="setup-tab" data-step="emailjs" onclick="showSetupStep('emailjs')">2 · EmailJS (optional)</button>
+    </div>
+
+    <!-- ── Step 1: Supabase ── -->
+    <div class="setup-step" id="setup-step-supabase">
+      <div class="setup-card">
+        <div>
+          <div class="setup-label">Supabase Project URL</div>
+          <input id="setup-supa-url" class="setup-input" type="url"
+            placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" spellcheck="false">
+        </div>
+        <div>
+          <div class="setup-label">Anon / Public Key</div>
+          <input id="setup-supa-key" class="setup-input" type="password"
+            placeholder="eyJhbGci…" autocomplete="off" spellcheck="false">
+        </div>
+
+        <div class="setup-btn-row">
+          <button id="setup-supa-test-btn" class="setup-btn primary" onclick="testSupabaseConnection()">Test Connection</button>
+          <button id="setup-supa-save-btn" class="setup-btn secondary" onclick="saveSupabaseAndContinue()" style="display:none;">Save &amp; Continue →</button>
+        </div>
+        <div id="setup-supa-status" class="setup-status"></div>
+
+        <!-- SQL Schema accordion -->
+        <button id="schema-accordion-btn" class="schema-accordion-btn" onclick="toggleSchemaAccordion()">
+          📋 View SQL Schema to run in Supabase ▼
+        </button>
+        <div id="schema-accordion-body" style="display:none;" class="schema-body">
+          <div class="setup-steps-hint">
+            <strong style="color:rgba(255,255,255,.8);">How to set up your Supabase project:</strong>
+            <ol>
+              <li>Go to <strong>supabase.com</strong> → create a free account</li>
+              <li>Click <strong>New project</strong> (takes ~2 min to initialize)</li>
+              <li>Go to <strong>Project Settings → API</strong></li>
+              <li>Copy <strong>Project URL</strong> and <strong>anon/public</strong> key above</li>
+              <li>Open <strong>SQL Editor</strong> (left sidebar), paste the SQL below, click <strong>Run</strong></li>
+            </ol>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
+            <button id="copy-schema-btn" class="setup-btn secondary" style="font-size:11px;padding:6px 14px;" onclick="copySchemaSQL()">📋 Copy SQL</button>
+          </div>
+          <textarea id="schema-sql-box" class="schema-sql-box" readonly></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Step 2: EmailJS ── -->
+    <div class="setup-step" id="setup-step-emailjs" style="display:none;">
+      <div class="setup-card">
+        <div class="setup-steps-hint" style="margin-bottom:4px;">
+          EmailJS lets you send password-reset emails from your own account.
+          Create a free account at <strong style="color:rgba(255,255,255,.8);">emailjs.com</strong>.
+        </div>
+        <div>
+          <div class="setup-label">Service ID</div>
+          <input id="setup-ejs-service" class="setup-input" type="text" placeholder="service_xxxxxxx" autocomplete="off">
+        </div>
+        <div>
+          <div class="setup-label">Template ID</div>
+          <input id="setup-ejs-template" class="setup-input" type="text" placeholder="template_xxxxxxx" autocomplete="off">
+        </div>
+        <div>
+          <div class="setup-label">Public Key</div>
+          <input id="setup-ejs-pubkey" class="setup-input" type="text" placeholder="xxxxxxxxxxxxxxx" autocomplete="off">
+        </div>
+        <div>
+          <div class="setup-label">Reset Email Address</div>
+          <input id="setup-ejs-email" class="setup-input" type="email" placeholder="you@example.com" autocomplete="off">
+        </div>
+        <div class="setup-btn-row">
+          <button id="setup-ejs-test-btn" class="setup-btn secondary" onclick="testEmailJS()">Send Test Email</button>
+          <button id="setup-ejs-save-btn" class="setup-btn primary" onclick="saveEmailJSAndFinish()" style="display:none;">Save &amp; Finish ✓</button>
+          <button class="setup-btn ghost" onclick="skipEmailJSAndFinish()">Skip for now →</button>
+        </div>
+        <div id="setup-ejs-status" class="setup-status"></div>
+      </div>
+      <div style="margin-top:12px;text-align:center;">
+        <button class="setup-skip-link" onclick="showSetupStep('supabase')">← Back to Supabase</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <div id="pin-gate">
   <div class="gate-logo">⚕</div>
   <div>
@@ -181,6 +477,7 @@
   <div class="hdr-sp"></div>
   <div class="hdr-actions">
     <button class="hdr-btn" onclick="openDataHub()" title="Data Hub (Ctrl+D)">📦 Data Hub</button>
+    <div id="pharma-conn-badge" class="pharma-conn-badge" style="display:none;"><span class="pcb-dot"></span><span>—</span></div>
     <span id="supabase-sync-badge" class="connecting" title="Device Telemetry Hub (click)" onclick="if(typeof DevicesModule!=='undefined')DevicesModule.openDeviceTelemetryHub()" style="cursor:pointer;" role="button" tabindex="0" onkeydown="if(event.key==='Enter'&&typeof DevicesModule!=='undefined')DevicesModule.openDeviceTelemetryHub()"><span class="dot"></span><span id="supabaseSyncLabel">Sync</span></span>
     <button class="hdr-btn" onclick="toggleSettingsDrawer()" title="Settings (F12)">⚙️ Settings <span class="hdr-f12-hint">F12</span></button>
     <button class="hdr-btn icon" id="hdrDarkModeBtn" onclick="toggleDarkMode()" title="Toggle Dark Mode">🌗</button>
@@ -566,6 +863,7 @@
 
       <!-- SETTINGS VIEW -->
 <div id="settingsView" class="view">
+      <div id="dbConnectionCard" class="sett-section"></div>
         <!-- Settings header -->
         <div class="sett-view-hdr">
           <div class="sett-view-title">⚙️ System Settings</div>
@@ -1801,6 +2099,8 @@
 <!--     AFTER config.js (needs _DEVICE_UUID). auditLog.js is also in sw.js  -->
 <!--     CORE_ASSETS so it caches correctly for offline use.                  -->
 <script src="js/auditLog.js?v=9"></script>
+<!-- 13. Setup screen + credential management -->
+<script src="js/setup.js"></script>
 <!-- Service Worker registration (Task 5) -->
 <script>
 // ============================================================================
