@@ -1191,6 +1191,60 @@
             </div>
           </div>
 
+          <!-- 11 · Dropbox Backup -->
+          <div class="sett-stack" data-stack-id="dropbox-backup" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#e0f2fe;color:#0369a1;">📦</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Dropbox Backup</div>
+                <div class="sett-stack-desc">Auto-backup every 10 min to your own Dropbox — no account needed from us</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <!-- Step 1: App Key -->
+              <div style="font-size:10px;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;">Step 1 — Your Dropbox App Key</div>
+              <div style="font-size:9px;color:#94a3b8;margin-bottom:8px;line-height:1.5;">
+                Get your free key at <strong>dropbox.com/developers</strong> → Create App → Scoped access → App folder.<br>
+                Add <code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:9px;">https://pos.duapharma.com</code> as a Redirect URI.
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">App Key</span>
+                <input type="text" class="sett-inp" id="dbxAppKeyInput" placeholder="e.g. abc123xyz456" autocomplete="off" maxlength="80">
+              </div>
+              <button class="sett-save" onclick="dropboxSaveAppKey()">Save App Key</button>
+              <!-- Step 2: Connect -->
+              <div style="font-size:10px;font-weight:700;color:#64748b;margin:12px 0 6px;text-transform:uppercase;letter-spacing:.5px;">Step 2 — Authorise</div>
+              <div class="sett-row" style="align-items:center;">
+                <span class="sett-lbl">Status</span>
+                <span id="dbxStatusBadge" class="dbx-status-badge dbx-off">⚪ Not connected</span>
+              </div>
+              <div style="font-size:9px;color:#94a3b8;margin-top:2px;margin-bottom:8px;">
+                Last upload: <span id="dbxLastUpload">—</span>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button id="dbxConnectBtn" class="sett-save" style="background:#0ea5e9;" onclick="dropboxConnect()">🔗 Connect Dropbox</button>
+                <button id="dbxDisconnectBtn" class="sett-save" style="background:#ef4444;display:none;" onclick="dropboxDisconnect()">Disconnect</button>
+              </div>
+              <!-- Step 3: Auto-backup toggle -->
+              <div style="font-size:10px;font-weight:700;color:#64748b;margin:14px 0 6px;text-transform:uppercase;letter-spacing:.5px;">Step 3 — Auto-Backup</div>
+              <div class="sett-row sett-row-sb">
+                <div>
+                  <span id="dbxAutoLabel" class="sett-lbl sett-lbl-auto">Auto-backup every 10 min</span>
+                  <div class="sett-hint">Full export uploaded silently in the background</div>
+                </div>
+                <button id="dbxAutoBtn" class="sett-toggle-btn sett-toggle-off" onclick="dropboxToggleAuto()" disabled>OFF</button>
+              </div>
+              <!-- Manual actions -->
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+                <button id="dbxBackupBtn" class="sett-save" style="background:#16a34a;" onclick="dropboxUploadBackup(false)" disabled>📤 Backup Now</button>
+                <button id="dbxRestoreBtn" class="sett-save" style="background:#7c3aed;" onclick="openDropboxRestoreModal()" disabled>📥 Restore from Dropbox</button>
+              </div>
+            </div>
+          </div>
+
           </div><!-- /sett-col 2 -->
         </div><!-- /sett-stacks-container -->
 
@@ -1421,10 +1475,52 @@
   <div class="sb-hint"><kbd>Ctrl+M</kbd> Manual</div>
   <div class="sb-sp"></div>
   <div id="f9StatusHint"></div>
+  <!-- Dropbox auto-backup status chip -->
+  <div id="sbDbxChip" class="sb-dbx-chip dbx-chip-off" onclick="dropboxToggleAuto()" title="Dropbox auto-backup (click to toggle)">
+    <span class="sb-dbx-icon">📦</span>DBX: <span id="sbDbxState">OFF</span>
+  </div>
   <div class="sb-hint" id="statusClock"></div>
 </div>
 
 </div><!-- /appRoot -->
+
+<!-- ════ DROPBOX RESTORE MODAL ════ -->
+<div id="dropboxRestoreModal" class="dbx-modal-overlay" onclick="if(event.target===this)closeDropboxRestoreModal()">
+  <div class="dbx-modal-box">
+    <div class="dbx-modal-header">
+      <span class="dbx-modal-title">📦 Restore from Dropbox</span>
+      <button class="dbx-modal-close" onclick="closeDropboxRestoreModal()">✕</button>
+    </div>
+    <div class="dbx-modal-body">
+      <div id="dbxRestoreList"><div class="dbx-list-msg">⟳ Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ SQL GENERATOR MODAL ════ -->
+<div id="sqlGenModal" class="dbx-modal-overlay" onclick="if(event.target===this)closeSQLGeneratorModal()">
+  <div class="dbx-modal-box" style="width:min(640px,96vw);">
+    <div class="dbx-modal-header">
+      <span class="dbx-modal-title">🗄️ Supabase Schema SQL</span>
+      <button class="dbx-modal-close" onclick="closeSQLGeneratorModal()">✕</button>
+    </div>
+    <div class="dbx-modal-body">
+      <div class="sql-gen-body">
+        <div class="sql-gen-note">
+          Paste this into your Supabase project → <strong>SQL Editor → Run</strong>.
+          Safe to re-run — all statements use <code>IF NOT EXISTS</code>.
+          Creates all 9 tables, indexes, RLS policies, and the
+          <code>deduct_inventory_atomic</code> function.
+        </div>
+        <textarea id="sqlGenText" class="sql-gen-ta" readonly spellcheck="false"></textarea>
+      </div>
+    </div>
+    <div class="sql-gen-footer">
+      <button id="sqlCopyBtn" class="sql-gen-btn sql-gen-btn-copy" onclick="copySQLToClipboard()">📋 Copy to Clipboard</button>
+      <button class="sql-gen-btn sql-gen-btn-close" onclick="closeSQLGeneratorModal()">Close</button>
+    </div>
+  </div>
+</div>
 
 <!-- ════ THERMAL RECEIPT PRINT WRAPPER ════ -->
 <div id="thermalReceiptPrintWrapper">
@@ -1726,6 +1822,30 @@
         <div class="dh-card-body">
           <div class="dh-card-title">Sync Diagnostics</div>
           <div class="dh-card-desc">Run connectivity, queue &amp; data integrity checks</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+      <div class="dh-card dh-card-cyan" onclick="dropboxUploadBackup(false);closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#ECFEFF;">📦</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Backup to Dropbox</div>
+          <div class="dh-card-desc">Upload full backup JSON to your Dropbox (requires App Key in Settings)</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+      <div class="dh-card dh-card-teal" onclick="openDropboxRestoreModal();closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#F0FDFA;">🔁</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Restore from Dropbox</div>
+          <div class="dh-card-desc">Browse and restore a backup file from your Dropbox app folder</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+      <div class="dh-card dh-card-blue" onclick="openSQLGeneratorModal();closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#EFF6FF;">🗄️</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Generate Supabase SQL</div>
+          <div class="dh-card-desc">Copy the complete schema SQL to set up your Supabase database</div>
         </div>
         <span class="dh-card-chevron">›</span>
       </div>
@@ -2101,6 +2221,10 @@
 <script src="js/auditLog.js?v=9"></script>
 <!-- 13. Setup screen + credential management -->
 <script src="js/setup.js"></script>
+<!-- 14. Dropbox backup integration -->
+<script src="js/dropbox.js"></script>
+<!-- 15. Supabase SQL generator -->
+<script src="js/sqlgen.js"></script>
 <!-- Service Worker registration (Task 5) -->
 <script>
 // ============================================================================
