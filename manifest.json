@@ -1,24 +1,136 @@
 {
-  "id": "/",
-  "scope": "/",
-  "start_url": "/?source=pwa",
+  "id": "pharmapos-byos-v25",
   "name": "Pharma POS",
   "short_name": "PharmaPos",
-  "description": "Offline-first pharmacy point of sale and inventory system.",
+  "description": "Offline-first pharmacy point-of-sale system. Bring your own Supabase database for cloud sync — your data, your server.",
+  "version": "25",
   "lang": "en",
   "dir": "ltr",
+
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui", "browser"],
+  "orientation": "landscape",
+
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
-  "display": "standalone",
-  "orientation": "landscape",
-  "categories": ["business", "productivity"],
+
+  "prefer_related_applications": false,
+  "related_applications": [],
+
+  "categories": ["business", "productivity", "medical"],
+
+  "launch_handler": {
+    "client_mode": ["navigate-existing", "auto"]
+  },
+
+  "handle_links": "preferred",
+
+  "edge_side_panel": {
+    "preferred_width": 480
+  },
+
   "icons": [
-    { "src": "icons/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable" },
-    { "src": "icons/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
   ],
+
   "shortcuts": [
-    { "name": "New Bill", "short_name": "Billing", "url": "/?view=billing&source=shortcut", "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }] },
-    { "name": "Held Bills", "short_name": "Held", "url": "/?view=held&source=shortcut", "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }] },
-    { "name": "Cloud Sync", "short_name": "Sync", "url": "/?view=sync&source=shortcut", "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }] }
-  ]
+    {
+      "name": "New Bill",
+      "short_name": "Billing",
+      "description": "Start a new billing session at the POS counter",
+      "url": "/?view=billing&source=shortcut",
+      "icons": [
+        { "src": "icons/shortcut-sync.png", "sizes": "96x96", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Held Bills",
+      "short_name": "Held",
+      "description": "View and resume parked (held) bills",
+      "url": "/?view=held&source=shortcut",
+      "icons": [
+        { "src": "icons/shortcut-sync.png", "sizes": "96x96", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Cloud Sync",
+      "short_name": "Sync",
+      "description": "Open the Cloud Sync Hub to force-sync or view device network",
+      "url": "/?view=sync&source=shortcut",
+      "icons": [
+        { "src": "icons/shortcut-sync.png", "sizes": "96x96", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Inventory",
+      "short_name": "Stock",
+      "description": "Check and manage medicine stock levels",
+      "url": "/?view=inventory&source=shortcut",
+      "icons": [
+        { "src": "icons/shortcut-sync.png", "sizes": "96x96", "type": "image/png" }
+      ]
+    }
+  ],
+
+  "protocol_handlers": [
+    {
+      "protocol": "web+pharmapos",
+      "url": "/?intent=%s"
+    }
+  ],
+
+  "file_handlers": [
+    {
+      "action": "/?import=csv",
+      "accept": {
+        "text/csv": [".csv"],
+        "application/vnd.ms-excel": [".csv", ".xls"]
+      },
+      "icons": [
+        { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ],
+      "launch_type": "single-client"
+    }
+  ],
+
+  "share_target": {
+    "action": "/?share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "files": [
+        {
+          "name": "file",
+          "accept": ["text/csv", "application/vnd.ms-excel"]
+        }
+      ]
+    }
+  }
 }

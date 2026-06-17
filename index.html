@@ -72,10 +72,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="PharmaPOS">
-<link rel="apple-touch-icon" href="icons/icon-192.svg">
-<link rel="icon" type="image/svg+xml" href="icons/icon-192.svg">
-<meta name="msapplication-TileColor" content="#008080">
-<meta name="msapplication-TileImage" content="icons/icon-192.svg">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+<meta name="msapplication-TileColor" content="#0f172a">
+<meta name="msapplication-TileImage" content="icons/icon-192.png">
 
 <!-- CSS -->
 <link rel="stylesheet" href="css/tokens.css">
@@ -1352,6 +1353,118 @@
             </div>
           </div>
 
+          <!-- 12 · Cloud Sync (Supabase) — always visible in BYOS model -->
+          <div class="sett-stack" data-stack-id="cloud-sync-supabase" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#ecfdf5;color:#059669;">☁️</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Cloud Sync (Supabase)</div>
+                <div class="sett-stack-desc">Your own Supabase project — multi-device sync and cloud backup</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <!-- Status row -->
+              <div id="settSupaConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
+                <span id="settSupaConnDot" class="conn-dot grey"></span>
+                <div class="conn-info">
+                  <div class="conn-label">Supabase Connection</div>
+                  <div id="settSupaConnSub" class="conn-sub">Not configured — enter your project URL and anon key below.</div>
+                </div>
+              </div>
+              <!-- Credentials -->
+              <div class="sett-row">
+                <span class="sett-lbl">Project URL</span>
+                <input type="text" class="sett-inp" id="settSupaUrl"
+                  placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Anon Key</span>
+                <input type="text" class="sett-inp" id="settSupaKey"
+                  placeholder="eyJ…" autocomplete="off" spellcheck="false">
+              </div>
+              <div id="settSupaStatus" style="font-size:12px;min-height:18px;margin:4px 0 8px;color:#64748b;"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="conn-btn primary" onclick="settingsTestSupabase()">🔌 Test Connection</button>
+                <button class="sett-save" style="margin:0;" onclick="settingsSaveSupabase()">Save</button>
+                <button class="conn-btn danger" onclick="settingsDisconnectSupabase()">Disconnect</button>
+              </div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;">
+                Get your URL and anon key from <strong>supabase.com</strong> → Project Settings → API.
+                Make sure you have run the schema SQL (available in the Cloud Sync Hub).
+              </div>
+              <div style="border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;">
+                <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">App Cache</div>
+                <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;line-height:1.5;">
+                  Force the service worker to re-download all app files fresh from the server.
+                  Use this if you deployed a new version and the app still shows old content.
+                </div>
+                <button class="conn-btn" onclick="refreshAppCache()"
+                  style="background:#7c3aed;color:#fff;border-color:#7c3aed;">
+                  🔄 Refresh App Cache
+                </button>
+                <div id="settRecacheStatus" style="font-size:11px;color:#7c3aed;margin-top:6px;min-height:14px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 13 · Email Recovery (EmailJS) — always visible in BYOS model -->
+          <div class="sett-stack" data-stack-id="email-recovery-emailjs" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#eff6ff;color:#2563eb;">📧</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Email Recovery (EmailJS)</div>
+                <div class="sett-stack-desc">Send password-reset emails from your own EmailJS account</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <!-- Status row -->
+              <div id="settEjsConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
+                <span id="settEjsConnDot" class="conn-dot grey"></span>
+                <div class="conn-info">
+                  <div class="conn-label">EmailJS</div>
+                  <div id="settEjsConnSub" class="conn-sub">Not configured — fill in your EmailJS credentials below.</div>
+                </div>
+              </div>
+              <!-- Credentials -->
+              <div class="sett-row">
+                <span class="sett-lbl">Service ID</span>
+                <input type="text" class="sett-inp" id="settEjsService"
+                  placeholder="e.g. service_xxxxxxx" autocomplete="off">
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Template ID</span>
+                <input type="text" class="sett-inp" id="settEjsTemplate"
+                  placeholder="e.g. template_xxxxxxx" autocomplete="off">
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Public Key</span>
+                <input type="text" class="sett-inp" id="settEjsPubkey"
+                  placeholder="e.g. XXXXXXXXXXXXXXXXXXXX" autocomplete="off">
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Recovery Email</span>
+                <input type="email" class="sett-inp" id="settEjsEmail"
+                  placeholder="e.g. admin@yourpharmacy.com" autocomplete="off">
+              </div>
+              <div id="settEjsStatus" style="font-size:12px;min-height:18px;margin:4px 0 8px;color:#64748b;"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="conn-btn primary" onclick="settingsTestEmailJS()">📨 Send Test Email</button>
+                <button class="sett-save" style="margin:0;" onclick="settingsSaveEmailJS()">Save</button>
+                <button class="conn-btn danger" onclick="settingsDisconnectEmailJS()">Disconnect</button>
+              </div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;">
+                Create a free account at <strong>emailjs.com</strong>. Used to send password-reset
+                OTPs from Settings → Security.
+              </div>
+            </div>
+          </div>
+
           </div><!-- /sett-col 2 -->
         </div><!-- /sett-stacks-container -->
 
@@ -2481,17 +2594,20 @@
 if ('serviceWorker' in navigator) {
   let _pendingSwWorker = null;
   let _swRefreshing    = false;
+  let _swReg           = null; // keep reference for sync registration
 
+  // ── Idle guard: only swap SW when no cart or sync is in flight ────
   function _tryApplySwUpdate() {
     if (!_pendingSwWorker) return;
     const syncBusy = (typeof _forceSyncRunning !== 'undefined' && _forceSyncRunning === true);
     const cartBusy = (typeof activeCartItems   !== 'undefined' && activeCartItems.length > 0);
     if (!syncBusy && !cartBusy) {
       _pendingSwWorker.postMessage({ type: 'SKIP_WAITING' });
-      _pendingSwWorker = null; // controllerchange fires → page will reload
+      _pendingSwWorker = null;
     }
   }
 
+  // ── Update toast ──────────────────────────────────────────────────
   function _showSwUpdateToast() {
     let el = document.getElementById('swUpdateToast');
     if (!el) {
@@ -2499,11 +2615,11 @@ if ('serviceWorker' in navigator) {
       el.id = 'swUpdateToast';
       el.setAttribute('role', 'status');
       el.style.cssText = [
-        'position:fixed', 'bottom:80px', 'left:50%', 'transform:translateX(-50%)',
-        'background:#1e293b', 'color:#fff', 'padding:10px 18px', 'border-radius:8px',
-        'font-size:13px', 'font-weight:700', 'z-index:99999',
-        'display:flex', 'align-items:center', 'gap:12px',
-        'box-shadow:0 4px 20px rgba(0,0,0,.4)', 'white-space:nowrap'
+        'position:fixed','bottom:80px','left:50%','transform:translateX(-50%)',
+        'background:#1e293b','color:#fff','padding:10px 18px','border-radius:8px',
+        'font-size:13px','font-weight:700','z-index:99999',
+        'display:flex','align-items:center','gap:12px',
+        'box-shadow:0 4px 20px rgba(0,0,0,.4)','white-space:nowrap'
       ].join(';');
       el.innerHTML =
         '<span>🔄 App update ready — will apply automatically when idle</span>' +
@@ -2529,17 +2645,82 @@ if ('serviceWorker' in navigator) {
   function _handlePendingWorker(worker) {
     _pendingSwWorker = worker;
     _tryApplySwUpdate();
-    // If still pending after the idle check the app is busy — show toast
     if (_pendingSwWorker) _showSwUpdateToast();
   }
 
+  // ── Register Background Sync so SW can flush queue on reconnect ───
+  function _registerBgSync() {
+    if (!_swReg || !('sync' in _swReg)) return;
+    _swReg.sync.register('pharma-sync-queue').catch(function() {});
+  }
+
+  // ── Register Periodic Background Sync (Chromium, needs permission) ─
+  function _registerPeriodicSync() {
+    if (!_swReg || !('periodicSync' in _swReg)) return;
+    navigator.permissions.query({ name: 'periodic-background-sync' })
+      .then(function(status) {
+        if (status.state === 'granted') {
+          _swReg.periodicSync.register('pharma-periodic-sync', {
+            minInterval: 5 * 60 * 1000  // ≥ 5 minutes
+          }).catch(function() {});
+        }
+      }).catch(function() {});
+  }
+
+  // ── Messages FROM the service worker ─────────────────────────────
+  navigator.serviceWorker.addEventListener('message', function(event) {
+    if (!event.data) return;
+    switch (event.data.type) {
+
+      case 'BG_SYNC_READY':
+        // SW fired background-sync — trigger forceSyncNow if app is open
+        if (typeof forceSyncNow === 'function') {
+          forceSyncNow().catch(function() {});
+        }
+        break;
+
+      case 'PERIODIC_SYNC_TICK':
+        // Periodic sync heartbeat — pull cloud updates silently
+        if (typeof StorageModule !== 'undefined' &&
+            typeof StorageModule.syncFromCloudEngine === 'function' &&
+            typeof _isSupabaseConfigured === 'function' &&
+            _isSupabaseConfigured()) {
+          StorageModule.syncFromCloudEngine().catch(function() {});
+        }
+        break;
+
+      case 'RECACHE_DONE':
+        if (typeof showToast === 'function') showToast('🔄 App files refreshed. Reload to apply.');
+        break;
+
+      case 'CACHE_STATUS_REPLY':
+        console.log('[PWA] Cache status:', event.data.caches);
+        break;
+    }
+  });
+
+  // ── BroadcastChannel: SW → all open tabs ─────────────────────────
+  try {
+    const _swChannel = new BroadcastChannel('pharmapos-sw');
+    _swChannel.addEventListener('message', function(event) {
+      if (!event.data) return;
+      if (event.data.type === 'SW_ACTIVATED') {
+        console.log('[PWA] SW activated, version:', event.data.version);
+      }
+    });
+  } catch (_) {}
+
+  // ── Register SW and wire up update / sync lifecycle ───────────────
   navigator.serviceWorker
     .register('sw.js')
     .then(function(reg) {
-      console.log('[PWA] Service worker registered');
-      // Handle a worker that was already waiting when the page loaded
+      _swReg = reg;
+      console.log('[PWA] Service worker registered (scope:', reg.scope, ')');
+
+      // Apply any update that was already waiting before this page loaded
       if (reg.waiting) _handlePendingWorker(reg.waiting);
 
+      // Watch for new SW versions installing
       reg.addEventListener('updatefound', function() {
         const newWorker = reg.installing;
         if (!newWorker) return;
@@ -2549,10 +2730,13 @@ if ('serviceWorker' in navigator) {
           }
         });
       });
+
+      // Register background sync + periodic sync capabilities
+      _registerPeriodicSync();
     })
     .catch(function(err) { console.warn('[PWA] SW registration failed:', err); });
 
-  // Reload once the newly-activated SW takes control so latest assets load
+  // ── Reload after SW swap so all new cached assets take effect ─────
   navigator.serviceWorker.addEventListener('controllerchange', function() {
     if (_swRefreshing) return;
     _swRefreshing = true;
@@ -2560,8 +2744,11 @@ if ('serviceWorker' in navigator) {
     window.location.reload();
   });
 
-  // Poll every 5 s — auto-applies any deferred update the moment app is idle
+  // ── Auto-apply idle-deferred update every 5 s ────────────────────
   setInterval(_tryApplySwUpdate, 5000);
+
+  // ── Register background sync whenever we come back online ─────────
+  window.addEventListener('online', _registerBgSync);
 }
 </script>
 <!-- ── PIN GATE LOGIC ── -->
