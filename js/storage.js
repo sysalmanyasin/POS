@@ -731,7 +731,8 @@ const StorageModule = (() => {
         'pharma_bill_save_pin', 'pharma_clock_offset', 'pharma_low_stock_threshold',
         'pharma_show_zero_stock', 'pharma_default_payment', 'pharma_auto_round_off',
         'pharma_partial_refund_reason', 'pharma_receipt_footer',
-        'pharma_require_customer_name', 'pharma_require_customer_phone'
+        'pharma_require_customer_name', 'pharma_require_customer_phone',
+        'pharma_timezone', 'pharma_locale'
     ];
 
     function _mergeInvoices(localArr, cloudArr) {

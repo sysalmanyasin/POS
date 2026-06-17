@@ -339,8 +339,27 @@ function _dbxUpdateUI() {
     const autoOn    = _dbxAutoOn();
     const lastUpTs  = localStorage.getItem(_DBX_KEY_LAST_UP);
 
-    // Settings panel
-    const badge      = document.getElementById('dbxStatusBadge');
+    // ── New conn-dot status row (2A Card 3) ──────────────────────────────
+    const dbxConnRow = document.getElementById('dbxConnRow');
+    const dbxConnDot = document.getElementById('dbxConnDot');
+    const dbxConnSub = document.getElementById('dbxConnSub');
+    if (dbxConnRow && dbxConnDot) {
+        if (connected) {
+            dbxConnRow.className = 'conn-row conn-connected';
+            dbxConnDot.className = 'conn-dot green';
+            if (dbxConnSub) {
+                const autoStr = autoOn ? ' · Auto-backup ON' : ' · Auto-backup OFF';
+                dbxConnSub.textContent = '🟢 Connected' + autoStr;
+            }
+        } else {
+            dbxConnRow.className = 'conn-row conn-offline';
+            dbxConnDot.className = 'conn-dot grey';
+            if (dbxConnSub) dbxConnSub.textContent = 'Not connected — save your App Key and authorise below.';
+        }
+    }
+
+    // Settings panel legacy badge (may not exist after HTML update, safe no-op)
+    const badge = document.getElementById('dbxStatusBadge');
     const connectBtn = document.getElementById('dbxConnectBtn');
     const disconnBtn = document.getElementById('dbxDisconnectBtn');
     const autoBtn    = document.getElementById('dbxAutoBtn');
@@ -367,6 +386,11 @@ function _dbxUpdateUI() {
             lastUpEl.textContent = '—';
         }
     }
+    // Backup/restore action buttons
+    const backupBtn  = document.getElementById('dbxBackupBtn');
+    const restoreBtn = document.getElementById('dbxRestoreBtn');
+    if (backupBtn)  { backupBtn.disabled  = !connected; backupBtn.style.opacity  = connected ? '1' : '.45'; }
+    if (restoreBtn) { restoreBtn.disabled = !connected; restoreBtn.style.opacity = connected ? '1' : '.45'; }
 
     // Status bar chip
     const sbChip  = document.getElementById('sbDbxChip');

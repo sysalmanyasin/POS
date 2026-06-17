@@ -19,6 +19,8 @@ function loadBranchIdentity() {
     if (brEl) brEl.textContent = receiptTitle;
     const appTitle = bi.businessName || bi.branchName || 'Pharma POS';
     const titleEl = document.getElementById('hdrAppTitle'); if (titleEl) titleEl.textContent = appTitle;
+    const gateTitle = document.getElementById('gate-title-text');
+    if (gateTitle) gateTitle.textContent = appTitle || 'Pharma POS';
     document.title = appTitle + ' — POS';
     const sub = document.getElementById('hdrSubtitle');
     if (sub) sub.textContent = bi.branchName + '  ·  ' + bi.counterId + '  ·  ' + bi.operatorName;
@@ -29,6 +31,10 @@ function _doSaveBranchIdentity() {
     const counterId    = (document.getElementById('settingCounterId').value     || '').trim() || BRANCH_DEFAULTS.counterId;
     const operatorName = (document.getElementById('settingOperatorName').value  || '').trim() || BRANCH_DEFAULTS.operatorName;
     const receiptHeader = (document.getElementById('settingReceiptHeader') ? (document.getElementById('settingReceiptHeader').value || '').trim() : '');
+    const timezone = (document.getElementById('settingTimezone')?.value || '').trim() || 'Asia/Karachi';
+    const locale   = (document.getElementById('settingLocale')?.value   || '').trim() || 'en-PK';
+    localStorage.setItem('pharma_timezone', timezone);
+    localStorage.setItem('pharma_locale',   locale);
     StorageModule.set('pharma_branch_identity', JSON.stringify({ businessName, branchName, counterId, operatorName, receiptHeader }));
     if (StorageModule.get('_supabase_sync_on') === 'true') { try { StorageModule.pushLocalToCloudEngine().catch(() => {}); } catch(e) {} }
     loadBranchIdentity(); showToast('✅ Identity settings saved.');
@@ -43,6 +49,11 @@ function _loadSettingsForm() {
     document.getElementById('settingCounterId').value    = bi.counterId;
     document.getElementById('settingOperatorName').value = bi.operatorName;
     const settRH = document.getElementById('settingReceiptHeader'); if (settRH) settRH.value = bi.receiptHeader || '';
+    _populateTimezoneDropdown();
+    const tzEl  = document.getElementById('settingTimezone');
+    const locEl = document.getElementById('settingLocale');
+    if (tzEl)  tzEl.value  = localStorage.getItem('pharma_timezone') || 'Asia/Karachi';
+    if (locEl) locEl.value = localStorage.getItem('pharma_locale')   || 'en-PK';
     _syncAutoBackupBtn();
     const st = document.getElementById('backupStatus'); if (st) st.textContent = '';
     try {
@@ -64,9 +75,9 @@ function _loadSettingsForm() {
     presets.forEach((v, i) => { document.getElementById('discPreset' + i).value = v; });
     _syncOverstockSettingBtn(); _syncDarkModeBtn(); _syncPaperModeBtn(); _syncThermalSettingsForm(); _syncRequireStaffPinBtn();
     renderStaffListSettings(); _attachReceiptPreviewListeners(); _renderReceiptPreview();
-    // Check local flags first; sys_has_password is set by _persistPassword even after
-    // sys_admin_pass_hash is wiped to Supabase during startup migration
-    const hasPass = !!(
+    // A password always exists — default 12345678 until explicitly changed.
+    // Always show the current-password field; hint the default when not yet set.
+    const usingDefault = !(
         StorageModule.get('sys_has_password') === 'true' ||
         StorageModule.get('sys_admin_pass_hash') ||
         StorageModule.get('sys_admin_pass')
@@ -76,12 +87,19 @@ function _loadSettingsForm() {
     const confirmPassEl      = document.getElementById('confirmNewPassInput');
     const secTitle           = document.getElementById('securitySectionTitle');
     const updateBtn          = document.getElementById('updatePassBtn');
-    // Show the current-password input only when a password is already set
-    if (currentAdminPassEl) currentAdminPassEl.style.display = hasPass ? '' : 'none';
-    if (oldPassInput)       oldPassInput.style.display       = 'none'; // superseded by currentAdminPasswordInput
-    if (confirmPassEl)      confirmPassEl.style.display      = '';     // always visible
-    if (secTitle)  secTitle.textContent  = hasPass ? 'Security — Change Admin Password' : 'Security — Set Admin Password';
-    if (updateBtn) updateBtn.textContent = hasPass ? 'Update Password' : 'Set Password';
+    if (currentAdminPassEl) {
+        currentAdminPassEl.style.display = '';
+        currentAdminPassEl.placeholder = usingDefault
+            ? 'Current password (default: 12345678)'
+            : 'Current admin password';
+    }
+    if (oldPassInput)  oldPassInput.style.display  = 'none'; // superseded by currentAdminPasswordInput
+    if (confirmPassEl) confirmPassEl.style.display  = '';     // always visible
+    if (secTitle)  secTitle.textContent  = 'Security — Change Admin Password';
+    if (updateBtn) updateBtn.textContent = 'Update Password';
+    // Show/hide default password warning banner
+    const defBanner = document.getElementById('defaultPasswordBanner');
+    if (defBanner) defBanner.style.display = usingDefault ? '' : 'none';
 }
 
 // ── Toggle Settings Drawer ───────────────────────────────────────────────
@@ -118,8 +136,8 @@ function _applyReceiptInfo() {
         const addrEl   = document.getElementById('printReceiptAddress');
         const phoneEl  = document.getElementById('printReceiptPhone');
         const footerEl = document.getElementById('printReceiptFooter');
-        if (addrEl)   addrEl.textContent  = ri.address || 'Community Pharmacy Retail Operations';
-        if (phoneEl)  phoneEl.textContent = ri.phone   || 'Lahore, Pakistan';
+        if (addrEl)   addrEl.textContent  = ri.address || '';
+        if (phoneEl)  phoneEl.textContent = ri.phone   || '';
         if (footerEl) { footerEl.innerHTML = _escHtml(ri.footer || '*** THANK YOU FOR YOUR VISIT ***') + '<br>Medicines once sold will not be exchanged<br>or returned without a valid digital token.'; }
     } catch(e) {}
 }
@@ -1828,12 +1846,14 @@ function _mrRenderStep1() {
         ? (StorageModule.get('pharma_device_role') || 'client') : 'client';
     const deviceName  = (typeof StorageModule !== 'undefined')
         ? (StorageModule.get('pharma_device_name') || 'This Device') : 'This Device';
+    // 2B fix: read email at call time
+    const _resetEmail = localStorage.getItem('pharma_emailjs_reset_email') || '(not configured)';
 
     body.innerHTML = `
 <div class="mr-step-title">Step 1 / 2 — Verify Identity</div>
 <div class="mr-info">
   <b>This device:</b> ${_escHtml(deviceName)} &nbsp;·&nbsp; Role: <b>${currentRole.toUpperCase()}</b><br><br>
-  An 8-digit OTP will be sent to <b>${_escHtml(RESET_EMAIL_ADDRESS)}</b>.<br>
+  An 8-digit OTP will be sent to <b>${_escHtml(_resetEmail)}</b>.<br>
   After verification, this device will be promoted to <b>Master</b> and all other
   devices will be automatically demoted to Client.
 </div>
@@ -1851,6 +1871,17 @@ async function _mrSendOtp() {
     const status = document.getElementById('mrStatus');
     if (typeof emailjs === 'undefined') {
         status.textContent = '❌ EmailJS not loaded.'; status.style.color = '#dc2626'; return;
+    }
+    // 2B fix: read EmailJS config at call time (not module-load constants)
+    const _ejsCfg = (typeof _getEmailJSConfig === 'function') ? _getEmailJSConfig() : {
+        serviceId:  localStorage.getItem('pharma_emailjs_service_id')  || '',
+        templateId: localStorage.getItem('pharma_emailjs_template_id') || '',
+        publicKey:  localStorage.getItem('pharma_emailjs_public_key')  || '',
+        resetEmail: localStorage.getItem('pharma_emailjs_reset_email') || ''
+    };
+    if (!_ejsCfg.resetEmail) {
+        status.textContent = '❌ Email address not configured. Set up EmailJS in Settings → Email Recovery.';
+        status.style.color = '#dc2626'; return;
     }
     if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
     status.style.color = '#64748b'; status.textContent = 'Generating OTP…';
@@ -1870,13 +1901,13 @@ async function _mrSendOtp() {
 
     const bi = (typeof _getBranchIdentity === 'function') ? _getBranchIdentity() : {};
     try {
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-            to_email:   RESET_EMAIL_ADDRESS,
+        await emailjs.send(_ejsCfg.serviceId, _ejsCfg.templateId, {
+            to_email:   _ejsCfg.resetEmail,
             reset_pin:  otp,
             shop_name:  (bi.businessName || bi.branchName || 'Pharma POS') + ' — 👑 MASTER RECLAIM',
             counter_id: (typeof StorageModule !== 'undefined' ? StorageModule.get('pharma_device_name') : '') || '',
             expires_in: '10 minutes'
-        }, EMAILJS_PUBLIC_KEY);
+        }, _ejsCfg.publicKey);
         status.textContent = '✅ OTP sent. Check your inbox.'; status.style.color = '#059669';
         setTimeout(_mrRenderStep2, 800);
     } catch (err) {
@@ -1891,9 +1922,11 @@ function _mrRenderStep2() {
     _mrOtpEntered = '';
     const body = document.getElementById('mrBody');
     if (!body) return;
+    // 2B fix: read email at call time
+    const _resetEmail = localStorage.getItem('pharma_emailjs_reset_email') || '(not configured)';
     body.innerHTML = `
 <div class="mr-step-title">Step 2 / 2 — Enter OTP</div>
-<div class="mr-info">Enter the 8-digit code sent to <b>${_escHtml(RESET_EMAIL_ADDRESS)}</b>.</div>
+<div class="mr-info">Enter the 8-digit code sent to <b>${_escHtml(_resetEmail)}</b>.</div>
 <div class="mr-dots" id="mrOtpDots">
   ${[0,1,2,3,4,5,6,7].map(i => `<div class="mr-dot" id="mrDot${i}"></div>`).join('')}
 </div>
@@ -2427,3 +2460,38 @@ window._mrOtpClear  = _mrOtpClear;
     };
 
 })();
+
+// ── Task 4B: Timezone dropdown populator ─────────────────────────────────
+function _populateTimezoneDropdown() {
+    const el = document.getElementById('settingTimezone');
+    if (!el || el.options.length > 1) return; // already populated
+    try {
+        const zones = Intl.supportedValuesOf('timeZone');
+        const saved = localStorage.getItem('pharma_timezone') || 'Asia/Karachi';
+        zones.forEach(function(tz) {
+            const opt = document.createElement('option');
+            opt.value = tz;
+            opt.textContent = tz.replace(/_/g, ' ');
+            opt.selected = (tz === saved);
+            el.appendChild(opt);
+        });
+    } catch(e) {
+        // Fallback: common zones if Intl.supportedValuesOf not available
+        var common = [
+            'UTC','Africa/Cairo','Africa/Lagos','Africa/Nairobi','America/Chicago',
+            'America/Los_Angeles','America/New_York','America/Sao_Paulo','Asia/Baghdad',
+            'Asia/Bangkok','Asia/Colombo','Asia/Dubai','Asia/Jakarta','Asia/Karachi',
+            'Asia/Kathmandu','Asia/Kolkata','Asia/Riyadh','Asia/Singapore','Asia/Tehran',
+            'Asia/Tokyo','Australia/Sydney','Europe/Berlin','Europe/Istanbul','Europe/London',
+            'Europe/Moscow','Europe/Paris','Pacific/Auckland'
+        ];
+        var saved2 = localStorage.getItem('pharma_timezone') || 'Asia/Karachi';
+        common.forEach(function(tz) {
+            var opt = document.createElement('option');
+            opt.value = tz;
+            opt.textContent = tz.replace(/_/g, ' ');
+            opt.selected = (tz === saved2);
+            el.appendChild(opt);
+        });
+    }
+}

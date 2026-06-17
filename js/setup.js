@@ -266,6 +266,77 @@ END $$;
     if (el) { el.style.opacity = '0'; setTimeout(() => el.style.display = 'none', 300); }
   }
 
+  // ── Quick Setup Card (first-time users) ──────────────────────────────────
+  function _showQuickSetupCard() {
+    var el = document.getElementById('welcome-screen');
+    if (!el) { hideWelcomeScreen(); return; }
+    el.innerHTML = [
+      '<div style="text-align:center;margin-bottom:8px;">',
+        '<div style="font-size:48px;line-height:1;">🏥</div>',
+        '<div style="color:#fff;font-size:22px;font-weight:800;margin-top:10px;">Set up your pharmacy</div>',
+        '<div style="color:rgba(255,255,255,.6);font-size:13px;margin-top:6px;">Takes 30 seconds. You can always change this in Settings.</div>',
+      '</div>',
+      '<div style="width:100%;max-width:400px;display:flex;flex-direction:column;gap:12px;margin-top:8px;">',
+        '<input id="qs-biz-name" class="setup-input" type="text"',
+          ' placeholder="Pharmacy name — e.g. City Medical Store"',
+          ' maxlength="60" autocomplete="off"',
+          ' style="padding:12px 14px;border-radius:8px;border:none;font-size:15px;outline:none;">',
+        '<input id="qs-city" class="setup-input" type="text"',
+          ' placeholder="City / address — e.g. Nairobi, Kenya"',
+          ' maxlength="80" autocomplete="off"',
+          ' style="padding:12px 14px;border-radius:8px;border:none;font-size:15px;outline:none;">',
+        '<input id="qs-phone" class="setup-input" type="tel"',
+          ' placeholder="Phone number (for receipts)"',
+          ' maxlength="30" autocomplete="off"',
+          ' style="padding:12px 14px;border-radius:8px;border:none;font-size:15px;outline:none;">',
+        '<button onclick="window._saveQuickSetup()"',
+          ' style="padding:14px;background:#10b981;color:#fff;border:none;border-radius:8px;',
+          'font-size:15px;font-weight:700;cursor:pointer;margin-top:4px;">',
+          'Save &amp; Start →',
+        '</button>',
+        '<button onclick="(function(){var e=document.getElementById('welcome-screen');if(e){e.style.opacity='0';setTimeout(function(){e.style.display='none';},300);}})()"',
+          ' style="padding:12px;background:transparent;color:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.2);',
+          'border-radius:8px;font-size:13px;cursor:pointer;">',
+          'Skip for now',
+        '</button>',
+      '</div>'
+    ].join('');
+  }
+
+  window._saveQuickSetup = function() {
+    var name  = ((document.getElementById('qs-biz-name') || {}).value || '').trim();
+    var city  = ((document.getElementById('qs-city')     || {}).value || '').trim();
+    var phone = ((document.getElementById('qs-phone')    || {}).value || '').trim();
+
+    var bi = {
+        businessName:  name || 'My Pharmacy',
+        branchName:    'Main Branch',
+        counterId:     'C-01',
+        operatorName:  'Operator',
+        receiptHeader: ''
+    };
+    localStorage.setItem('pharma_branch_identity', JSON.stringify(bi));
+
+    if (city || phone) {
+        var ri = { address: city, phone: phone, footer: '' };
+        try {
+            if (typeof StorageModule !== 'undefined') {
+                StorageModule.set('pharma_receipt_info', JSON.stringify(ri));
+            } else {
+                localStorage.setItem('pharma_receipt_info', JSON.stringify(ri));
+            }
+        } catch(e) {}
+    }
+
+    // Apply to UI immediately
+    if (typeof loadBranchIdentity === 'function') loadBranchIdentity();
+
+    var el = document.getElementById('welcome-screen');
+    if (el) { el.style.opacity = '0'; setTimeout(function() { el.style.display = 'none'; }, 300); }
+    if (typeof showToast === 'function')
+        showToast('✅ Welcome to ' + (name || 'your pharmacy') + '!');
+  };
+
   // ── Setup screen ──────────────────────────────────────────────────────────
   function showSetupScreen(step) {
     const el = document.getElementById('setup-screen');
@@ -291,12 +362,70 @@ END $$;
   // ── Choose mode ───────────────────────────────────────────────────────────
   window.chooseOfflineMode = function() {
     setMode('offline');
-    hideWelcomeScreen();
     updateConnectionBadge();
+    // Check if business name already set (returning user)
+    var bi = (function() {
+        try { return JSON.parse(localStorage.getItem('pharma_branch_identity') || '{}'); } catch(e) { return {}; }
+    })();
+    if (!bi.businessName && !bi.branchName) {
+        _showQuickSetupCard();
+    } else {
+        hideWelcomeScreen();
+    }
   };
 
   window.chooseCloudMode = function() {
     hideWelcomeScreen();
+    showSetupScreen('supabase');
+  };
+
+  window.chooseShareLinkMode = function() {
+    hideWelcomeScreen();
+    _showPasteLinkModal();
+  };
+
+  function _showPasteLinkModal() {
+    let modal = document.getElementById('_pasteLinkModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = '_pasteLinkModal';
+      modal.innerHTML = `
+<div style="position:fixed;inset:0;background:rgba(15,23,42,.9);z-index:9990;display:flex;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:#fff;width:100%;max-width:480px;border-radius:12px;padding:28px;box-shadow:0 25px 50px rgba(0,0,0,.3);">
+    <div style="font-size:18px;font-weight:900;color:#1e293b;margin-bottom:6px;">📎 Paste Setup Link</div>
+    <div style="font-size:13px;color:#6b7280;margin-bottom:16px;">Paste the share link you received from the master device. It will automatically configure your database connection.</div>
+    <textarea id="_pasteLinkInput" placeholder="Paste link here… (starts with https://)" rows="4"
+      style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;resize:vertical;font-family:monospace;"></textarea>
+    <div style="margin-top:6px;font-size:11px;color:#9ca3af;">Your credentials are embedded in this link — treat it like a password.</div>
+    <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+      <button onclick="document.getElementById('_pasteLinkModal').remove();showWelcomeScreen();"
+        style="padding:10px 18px;background:#e5e7eb;color:#374151;border:none;border-radius:6px;font-weight:700;cursor:pointer;">Cancel</button>
+      <button onclick="_applyPastedLink()"
+        style="padding:10px 20px;background:#059669;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;">Apply Link →</button>
+    </div>
+    <div id="_pasteLinkStatus" style="margin-top:10px;font-size:12px;min-height:18px;"></div>
+  </div>
+</div>`;
+      document.body.appendChild(modal);
+    }
+    modal.style.display = '';
+  }
+
+  window._applyPastedLink = function() {
+    const raw = (document.getElementById('_pasteLinkInput').value || '').trim();
+    const statusEl = document.getElementById('_pasteLinkStatus');
+    const hashIdx = raw.indexOf('#byos?');
+    if (hashIdx === -1) {
+      statusEl.textContent = '⚠️ This doesn\'t look like a valid setup link (no #byos? found).';
+      statusEl.style.color = '#dc2626';
+      return;
+    }
+    // Extract just the hash part and apply it
+    const hash = raw.slice(hashIdx + 1); // everything after #
+    location.hash = hash;
+    document.getElementById('_pasteLinkModal').remove();
+    // _parseShareHash will run automatically on hash change or force it
+    if (typeof _parseShareHash === 'function') _parseShareHash();
     showSetupScreen('supabase');
   };
 
@@ -340,8 +469,9 @@ END $$;
         statusEl.textContent = '❌ Invalid Anon Key. Check your key from Supabase → Project Settings → API.';
       } else if (r.status === 404) {
         statusEl.className = 'setup-status warning';
-        statusEl.textContent = '⚠️ Reached Supabase but pharma_sync table not found yet. Run the SQL schema first, then retry.';
-        document.getElementById('setup-supa-save-btn').style.display = 'inline-block';
+        statusEl.textContent = '⚠️ Schema not found. Paste and run the SQL below in Supabase → SQL Editor, then click Test again.';
+        // Do NOT show save button — block until schema exists
+        if (typeof toggleSchemaAccordion === 'function') toggleSchemaAccordion(); // auto-expand SQL
       } else {
         statusEl.className = 'setup-status error';
         statusEl.textContent = '❌ Error ' + r.status + '. Check your URL and key.';
@@ -355,13 +485,32 @@ END $$;
     btn.textContent = 'Test Connection';
   };
 
-  window.saveSupabaseAndContinue = function() {
+  window.saveSupabaseAndContinue = async function() {
     const url = (document.getElementById('setup-supa-url').value || '').trim().replace(/\/$/, '');
     const key = (document.getElementById('setup-supa-key').value || '').trim();
     if (!url || !key) return;
     localStorage.setItem('pharma_supa_url', url);
     localStorage.setItem('pharma_supa_key', key);
     setMode('cloud');
+
+    // ── 3C: Push current (or default) password hash to Supabase immediately ──
+    // This ensures Device 2 can sync the password without triggering master setup.
+    try {
+        const localHash = StorageModule ? StorageModule.get('sys_admin_pass_hash') : null;
+        if (localHash) {
+            await _supaSet('pharma_master_password_hash', localHash);
+        } else {
+            // No custom password set yet — push the hash of the default 12345678
+            if (typeof _hashPassword === 'function') {
+                const defaultHash = await _hashPassword('12345678');
+                await _supaSet('pharma_master_password_hash', defaultHash);
+            }
+        }
+    } catch(e) {
+        console.warn('[Setup] Could not push password hash to Supabase:', e.message);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     showSetupStep('emailjs');
   };
 
@@ -421,10 +570,24 @@ END $$;
   window.skipEmailJSAndFinish = function() { finishSetup(); };
 
   function finishSetup() {
-    hideSetupScreen();
+    // Show a brief "all done" screen before reloading
+    const inner = document.querySelector('.setup-inner');
+    if (inner) {
+        inner.innerHTML = `
+            <div style="text-align:center;padding:60px 20px;color:#fff;">
+                <div style="font-size:56px;margin-bottom:18px;">✅</div>
+                <div style="font-size:22px;font-weight:800;margin-bottom:10px;color:#10b981;">You're all set!</div>
+                <div style="font-size:14px;opacity:.75;margin-bottom:20px;line-height:1.7;">
+                    Your Supabase database is connected.<br>
+                    Loading your system…
+                </div>
+                <div style="font-size:12px;opacity:.5;">
+                    Default password: <strong>12345678</strong> — change it in Settings → Security
+                </div>
+            </div>`;
+    }
     updateConnectionBadge();
-    // Reload so config.js picks up the new credentials
-    setTimeout(function() { location.reload(); }, 400);
+    setTimeout(function() { location.reload(); }, 2200);
   }
 
   // ── Share Setup Link ──────────────────────────────────────────────────────
@@ -604,6 +767,41 @@ END $$;
     location.reload();
   };
 
+  // ── Factory Reset — wipes all local data, credentials, and passwords ───────
+  // Supabase cloud data is NOT affected. Only this device is reset.
+  window.factoryReset = async function() {
+    if (!confirm('⚠️ FACTORY RESET\n\nThis will permanently delete from THIS DEVICE:\n• All invoices and inventory\n• All settings and passwords\n• All cloud credentials\n\nYour Supabase cloud data is NOT deleted.\nThis cannot be undone. Continue?')) return;
+    const typed = prompt('Type RESET to confirm:');
+    if ((typed || '').trim() !== 'RESET') {
+      if (typeof showToast === 'function') showToast('Factory reset cancelled.', 2500);
+      return;
+    }
+
+    // 1. Clear IDB data via StorageModule helpers
+    try {
+      if (typeof StorageModule !== 'undefined') {
+        if (typeof StorageModule.clearAllPrimaryStores === 'function') StorageModule.clearAllPrimaryStores();
+        if (typeof StorageModule.clearAllQueues       === 'function') StorageModule.clearAllQueues();
+      }
+    } catch(e) { console.warn('[FactoryReset] StorageModule clear error:', e); }
+
+    // 2. Delete IDB databases entirely for a clean slate
+    try { indexedDB.deleteDatabase('PharmaDataDB'); }      catch(e) {}
+    try { indexedDB.deleteDatabase('PharmaInventoryDB'); } catch(e) {}
+
+    // 3. Clear all pharma_* and sys_* localStorage keys
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('pharma_') || k.startsWith('sys_'))) keysToRemove.push(k);
+    }
+    keysToRemove.forEach(k => localStorage.removeItem(k));
+
+    // 4. Reload → welcome screen
+    if (typeof showToast === 'function') showToast('✅ Factory reset complete. Restarting…', 2000);
+    setTimeout(() => location.reload(), 1400);
+  };
+
   window.disconnectEmailJS = function() {
     if (!confirm('Remove your EmailJS configuration? Password reset emails will be disabled.')) return;
     localStorage.removeItem('pharma_emailjs_service_id');
@@ -629,9 +827,13 @@ END $$;
     const mode = getMode();
     const url  = getSupaUrl();
     const key  = getSupaKey();
-    const emailSvc = localStorage.getItem('pharma_emailjs_service_id') || '';
-    const resetEmail = localStorage.getItem('pharma_emailjs_reset_email') || '';
+    const emailSvc    = localStorage.getItem('pharma_emailjs_service_id')   || '';
+    const emailTid    = localStorage.getItem('pharma_emailjs_template_id')  || '';
+    const emailPk     = localStorage.getItem('pharma_emailjs_public_key')   || '';
+    const resetEmail  = localStorage.getItem('pharma_emailjs_reset_email')  || '';
+    const emailConfigured = !!(emailSvc && emailTid && emailPk && resetEmail);
 
+    // ── Card 1: Supabase Database ─────────────────────────────────────────
     let supaHtml = '';
     if (mode === 'cloud' && url) {
       const ref = url.match(/https:\/\/([^.]+)\.supabase\.co/)?.[1] || url;
@@ -640,14 +842,15 @@ END $$;
         <div class="conn-row conn-connected">
           <span class="conn-dot green"></span>
           <div class="conn-info">
-            <div class="conn-label">Supabase Project</div>
+            <div class="conn-label">Supabase Database</div>
             <div class="conn-value">${ref}.supabase.co</div>
             <div class="conn-sub">Anon Key: ${maskedKey}</div>
           </div>
           <div class="conn-actions">
-            <button class="conn-btn outline" onclick="generateShareLink()" title="Generate a link to configure another device with the same database">📎 Share</button>
-            <button class="conn-btn outline" onclick="reconnectDatabase()">Change</button>
-            <button class="conn-btn danger" onclick="disconnectDatabase()">Disconnect</button>
+            <button class="conn-btn primary" onclick="generateShareLink()" style="width:100%;margin-bottom:4px;" title="Generate a one-click setup link for a second device">📱 Add Another Device</button>
+            <div style="font-size:11px;opacity:.55;margin-bottom:6px;line-height:1.5;">Opens this app on another device with the same database instantly. Keep the link private — it contains your credentials.</div>
+            <button class="conn-btn outline" onclick="reconnectDatabase()">Change Database</button>
+            <button class="conn-btn danger" onclick="disconnectDatabase()">Switch to Offline</button>
           </div>
         </div>`;
     } else if (mode === 'offline') {
@@ -655,11 +858,12 @@ END $$;
         <div class="conn-row conn-offline">
           <span class="conn-dot orange"></span>
           <div class="conn-info">
-            <div class="conn-label">Running in Offline-Only mode</div>
-            <div class="conn-sub">No cloud sync. All data stored locally.</div>
+            <div class="conn-label">🔴 Offline — local only</div>
+            <div class="conn-sub">No cloud sync. All data stored locally on this device.</div>
           </div>
           <div class="conn-actions">
             <button class="conn-btn primary" onclick="reconnectDatabase()">Connect Database</button>
+            <button class="conn-btn outline" onclick="showSetupGuide()" style="margin-top:6px;">📖 Setup Guide</button>
           </div>
         </div>`;
     } else {
@@ -667,8 +871,8 @@ END $$;
         <div class="conn-row conn-unconfigured">
           <span class="conn-dot grey"></span>
           <div class="conn-info">
-            <div class="conn-label">No database configured</div>
-            <div class="conn-sub">Click Connect to set up your own Supabase project.</div>
+            <div class="conn-label">Supabase Database</div>
+            <div class="conn-sub">No database configured. Click Connect to set up your own Supabase project.</div>
           </div>
           <div class="conn-actions">
             <button class="conn-btn primary" onclick="chooseCloudMode()">Connect Database</button>
@@ -677,40 +881,151 @@ END $$;
         </div>`;
     }
 
+    // ── Card 2: Email Recovery (EmailJS) ─────────────────────────────────
+    const emailDotClass  = emailConfigured ? 'green' : 'grey';
+    const emailRowClass  = emailConfigured ? 'conn-connected' : 'conn-offline';
+    const emailjs_howto  = `
+      <div id="emailjs-howto" style="display:none;margin-top:12px;padding:12px 14px;background:rgba(0,0,0,.04);border-radius:8px;font-size:12px;line-height:1.7;color:var(--g600);">
+        <strong style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;opacity:.7;">How to set up EmailJS</strong><br>
+        1. Go to <a href="https://www.emailjs.com" target="_blank" style="color:var(--teal);">emailjs.com</a> → Create a free account<br>
+        2. Add an Email Service (Gmail, Outlook, etc.) → copy the <strong>Service ID</strong><br>
+        3. Create an Email Template → copy the <strong>Template ID</strong><br>
+        4. Go to Account → API Keys → copy the <strong>Public Key</strong><br>
+        5. Enter the recovery email address where OTPs will be sent<br>
+        <div style="margin-top:8px;padding:8px 10px;background:rgba(13,148,136,.08);border-left:3px solid var(--teal);border-radius:4px;">
+          <strong style="font-size:11px;">Required template variables</strong> — your EmailJS template must include these exact variable names:<br>
+          <code style="font-size:11px;background:rgba(0,0,0,.07);padding:1px 4px;border-radius:3px;">{{to_email}}</code> — recipient address (filled automatically)<br>
+          <code style="font-size:11px;background:rgba(0,0,0,.07);padding:1px 4px;border-radius:3px;">{{reset_pin}}</code> — the 8-digit OTP code<br>
+          <code style="font-size:11px;background:rgba(0,0,0,.07);padding:1px 4px;border-radius:3px;">{{shop_name}}</code> — your pharmacy name<br>
+          <code style="font-size:11px;background:rgba(0,0,0,.07);padding:1px 4px;border-radius:3px;">{{expires_in}}</code> — expiry notice (e.g. "10 minutes")<br>
+          <code style="font-size:11px;background:rgba(0,0,0,.07);padding:1px 4px;border-radius:3px;">{{counter_id}}</code> — counter/device ID (optional)
+        </div>
+      </div>`;
+
     let emailHtml = '';
-    if (emailSvc) {
+    if (emailConfigured) {
       emailHtml = `
-        <div class="conn-row conn-connected" style="margin-top:8px;">
-          <span class="conn-dot green"></span>
+        <div class="conn-row ${emailRowClass}" style="margin-top:8px;">
+          <span class="conn-dot ${emailDotClass}"></span>
           <div class="conn-info">
-            <div class="conn-label">EmailJS</div>
+            <div class="conn-label">Email Recovery (EmailJS)</div>
             <div class="conn-value">Service: ${emailSvc}</div>
-            ${resetEmail ? `<div class="conn-sub">Resets → ${resetEmail}</div>` : ''}
+            <div class="conn-sub">OTPs → ${resetEmail}</div>
           </div>
           <div class="conn-actions">
-            <button class="conn-btn outline" onclick="reconfigureEmailJS()">Change</button>
+            <button class="conn-btn outline" onclick="_settToggleEmailJSEdit()" id="ejsEditBtn">Edit</button>
             <button class="conn-btn danger" onclick="disconnectEmailJS()">Remove</button>
           </div>
+        </div>
+        <div id="ejsEditForm" style="display:none;margin-top:8px;padding:12px 14px;background:rgba(0,0,0,.04);border-radius:8px;">
+          <div style="display:grid;gap:8px;">
+            <input id="settEjsService"  class="sett-inp" placeholder="Service ID"    value="${emailSvc}" style="font-size:12px;">
+            <input id="settEjsTemplate" class="sett-inp" placeholder="Template ID"   value="${emailTid}" style="font-size:12px;">
+            <input id="settEjsPubkey"   class="sett-inp" placeholder="Public Key"    value="${emailPk}"  style="font-size:12px;">
+            <input id="settEjsEmail"    class="sett-inp" placeholder="Recovery Email" value="${resetEmail}" type="email" style="font-size:12px;">
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+            <button class="conn-btn primary" onclick="_settSaveEmailJS()">💾 Save</button>
+            <button class="conn-btn outline" onclick="_settTestEmailJS()">📧 Test</button>
+            <button class="conn-btn outline" onclick="_settToggleEmailJSEdit()">Cancel</button>
+          </div>
+          <div id="settEjsStatus" style="font-size:11px;color:var(--g500);margin-top:6px;min-height:16px;"></div>
+          ${emailjs_howto}
+          <button style="background:none;border:none;font-size:11px;color:var(--teal);cursor:pointer;padding:6px 0 0;text-decoration:underline;" onclick="document.getElementById('emailjs-howto').style.display=document.getElementById('emailjs-howto').style.display==='none'?'block':'none'">How to set up EmailJS ▾</button>
         </div>`;
     } else {
       emailHtml = `
-        <div class="conn-row conn-offline" style="margin-top:8px;">
-          <span class="conn-dot grey"></span>
+        <div class="conn-row ${emailRowClass}" style="margin-top:8px;">
+          <span class="conn-dot ${emailDotClass}"></span>
           <div class="conn-info">
-            <div class="conn-label">EmailJS — not configured</div>
-            <div class="conn-sub">Password reset emails are disabled.</div>
+            <div class="conn-label">Email Recovery (EmailJS)</div>
+            <div class="conn-sub">Not configured — password reset emails are disabled.</div>
           </div>
           <div class="conn-actions">
-            <button class="conn-btn outline" onclick="reconfigureEmailJS()">Set Up EmailJS</button>
+            <button class="conn-btn outline" onclick="_settToggleEmailJSEdit()" id="ejsEditBtn">Set Up</button>
           </div>
+        </div>
+        <div id="ejsEditForm" style="display:none;margin-top:8px;padding:12px 14px;background:rgba(0,0,0,.04);border-radius:8px;">
+          <div style="display:grid;gap:8px;">
+            <input id="settEjsService"  class="sett-inp" placeholder="Service ID"    value="" style="font-size:12px;">
+            <input id="settEjsTemplate" class="sett-inp" placeholder="Template ID"   value="" style="font-size:12px;">
+            <input id="settEjsPubkey"   class="sett-inp" placeholder="Public Key"    value="" style="font-size:12px;">
+            <input id="settEjsEmail"    class="sett-inp" placeholder="Recovery Email (OTPs sent here)" value="" type="email" style="font-size:12px;">
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+            <button class="conn-btn primary" onclick="_settSaveEmailJS()">💾 Save</button>
+            <button class="conn-btn outline" onclick="_settTestEmailJS()">📧 Test</button>
+            <button class="conn-btn outline" onclick="_settToggleEmailJSEdit()">Cancel</button>
+          </div>
+          <div id="settEjsStatus" style="font-size:11px;color:var(--g500);margin-top:6px;min-height:16px;"></div>
+          ${emailjs_howto}
+          <button style="background:none;border:none;font-size:11px;color:var(--teal);cursor:pointer;padding:6px 0 0;text-decoration:underline;" onclick="document.getElementById('emailjs-howto').style.display=document.getElementById('emailjs-howto').style.display==='none'?'block':'none'">How to set up EmailJS ▾</button>
         </div>`;
     }
 
     card.innerHTML = `
-      <div class="sett-section-title">🔌 Database &amp; Email Connection</div>
+      <div class="sett-section-title">🔌 Database &amp; Services</div>
       ${supaHtml}
       ${emailHtml}
     `;
+  };
+
+  // ── EmailJS inline edit helpers ───────────────────────────────────────────
+  window._settToggleEmailJSEdit = function() {
+    const form = document.getElementById('ejsEditForm');
+    const btn  = document.getElementById('ejsEditBtn');
+    if (!form) return;
+    const showing = form.style.display !== 'none';
+    form.style.display = showing ? 'none' : 'block';
+    if (btn) btn.textContent = showing ? 'Edit' : 'Cancel';
+  };
+
+  window._settSaveEmailJS = function() {
+    const statusEl = document.getElementById('settEjsStatus');
+    const sid   = (document.getElementById('settEjsService')?.value  || '').trim();
+    const tid   = (document.getElementById('settEjsTemplate')?.value || '').trim();
+    const pk    = (document.getElementById('settEjsPubkey')?.value   || '').trim();
+    const email = (document.getElementById('settEjsEmail')?.value    || '').trim();
+    if (!sid || !tid || !pk || !email) {
+      if (statusEl) { statusEl.textContent = '⚠️ Fill in all four fields.'; statusEl.style.color = 'var(--amb)'; }
+      return;
+    }
+    localStorage.setItem('pharma_emailjs_service_id',  sid);
+    localStorage.setItem('pharma_emailjs_template_id', tid);
+    localStorage.setItem('pharma_emailjs_public_key',  pk);
+    localStorage.setItem('pharma_emailjs_reset_email', email);
+    if (statusEl) { statusEl.textContent = '✅ Saved.'; statusEl.style.color = 'var(--grn)'; }
+    if (typeof showToast === 'function') showToast('✅ Email Recovery configured.');
+    setTimeout(renderConnectionCard, 800);
+  };
+
+  window._settTestEmailJS = function() {
+    const statusEl = document.getElementById('settEjsStatus');
+    const sid   = (document.getElementById('settEjsService')?.value  || '').trim();
+    const tid   = (document.getElementById('settEjsTemplate')?.value || '').trim();
+    const pk    = (document.getElementById('settEjsPubkey')?.value   || '').trim();
+    const email = (document.getElementById('settEjsEmail')?.value    || '').trim();
+    if (!sid || !tid || !pk || !email) {
+      if (statusEl) { statusEl.textContent = '⚠️ Fill in all four fields first.'; statusEl.style.color = 'var(--amb)'; }
+      return;
+    }
+    if (typeof emailjs === 'undefined') {
+      if (statusEl) { statusEl.textContent = '❌ EmailJS library not loaded.'; statusEl.style.color = 'var(--red)'; }
+      return;
+    }
+    if (statusEl) { statusEl.textContent = '🔄 Sending test email…'; statusEl.style.color = 'var(--g500)'; }
+    try {
+      emailjs.init({ publicKey: pk });
+      emailjs.send(sid, tid, { to_email: email, reset_link: 'https://test.example.com', device_name: 'Settings Test', reset_pin: '12345678', shop_name: 'Pharma POS', counter_id: 'Test', expires_in: 'N/A' })
+        .then(function() {
+          if (statusEl) { statusEl.textContent = '✅ Test email sent to ' + email + '!'; statusEl.style.color = 'var(--grn)'; }
+        })
+        .catch(function(err) {
+          if (statusEl) { statusEl.textContent = '❌ ' + (err.text || err.message || 'Send failed'); statusEl.style.color = 'var(--red)'; }
+        });
+    } catch(e) {
+      if (statusEl) { statusEl.textContent = '❌ ' + (e.message || 'EmailJS error'); statusEl.style.color = 'var(--red)'; }
+    }
   };
 
   // ── Schema SQL textarea fill ──────────────────────────────────────────────
@@ -915,3 +1230,104 @@ END $$;
   });
 
 })();
+
+// ── Setup Guide Modal (Phase 5A) ─────────────────────────────────────────────
+window.showSetupGuide = function() {
+    var existing = document.getElementById('_setupGuideModal');
+    if (existing) { existing.style.display = 'flex'; return; }
+
+    var modal = document.createElement('div');
+    modal.id = '_setupGuideModal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:99995;background:rgba(15,23,42,.85);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:16px;';
+
+    modal.innerHTML = `
+<div style="background:#fff;color:#1e293b;border-radius:16px;padding:0;max-width:580px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 25px 60px rgba(0,0,0,.4);">
+  <!-- Header -->
+  <div style="padding:22px 24px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="font-size:18px;font-weight:800;">☁️ Cloud Sync Setup Guide</div>
+      <div style="font-size:12px;color:#64748b;margin-top:2px;">Multi-device sync using your own free Supabase account</div>
+    </div>
+    <button onclick="document.getElementById('_setupGuideModal').style.display='none'"
+      style="background:none;border:none;font-size:20px;color:#94a3b8;cursor:pointer;padding:4px 8px;line-height:1;">×</button>
+  </div>
+  <!-- Scrollable body -->
+  <div style="overflow-y:auto;padding:20px 24px;flex:1;">
+
+    <!-- Supabase section -->
+    <div style="margin-bottom:24px;">
+      <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#0d9488;margin-bottom:10px;">Step 1 — Create a Supabase project (2 min, free)</div>
+      <div style="font-size:12px;color:#475569;line-height:1.8;">
+        <strong>What is Supabase?</strong> It's a free, open-source database platform. Your pharmacy data lives in <em>your</em> Supabase project — not on any shared server. You own it completely; we never have access to it.
+      </div>
+      <ol style="font-size:12px;color:#475569;line-height:2;margin:10px 0 0 16px;padding:0;">
+        <li>Go to <a href="https://supabase.com" target="_blank" style="color:#0d9488;font-weight:600;">supabase.com</a> → Sign up free (GitHub login works)</li>
+        <li>Click <strong>New project</strong> — give it any name, e.g. "My Pharmacy"</li>
+        <li>Wait ~2 minutes for the project to initialise</li>
+        <li>Go to <strong>Project Settings → API</strong> (left sidebar)</li>
+        <li>Copy the <strong>Project URL</strong> and <strong>anon / public key</strong></li>
+        <li>In Settings → Database &amp; Services → click <strong>Connect Database</strong> → paste both values</li>
+        <li>Click <strong>Test Connection</strong> — when it shows ✅, click <strong>View SQL Schema</strong></li>
+        <li>Copy the SQL, open <strong>Supabase → SQL Editor</strong>, paste it, click <strong>Run</strong></li>
+        <li>Back in the app → click <strong>Save &amp; Continue</strong></li>
+      </ol>
+      <div style="margin-top:10px;padding:8px 12px;background:#f0fdf4;border-left:3px solid #22c55e;border-radius:4px;font-size:11px;color:#166534;">
+        ✅ Free tier: 500 MB storage, unlimited API calls — more than enough for a pharmacy.
+      </div>
+    </div>
+
+    <!-- FAQ -->
+    <div style="margin-bottom:24px;">
+      <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#0d9488;margin-bottom:10px;">FAQ</div>
+      <div style="font-size:12px;color:#475569;line-height:1.8;">
+        <p style="margin:0 0 8px;"><strong>Is my data private?</strong><br>
+        Yes. Your Supabase project belongs to your account. Only devices with your URL and key can access it. The app never sends your data anywhere else.</p>
+        <p style="margin:0 0 8px;"><strong>What happens if I don't connect Supabase?</strong><br>
+        Everything works offline on this device. Invoices, inventory, and settings are saved locally. You just can't sync to other devices or access data from a second computer.</p>
+        <p style="margin:0 0 8px;"><strong>Can I add cloud sync later?</strong><br>
+        Yes — at any time from Settings → Database &amp; Services → Connect Database. Your existing local data will sync up automatically.</p>
+        <p style="margin:0;"><strong>What if I already set up Supabase and want a second device?</strong><br>
+        Go to Settings → Database &amp; Services → click <strong>Add Another Device</strong>. Copy the link and open it on the second device.</p>
+      </div>
+    </div>
+
+    <!-- EmailJS section -->
+    <div style="margin-bottom:8px;">
+      <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#64748b;margin-bottom:10px;">
+        Step 2 — Email Password Recovery <span style="font-weight:400;font-size:11px;background:#f1f5f9;padding:2px 7px;border-radius:10px;margin-left:4px;">Optional</span>
+      </div>
+      <div style="font-size:12px;color:#475569;line-height:1.8;">
+        <strong>What is EmailJS?</strong> A free service that lets the app send password-reset emails from your own inbox — no server required. Without it, you still have the default password (12345678) as a fallback.
+      </div>
+      <ol style="font-size:12px;color:#475569;line-height:2;margin:10px 0 0 16px;padding:0;">
+        <li>Go to <a href="https://www.emailjs.com" target="_blank" style="color:#0d9488;font-weight:600;">emailjs.com</a> → Create a free account</li>
+        <li>Add an Email Service (Gmail, Outlook, etc.) → copy the <strong>Service ID</strong></li>
+        <li>Create an Email Template with these exact variable names:<br>
+          <span style="font-family:monospace;font-size:11px;background:#f1f5f9;padding:2px 5px;border-radius:3px;">{{to_email}}</span>
+          <span style="font-family:monospace;font-size:11px;background:#f1f5f9;padding:2px 5px;border-radius:3px;">{{reset_pin}}</span>
+          <span style="font-family:monospace;font-size:11px;background:#f1f5f9;padding:2px 5px;border-radius:3px;">{{shop_name}}</span>
+          <span style="font-family:monospace;font-size:11px;background:#f1f5f9;padding:2px 5px;border-radius:3px;">{{expires_in}}</span>
+        </li>
+        <li>Copy the <strong>Template ID</strong></li>
+        <li>Go to Account → API Keys → copy the <strong>Public Key</strong></li>
+        <li>In Settings → Database &amp; Services → Email Recovery → click <strong>Set Up</strong> → paste all four values</li>
+      </ol>
+    </div>
+
+  </div>
+  <!-- Footer -->
+  <div style="padding:14px 24px;border-top:1px solid #f1f5f9;display:flex;gap:10px;align-items:center;">
+    <button onclick="(function(){document.getElementById('_setupGuideModal').style.display='none';if(typeof reconnectDatabase==='function')reconnectDatabase();})()"
+      style="padding:10px 20px;background:#0d9488;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+      Connect Database →
+    </button>
+    <button onclick="document.getElementById('_setupGuideModal').style.display='none'"
+      style="padding:10px 18px;background:transparent;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#64748b;cursor:pointer;">
+      Close
+    </button>
+  </div>
+</div>`;
+
+    modal.addEventListener('click', function(e) { if (e.target === modal) modal.style.display = 'none'; });
+    document.body.appendChild(modal);
+};

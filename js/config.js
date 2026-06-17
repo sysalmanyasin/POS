@@ -240,21 +240,26 @@ function _getDeviceCode() {
     } catch(e) { return 'DEV'; }
 }
 
-// ── Pakistan Standard Time (PKT = UTC+5) helpers ─────────────────────────
-const _PKT_TIMEZONE = 'Asia/Karachi';
+// ── Configurable timezone/locale helpers ─────────────────────────────────
+function _getTimezone() {
+    try { return localStorage.getItem('pharma_timezone') || 'Asia/Karachi'; } catch(e) { return 'Asia/Karachi'; }
+}
+function _getLocale() {
+    try { return localStorage.getItem('pharma_locale') || 'en-PK'; } catch(e) { return 'en-PK'; }
+}
 
 function _toPKT(dateOrStr, options) {
     try {
         const d = (dateOrStr instanceof Date) ? dateOrStr : new Date(dateOrStr);
         if (isNaN(d.getTime())) return String(dateOrStr || '');
-        return d.toLocaleString('en-PK', Object.assign({
+        return d.toLocaleString(_getLocale(), Object.assign({
             year:   'numeric',
             month:  'numeric',
             day:    'numeric',
             hour:   'numeric',
             minute: '2-digit',
             hour12: true,
-            timeZone: _PKT_TIMEZONE
+            timeZone: _getTimezone()
         }, options || {}));
     } catch(e) { return String(dateOrStr || ''); }
 }
@@ -263,9 +268,9 @@ function _pktDateStr(dateOrStr) {
     try {
         const d = (dateOrStr instanceof Date) ? dateOrStr : new Date(dateOrStr);
         if (isNaN(d.getTime())) return '';
-        const parts = new Intl.DateTimeFormat('en-CA', {
+        const parts = new Intl.DateTimeFormat(_getLocale(), {
             year: 'numeric', month: '2-digit', day: '2-digit',
-            timeZone: _PKT_TIMEZONE
+            timeZone: _getTimezone()
         }).format(d);
         return parts;
     } catch(e) { return ''; }

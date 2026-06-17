@@ -25,7 +25,8 @@ async function _verifyPassword(entered) {
     if (storedHash) return (await _hashPassword(entered)) === storedHash;
     const plain = StorageModule.get('sys_admin_pass');
     if (plain) return entered === plain;
-    return false;
+    // 3. No password set yet — default is 12345678 (zero-setup local experience)
+    return entered === '12345678';
 }
 
 // ── Task 2: save password always writes to Supabase ─────────────────────────
@@ -38,6 +39,80 @@ async function _persistPassword(hash) {
     // Persistent flag so UI knows a password is set even after localStorage is cleared
     StorageModule.set('sys_has_password', 'true');
 }
+
+// =========================================================================
+// RECOVERY CODE — offline fallback when EmailJS is not configured
+// =========================================================================
+
+function _generateRecoveryCode() {
+    // 4 groups of 4 uppercase alphanumeric chars: e.g. X7K2-P9QA-3NWR-M5TF
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no O,0,I,1 — confusing
+    var groups = [];
+    for (var g = 0; g < 4; g++) {
+        var group = '';
+        for (var i = 0; i < 4; i++) {
+            group += chars[Math.floor(Math.random() * chars.length)];
+        }
+        groups.push(group);
+    }
+    return groups.join('-');
+}
+
+async function _persistRecoveryCode(code) {
+    const hash = await _hashPassword(code.replace(/-/g, '')); // hash without dashes
+    StorageModule.set('sys_recovery_code_hash', hash);
+}
+
+async function _verifyRecoveryCode(entered) {
+    const stored = StorageModule.get('sys_recovery_code_hash');
+    if (!stored) return false;
+    const hash = await _hashPassword(entered.replace(/-/g, '').toUpperCase());
+    return hash === stored;
+}
+
+function _showRecoveryCodeModal(code) {
+    var existing = document.getElementById('_recoveryCodeModal');
+    if (existing) existing.remove();
+
+    var modal = document.createElement('div');
+    modal.id = '_recoveryCodeModal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:10200;background:rgba(15,23,42,.9);display:flex;align-items:center;justify-content:center;padding:16px;';
+    modal.innerHTML = `
+<div style="background:#fff;color:#1e293b;border-radius:14px;padding:24px;max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+  <div style="font-size:17px;font-weight:800;margin-bottom:6px;">🔑 Save Your Recovery Code</div>
+  <div style="font-size:12px;color:#64748b;line-height:1.6;margin-bottom:16px;">
+    If you ever forget your password and don't have email recovery set up, this code lets you get back in.<br>
+    <strong style="color:#dc2626;">Write it down or screenshot it now — it won't be shown again.</strong>
+  </div>
+  <div id="_rcCodeDisplay" style="font-family:monospace;font-size:22px;font-weight:800;letter-spacing:3px;text-align:center;padding:14px;background:#f8fafc;border:2px solid #e2e8f0;border-radius:10px;color:#0f172a;margin-bottom:14px;">
+    ${code}
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:14px;">
+    <button onclick="(function(){navigator.clipboard&&navigator.clipboard.writeText('${code}').then(function(){var b=document.getElementById('_rcCopyBtn');b.textContent='✅ Copied!';setTimeout(function(){b.textContent='📋 Copy Code';},2000);});})(); return false;"
+      id="_rcCopyBtn"
+      style="flex:1;padding:9px;background:#0d9488;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+      📋 Copy Code
+    </button>
+  </div>
+  <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#475569;cursor:pointer;margin-bottom:12px;">
+    <input type="checkbox" id="_rcConfirmCheck" style="margin-top:1px;accent-color:#0d9488;">
+    I have saved this recovery code somewhere safe
+  </label>
+  <button onclick="(function(){if(!document.getElementById('_rcConfirmCheck').checked){alert('Please confirm you have saved the code first.');return;}document.getElementById('_recoveryCodeModal').remove();})()"
+    style="width:100%;padding:10px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+    I've saved it — close
+  </button>
+  <div style="font-size:11px;color:#94a3b8;text-align:center;margin-top:10px;">You can generate a new recovery code anytime from Settings → Security.</div>
+</div>`;
+    document.body.appendChild(modal);
+}
+
+// ── Expose regenerate for Settings → Security ──────────────────────────────
+window.regenerateRecoveryCode = async function() {
+    const code = _generateRecoveryCode();
+    await _persistRecoveryCode(code);
+    _showRecoveryCodeModal(code);
+};
 
 // =========================================================================
 // POST-PURGE MASTER DEVICE SETUP — EmailJS PIN Distribution
@@ -60,12 +135,17 @@ async function _checkAndInitMasterSetup() {
     );
 
     // ── FAST PATH: offline mode or EmailJS not configured ─────────────────
-    // Skip the email-PIN ceremony entirely. Go straight to the standard
-    // first-launch password modal, which saves locally (and to Supabase
-    // when cloud is configured, thanks to _persistPassword's try/catch).
+    // Default password 12345678 is active — no modal needed.
+    // If cloud is configured but EmailJS is missing, user logs in with
+    // 12345678 and can change it in Settings → Security.
     if (mode === 'offline' || !hasEmailJS) {
         StorageModule.set('sys_is_master_device', 'true');
-        _showFirstLaunchPasswordSetup();
+        if (!hasEmailJS && mode === 'cloud') {
+            // Show a subtle toast so the user knows why no PIN ceremony ran
+            if (typeof showToast === 'function') {
+                showToast('Email recovery not configured — use default password 12345678', 4000);
+            }
+        }
         return;
     }
 
@@ -99,7 +179,11 @@ async function _checkAndInitMasterSetup() {
                 return;
             }
         } catch(_e) {}
-        _showFirstLaunchPasswordSetup();
+        // Can't determine master status — safe default: treat as master, use default password.
+        StorageModule.set('sys_is_master_device', 'true');
+        if (typeof showToast === 'function') {
+            showToast('Could not reach cloud — use default password 12345678', 4000);
+        }
     }
 }
 
@@ -204,11 +288,12 @@ function _showMasterDeviceSetupModal() {
         ⚠️ An 8-digit PIN will be sent to your email. Use it to set the master password. All client devices will sync this password.
       </div>
       <div class="master-setup-step">
-        <strong>Email:</strong> ${RESET_EMAIL_ADDRESS || '(not configured)'}
+        <strong>Email:</strong> <span id="masterSetupEmailDisplay"></span>
       </div>
       <div class="master-setup-actions">
         <button class="master-setup-btn master-setup-btn-secondary" onclick="_closeMasterSetupModal()">Cancel</button>
-        <button class="master-setup-btn master-setup-btn-primary" onclick="_sendMasterSetupPin()">📧 Send PIN to Email</button>
+        <button class="master-setup-btn" style="background:#6b7280;color:#fff;" onclick="_useMasterDefaultPassword()" title="Skip PIN — use default password 12345678">🔑 Use Default (12345678)</button>
+        <button class="master-setup-btn master-setup-btn-primary" id="masterSetupSendBtn" onclick="_sendMasterSetupPin()">📧 Send PIN to Email</button>
       </div>
       <div class="master-setup-status" id="masterSetupStatus"></div>
     </div>
@@ -217,14 +302,34 @@ function _showMasterDeviceSetupModal() {
         document.body.appendChild(modal);
     }
     document.getElementById('masterSetupStatus').textContent = '';
+    // Populate email display from runtime EmailJS config
+    const _msCfg = _getEmailJSConfig();
+    const _msEmailEl = document.getElementById('masterSetupEmailDisplay');
+    const _msSendBtn = document.getElementById('masterSetupSendBtn');
+    if (_msEmailEl) {
+        if (_msCfg.resetEmail) {
+            _msEmailEl.textContent = _msCfg.resetEmail;
+            if (_msSendBtn) { _msSendBtn.disabled = false; _msSendBtn.style.opacity = ''; }
+        } else {
+            _msEmailEl.innerHTML = '<span style="color:#ef4444;">Not configured — add EmailJS in Settings first, or use default password.</span>';
+            if (_msSendBtn) { _msSendBtn.disabled = true; _msSendBtn.style.opacity = '0.4'; }
+        }
+    }
     modal.style.display = '';
 }
 
 function _closeMasterSetupModal() {
     const m = document.getElementById('masterDeviceSetupModal');
     if (m) m.style.display = 'none';
-    // Fall back to first launch setup
-    _showFirstLaunchPasswordSetup();
+    // No first-launch modal needed — default password 12345678 is active.
+}
+
+function _useMasterDefaultPassword() {
+    const m = document.getElementById('masterDeviceSetupModal');
+    if (m) m.style.display = 'none';
+    if (typeof showToast === 'function') {
+        showToast('Using default password: 12345678 — change it in Settings → Security', 5000);
+    }
 }
 
 /**
@@ -233,8 +338,16 @@ function _closeMasterSetupModal() {
 async function _sendMasterSetupPin() {
     const statusEl = document.getElementById('masterSetupStatus');
     
-    if (!RESET_EMAIL_ADDRESS || RESET_EMAIL_ADDRESS.includes('YOUR_')) {
-        statusEl.textContent = '❌ Email address not configured.';
+    // 2B fix: read config at call time
+    const cfg = _getEmailJSConfig();
+
+    if (!cfg.resetEmail) {
+        statusEl.textContent = '❌ Email address not configured. Add EmailJS in Settings → Email Recovery first.';
+        statusEl.style.color = 'var(--red)';
+        return;
+    }
+    if (!cfg.serviceId || !cfg.templateId || !cfg.publicKey) {
+        statusEl.textContent = '❌ EmailJS not fully configured. Add Service ID, Template ID, and Public Key in Settings first.';
         statusEl.style.color = 'var(--red)';
         return;
     }
@@ -261,16 +374,16 @@ async function _sendMasterSetupPin() {
             createdAt: new Date().toISOString()
         }));
         
-        // Send via EmailJS
+        // Send via EmailJS — use runtime config (2B fix)
         const bi = (typeof _getBranchIdentity === 'function') ? _getBranchIdentity() : {};
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-            to_email: RESET_EMAIL_ADDRESS,
+        await emailjs.send(cfg.serviceId, cfg.templateId, {
+            to_email: cfg.resetEmail,
             reset_pin: _generatedMasterPin,
             shop_name: bi.businessName || bi.branchName || 'Pharma POS',
             counter_id: bi.counterId || 'Master Device',
             expires_in: '15 minutes',
             email_subject: '👑 Pharma POS Master Device Setup PIN'
-        }, EMAILJS_PUBLIC_KEY);
+        }, cfg.publicKey);
         
         statusEl.textContent = '✅ PIN sent! Check your email.';
         statusEl.style.color = '#059669';
@@ -876,8 +989,8 @@ async function _migrateSecretsOnStartup() {
     const mode = localStorage.getItem('pharma_mode');
 
     // ── OFFLINE MODE OR NO DB CONFIGURED ─────────────────────────────────
-    // Skip Supabase entirely. Check local storage only and prompt for
-    // password setup if nothing is found.
+    // Skip Supabase entirely. Default password 12345678 is always active
+    // until the user explicitly changes it — no blocking setup modal needed.
     if (mode === 'offline' || !_isSupabaseConfigured()) {
         const localHash = StorageModule.get('sys_admin_pass_hash');
         const hasFlag   = StorageModule.get('sys_has_password') === 'true';
@@ -886,9 +999,8 @@ async function _migrateSecretsOnStartup() {
             const timeSincePurge = lastPurgeTime ? (Date.now() - parseInt(lastPurgeTime)) : null;
             if (timeSincePurge && timeSincePurge < 5 * 60 * 1000) {
                 await _checkAndInitMasterSetup();
-            } else {
-                _showFirstLaunchPasswordSetup();
             }
+            // No else: default password 12345678 is used — no modal needed.
         }
         // Migrate staff PINs to hashed versions (offline-safe, no await needed)
         const list = _getStaffList();
@@ -922,8 +1034,7 @@ async function _migrateSecretsOnStartup() {
                 if (timeSincePurge && timeSincePurge < 5 * 60 * 1000) {
                     await _checkAndInitMasterSetup();
                 } else {
-                    // Truly first launch — show setup modal
-                    _showFirstLaunchPasswordSetup();
+                    // Truly first launch — default password 12345678 is active; no modal needed.
                 }
             }
         } else {
@@ -933,10 +1044,7 @@ async function _migrateSecretsOnStartup() {
             StorageModule.set('sys_has_password', 'true');
         }
     } catch(e) {
-        // Network error — if we have a local hash that's fine, keep it
-        if (!StorageModule.get('sys_admin_pass_hash')) {
-            _showFirstLaunchPasswordSetup();
-        }
+        // Network error — local hash is fine; default 12345678 covers no-hash case.
     }
 
     // Migrate staff PINs to hashed versions
@@ -986,7 +1094,9 @@ function requestAdminAccess(type, targetId = null, extraData = null) {
         'MASTER_RECLAIM':       '👑 Authenticate to re-claim the Master role on this device. Any other Master will be downgraded to Client.',
         'PURGE_OLD_INVOICES':   '⚠️ Authenticate to open the old-invoice purge tool.',
         'PURGE_ZERO_STOCK':     '⚠️ Authenticate to remove all zero-stock items from inventory.',
-        'IDB_NUKE':             '💣 Authenticate to broadcast Force IDB Nuke to all active devices.'
+        'IDB_NUKE':             '💣 Authenticate to broadcast Force IDB Nuke to all active devices.',
+        'FACTORY_RESET':        '⚠️ FACTORY RESET — Wipes ALL local data, settings, and credentials from this device. Cannot be undone.',
+        'REGENERATE_RECOVERY_CODE': '🔑 Generate a new recovery code — your old recovery code will stop working immediately.'
     };
     document.getElementById('authActionText').textContent = msgs[type] || 'Admin action required.';
     document.getElementById('authModal').classList.add('visible');
@@ -1119,6 +1229,12 @@ function executeProtectedAction() {
     else if (type === 'IDB_NUKE') {
         if (typeof window._executeIDBNukeBroadcast === 'function') window._executeIDBNukeBroadcast();
     }
+    else if (type === 'FACTORY_RESET') {
+        if (typeof window.factoryReset === 'function') window.factoryReset();
+    }
+    else if (type === 'REGENERATE_RECOVERY_CODE') {
+        if (typeof window.regenerateRecoveryCode === 'function') window.regenerateRecoveryCode();
+    }
 }
 
 // =========================================================================
@@ -1209,7 +1325,9 @@ async function _checkPasswordExists() {
             return true;
         }
     } catch(e) {}
-    return false;
+    // A password always exists — the default 12345678 is always active until changed.
+    // This ensures the "current password" field is shown on the change-password form.
+    return true;
 }
 
 // ── Password change — current password verified via SHA-256 before _persistPassword ──
@@ -1242,13 +1360,19 @@ function processPasswordModification() {
                 const hash = await _hashPassword(newP);
                 await _persistPassword(hash);
                 _clearFields();
-                showToast('🔒 Admin password updated securely.');
+                // Regenerate recovery code on every password change
+                const rc = _generateRecoveryCode();
+                await _persistRecoveryCode(rc);
+                _showRecoveryCodeModal(rc);
             }).catch(() => showToast('❌ Verification error. Try again.', true));
         } else {
             _hashPassword(newP).then(async hash => {
                 await _persistPassword(hash);
                 _clearFields();
-                showToast('✅ Admin password set.');
+                // Generate recovery code and show it once
+                const rc = _generateRecoveryCode();
+                await _persistRecoveryCode(rc);
+                _showRecoveryCodeModal(rc);
             }).catch(() => showToast('❌ Failed to set password.', true));
         }
     }).catch(() => showToast('❌ Could not check existing password. Try again.', true));
@@ -1262,12 +1386,36 @@ document.getElementById('authModal').addEventListener('click', e => {
 // TASK 3 — GMAIL RESET VIA EMAILJS: Full OTP flow
 // =========================================================================
 
+// ── Runtime EmailJS config reader (2B fix: reads at call time, not module load) ──
+function _getEmailJSConfig() {
+    return {
+        serviceId:  localStorage.getItem('pharma_emailjs_service_id')  || '',
+        templateId: localStorage.getItem('pharma_emailjs_template_id') || '',
+        publicKey:  localStorage.getItem('pharma_emailjs_public_key')  || '',
+        resetEmail: localStorage.getItem('pharma_emailjs_reset_email') || ''
+    };
+}
+
 // State for the reset flow
 let _resetOtpPin  = '';
 const _RESET_SUPABASE_KEY = 'pharma_reset_pin';
 
 // ── Step 1: open the reset modal ─────────────────────────────────────────────
 function openPasswordResetFlow() {
+    // If EmailJS not configured → try recovery code path instead
+    const cfg = _getEmailJSConfig();
+    if (!cfg.serviceId || !cfg.templateId || !cfg.publicKey || !cfg.resetEmail) {
+        // Check if a recovery code has ever been set
+        const hasRC = !!StorageModule.get('sys_recovery_code_hash');
+        if (hasRC) {
+            _showRecoveryCodeEntryModal();
+        } else {
+            // No EmailJS, no recovery code — guide them
+            _showNoRecoveryModal();
+        }
+        return;
+    }
+
     const modal = document.getElementById('passwordResetModal');
     if (!modal) return;
     // Reset to step 1
@@ -1278,7 +1426,7 @@ function openPasswordResetFlow() {
     document.getElementById('prm-send-btn').disabled  = false;
     document.getElementById('prm-send-btn').textContent = '📧 Send OTP to Email';
     const addrEl = document.getElementById('prm-email-display');
-    if (addrEl) addrEl.textContent = RESET_EMAIL_ADDRESS || '(not configured)';
+    if (addrEl) addrEl.textContent = cfg.resetEmail || '(not configured)';
     modal.classList.add('visible');
 }
 function closePasswordResetFlow() {
@@ -1299,8 +1447,11 @@ async function sendResetOtp() {
     const btn = document.getElementById('prm-send-btn');
     const statusEl = document.getElementById('prm-status');
 
-    if (!RESET_EMAIL_ADDRESS || RESET_EMAIL_ADDRESS.includes('YOUR_')) {
-        statusEl.textContent = '❌ Reset email address not configured in config.js.';
+    // 2B fix: read config at call time, not from stale module-load constants
+    const cfg = _getEmailJSConfig();
+
+    if (!cfg.resetEmail) {
+        statusEl.textContent = '❌ Reset email address not configured. Set it up in Settings → Email Recovery.';
         statusEl.style.color = 'var(--red)';
         return;
     }
@@ -1331,16 +1482,16 @@ async function sendResetOtp() {
         return;
     }
 
-    // Send via EmailJS
+    // Send via EmailJS — use runtime config (2B fix)
     const bi = (typeof _getBranchIdentity === 'function') ? _getBranchIdentity() : {};
     try {
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-            to_email:   RESET_EMAIL_ADDRESS,
+        await emailjs.send(cfg.serviceId, cfg.templateId, {
+            to_email:   cfg.resetEmail,
             reset_pin:  otp,
             shop_name:  bi.businessName || bi.branchName || 'Pharma POS',
             counter_id: bi.counterId    || '',
             expires_in: '10 minutes'
-        }, EMAILJS_PUBLIC_KEY);
+        }, cfg.publicKey);
 
         statusEl.textContent = '✅ OTP sent! Check your inbox. It expires in 10 minutes.';
         statusEl.style.color = 'var(--grn)';
@@ -1495,3 +1646,122 @@ function openEmailResetModal()  { openPasswordResetFlow(); }
 function closeEmailResetModal() { closePasswordResetFlow(); }
 // sendPasswordResetEmail kept as alias for any inline buttons
 function sendPasswordResetEmail() { sendResetOtp(); }
+
+// =========================================================================
+// DEFAULT PASSWORD HINT — show on login screen until custom password is set
+// =========================================================================
+(function _initDefaultPasswordHint() {
+    function _showGateHintIfDefault() {
+        const hint = document.getElementById('gate-default-hint');
+        if (!hint) return;
+        const hasCustom = (
+            StorageModule.get('sys_has_password') === 'true' ||
+            StorageModule.get('sys_admin_pass_hash') ||
+            StorageModule.get('sys_admin_pass')
+        );
+        hint.style.display = hasCustom ? 'none' : '';
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _showGateHintIfDefault);
+    } else {
+        _showGateHintIfDefault();
+    }
+    // Re-check after migration runs (which may set sys_has_password)
+    setTimeout(_showGateHintIfDefault, 1200);
+})();
+
+// ── Recovery Code Entry Modal ─────────────────────────────────────────────────
+function _showRecoveryCodeEntryModal() {
+    var existing = document.getElementById('_rcEntryModal');
+    if (existing) existing.remove();
+
+    var modal = document.createElement('div');
+    modal.id = '_rcEntryModal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:10200;background:rgba(15,23,42,.9);display:flex;align-items:center;justify-content:center;padding:16px;';
+    modal.innerHTML = `
+<div style="background:#fff;color:#1e293b;border-radius:14px;padding:24px;max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+  <div style="font-size:17px;font-weight:800;margin-bottom:6px;">🔑 Enter Recovery Code</div>
+  <div style="font-size:12px;color:#64748b;line-height:1.6;margin-bottom:14px;">
+    Enter the recovery code you saved when you last set your password.
+  </div>
+  <input id="_rcEntryInput" type="text"
+    placeholder="e.g. X7K2-P9QA-3NWR-M5TF"
+    autocomplete="off" autocapitalize="characters" spellcheck="false"
+    style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #e2e8f0;border-radius:8px;font-size:15px;font-family:monospace;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;outline:none;">
+  <div id="_rcEntryStatus" style="font-size:11px;color:#dc2626;min-height:16px;margin-bottom:10px;text-align:center;"></div>
+  <button onclick="window._verifyAndProceedRecovery()"
+    style="width:100%;padding:10px;background:#0d9488;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px;">
+    Verify Code →
+  </button>
+  <button onclick="document.getElementById('_rcEntryModal').remove()"
+    style="width:100%;padding:10px;background:transparent;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;color:#64748b;cursor:pointer;">
+    Cancel
+  </button>
+</div>`;
+
+    // Allow Enter key to submit
+    modal.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') window._verifyAndProceedRecovery();
+    });
+
+    document.body.appendChild(modal);
+    setTimeout(function() {
+        var inp = document.getElementById('_rcEntryInput');
+        if (inp) inp.focus();
+    }, 80);
+}
+
+window._verifyAndProceedRecovery = async function() {
+    var inp = document.getElementById('_rcEntryInput');
+    var statusEl = document.getElementById('_rcEntryStatus');
+    var code = (inp ? inp.value : '').trim().toUpperCase();
+    if (!code) { if (statusEl) statusEl.textContent = 'Enter your recovery code.'; return; }
+
+    var ok = await _verifyRecoveryCode(code);
+    if (!ok) {
+        if (statusEl) statusEl.textContent = '❌ Incorrect recovery code. Check your saved copy.';
+        if (inp) { inp.select(); inp.focus(); }
+        return;
+    }
+
+    // Verified — close entry modal, open "set new password" step in the reset modal
+    var rcModal = document.getElementById('_rcEntryModal');
+    if (rcModal) rcModal.remove();
+
+    // Reuse the existing prm-step3 UI (set new password)
+    var resetModal = document.getElementById('passwordResetModal');
+    if (resetModal) {
+        _showResetStep(3);
+        var statusPrm = document.getElementById('prm-newpass-status');
+        if (statusPrm) {
+            statusPrm.textContent = '✅ Recovery code verified. Set your new password.';
+            statusPrm.style.color = 'var(--grn, #22c55e)';
+        }
+        resetModal.classList.add('visible');
+    }
+};
+
+function _showNoRecoveryModal() {
+    var existing = document.getElementById('_noRecoveryModal');
+    if (existing) existing.remove();
+
+    var modal = document.createElement('div');
+    modal.id = '_noRecoveryModal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:10200;background:rgba(15,23,42,.9);display:flex;align-items:center;justify-content:center;padding:16px;';
+    modal.innerHTML = `
+<div style="background:#fff;color:#1e293b;border-radius:14px;padding:24px;max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+  <div style="font-size:17px;font-weight:800;margin-bottom:6px;">⚠️ No Recovery Method Set Up</div>
+  <div style="font-size:12px;color:#64748b;line-height:1.7;margin-bottom:16px;">
+    You haven't set up email recovery (EmailJS) and no recovery code exists for this device.<br><br>
+    <strong>Options:</strong><br>
+    • If you remember your password — log in normally<br>
+    • Set up email recovery in <strong>Settings → Email Recovery</strong> before you forget<br>
+    • As a last resort: <strong>Factory Reset</strong> in Settings → Security (wipes this device's local data)
+  </div>
+  <button onclick="document.getElementById('_noRecoveryModal').remove()"
+    style="width:100%;padding:10px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+    OK
+  </button>
+</div>`;
+    document.body.appendChild(modal);
+}

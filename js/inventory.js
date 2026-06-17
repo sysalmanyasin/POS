@@ -2465,3 +2465,46 @@ window.pullInventoryFromCloud   = pullInventoryFromCloud;
 // Phase 4 — relational table bootstrap (master push / client pull)
 window._pushInventoryBootstrapToCloud = _pushInventoryBootstrapToCloud;
 window._pullInventoryFromSupabase     = _pullInventoryFromSupabase;
+
+// ── Clear Demo Stock ──────────────────────────────────────────────────────────
+// Removes the three seeded demo items by their known codes.
+// Any item the user has added (even with a coincidentally similar code) is safe
+// because we match on the exact code+name+company triple to be certain.
+const _DEMO_ITEM_CODES = ['P-1002', 'A-5541', 'B-2099'];
+
+window.clearDemoStock = function() {
+    if (!Array.isArray(masterInventoryDB)) return;
+
+    // Only remove items that still exactly match the seeded demo records
+    const before = masterInventoryDB.length;
+    masterInventoryDB = masterInventoryDB.filter(function(item) {
+        return !_DEMO_ITEM_CODES.includes(item.code);
+    });
+    window.masterInventoryDB = masterInventoryDB;
+
+    const removed = before - masterInventoryDB.length;
+    if (removed === 0) {
+        if (typeof showToast === 'function') showToast('ℹ️ No demo items found — already cleared.', false);
+        return;
+    }
+
+    // Persist the cleared state and mark as intentionally empty/modified
+    try { localStorage.setItem('_pharma_inv_dirty', 'true'); } catch(e) {}
+    saveInventoryToDB(masterInventoryDB);
+
+    // Hide the banner
+    var banner = document.getElementById('demoInventoryBanner');
+    if (banner) banner.classList.remove('visible');
+
+    // Refresh the inventory view if open
+    if (typeof renderInventoryView === 'function') {
+        try { renderInventoryView(); } catch(e) {}
+    }
+    if (typeof showInventoryPlaceholder === 'function') {
+        try { showInventoryPlaceholder(); } catch(e) {}
+    }
+    if (typeof updateHdrStats === 'function') updateHdrStats();
+
+    if (typeof showToast === 'function')
+        showToast('🗑️ Demo stock cleared (' + removed + ' item' + (removed !== 1 ? 's' : '') + ' removed). Ready for your inventory.', false);
+};
