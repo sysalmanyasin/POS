@@ -1,10 +1,10 @@
 // ============================================================
-// DuaPharmaPos — Service Worker
+// Pharma POS — Service Worker
 // Strategy: Cache-First for app shell, Network-bypass for
 //           Supabase, EmailJS, and all external API traffic.
 // ============================================================
 
-const CACHE_NAME = 'pharmapos-cache-v20.1';
+const CACHE_NAME = 'pharmapos-cache-v20';
 // ⚠️ CACHE_NAME is auto-updated by GitHub Actions on every deploy.
 // Do NOT manually edit the version number — it will be overwritten.
 

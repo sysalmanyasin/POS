@@ -2,54 +2,23 @@
   "id": "/",
   "scope": "/",
   "start_url": "/?source=pwa",
-  "short_name": "DuaPharma",
-  "name": "DuaPharmaPos Terminal",
-  "description": "Offline-First Pharmacy Point of Sale and Inventory Management Terminal.",
-  "lang": "en-PK",
+  "name": "Pharma POS",
+  "short_name": "PharmaPos",
+  "description": "Offline-first pharmacy point of sale and inventory system.",
+  "lang": "en",
   "dir": "ltr",
-
-  "icons": [
-    {
-      "src": "icons/icon-192.png",
-      "type": "image/png",
-      "sizes": "192x192",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icons/icon-512.png",
-      "type": "image/png",
-      "sizes": "512x512",
-      "purpose": "any maskable"
-    }
-  ],
-
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
   "display": "standalone",
   "orientation": "landscape",
   "categories": ["business", "productivity"],
-
+  "icons": [
+    { "src": "icons/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable" }
+  ],
   "shortcuts": [
-    {
-      "name": "New Billing Terminal",
-      "short_name": "Billing",
-      "description": "Open a fresh billing counter transaction",
-      "url": "/?view=billing&source=shortcut",
-      "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }]
-    },
-    {
-      "name": "Held Transactions",
-      "short_name": "Held Bills",
-      "description": "View and recall parked orders",
-      "url": "/?view=held&source=shortcut",
-      "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }]
-    },
-    {
-      "name": "Cloud Sync Hub",
-      "short_name": "Sync Hub",
-      "description": "Manage local-to-cloud synchronization",
-      "url": "/?view=sync&source=shortcut",
-      "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }]
-    }
+    { "name": "New Bill", "short_name": "Billing", "url": "/?view=billing&source=shortcut", "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }] },
+    { "name": "Held Bills", "short_name": "Held", "url": "/?view=held&source=shortcut", "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }] },
+    { "name": "Cloud Sync", "short_name": "Sync", "url": "/?view=sync&source=shortcut", "icons": [{ "src": "icons/shortcut-sync.png", "sizes": "96x96" }] }
   ]
 }

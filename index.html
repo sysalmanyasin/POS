@@ -24,7 +24,49 @@
 <title id="pageTitle">Pharma Plus — POS</title>
 
 <!-- PWA manifest + icons -->
-<link rel="manifest" href="manifest.json">
+<script>
+(function() {
+    var bi = (function() {
+        try { return JSON.parse(localStorage.getItem('pharma_branch_identity') || '{}'); } catch(e) { return {}; }
+    })();
+    var name     = bi.businessName || bi.branchName || 'Pharma POS';
+    var locale   = (function() { try { return localStorage.getItem('pharma_locale') || 'en'; } catch(e) { return 'en'; } })();
+    var shortName = name.length > 12 ? name.slice(0, 12) + '…' : name;
+    var manifest = {
+        id: '/', scope: '/', start_url: '/?source=pwa',
+        name: name + ' — POS Terminal',
+        short_name: shortName,
+        description: 'Offline-first pharmacy point of sale and inventory system.',
+        lang: locale, dir: 'ltr',
+        background_color: '#0f172a', theme_color: '#0f172a',
+        display: 'standalone', orientation: 'landscape',
+        categories: ['business', 'productivity'],
+        icons: [
+            { src: 'icons/icon-192.png', type: 'image/png', sizes: '192x192', purpose: 'any maskable' },
+            { src: 'icons/icon-512.png', type: 'image/png', sizes: '512x512', purpose: 'any maskable' }
+        ],
+        shortcuts: [
+            { name: 'New Bill', short_name: 'Billing', url: '/?view=billing&source=shortcut', icons: [{ src: 'icons/shortcut-sync.png', sizes: '96x96' }] },
+            { name: 'Held Bills', short_name: 'Held',   url: '/?view=held&source=shortcut',   icons: [{ src: 'icons/shortcut-sync.png', sizes: '96x96' }] },
+            { name: 'Cloud Sync', short_name: 'Sync',   url: '/?view=sync&source=shortcut',   icons: [{ src: 'icons/shortcut-sync.png', sizes: '96x96' }] }
+        ]
+    };
+    try {
+        var blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+        var url  = URL.createObjectURL(blob);
+        var link = document.createElement('link');
+        link.rel  = 'manifest';
+        link.href = url;
+        document.head.appendChild(link);
+    } catch(e) {
+        // Fallback to static manifest if Blob/URL.createObjectURL not available
+        var link2 = document.createElement('link');
+        link2.rel  = 'manifest';
+        link2.href = 'manifest.json';
+        document.head.appendChild(link2);
+    }
+})();
+</script>
 <meta name="theme-color" content="#008080">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -319,30 +361,36 @@
 <div id="welcome-screen" style="display:none;">
   <div class="ws-logo">⚕</div>
   <div class="ws-title">Pharma POS</div>
-  <div class="ws-sub">Choose how you want to run your system</div>
+  <div class="ws-sub">Pharmacy Billing &amp; Inventory System</div>
   <div class="ws-cards">
-    <div class="ws-card" onclick="chooseOfflineMode()">
-      <div class="ws-card-icon">💾</div>
-      <div class="ws-card-title">Offline Only</div>
+    <!-- PRIMARY: offline, full-width emphasis -->
+    <div class="ws-card ws-card-primary" onclick="chooseOfflineMode()" style="max-width:400px;border-color:rgba(255,255,255,.35);background:rgba(255,255,255,.13);">
+      <div class="ws-card-icon">🚀</div>
+      <div class="ws-card-title">Start Using Now</div>
       <div class="ws-card-desc">
-        Works entirely on this device.<br>
-        No setup needed.<br>
-        No sync, full privacy.
+        Works on this device — no internet, no accounts, no setup.<br>
+        Default password: <strong style="color:#fff;">12345678</strong><br>
+        Change it anytime from Settings.
       </div>
-      <button class="ws-card-btn ws-btn-offline">Start Offline →</button>
+      <button class="ws-card-btn ws-btn-cloud" style="background:#10b981;">Start Now — No Setup Needed</button>
     </div>
-    <div class="ws-card" onclick="chooseCloudMode()">
+    <!-- SECONDARY: cloud -->
+    <div class="ws-card" onclick="chooseCloudMode()" style="opacity:.85;">
       <div class="ws-card-icon">☁️</div>
-      <div class="ws-card-title">Sync with Supabase</div>
+      <div class="ws-card-title">Connect Cloud Sync</div>
       <div class="ws-card-desc">
-        Connect your own Supabase project.<br>
+        Bring your own Supabase project.<br>
         Multi-device sync &amp; backup.<br>
         You own your data completely.
       </div>
-      <button class="ws-card-btn ws-btn-cloud">Connect Database →</button>
+      <button class="ws-card-btn ws-btn-offline">Setup Cloud Sync →</button>
     </div>
   </div>
-  <div class="ws-footer">You can change this anytime from Settings → Database &amp; Email Connection</div>
+  <div class="ws-footer">Cloud sync can be added anytime from Settings — start local, upgrade later</div>
+  <div style="margin-top:14px;font-size:12px;color:rgba(255,255,255,.45);text-align:center;">
+    Have a setup link from another device?
+    <button onclick="chooseShareLinkMode()" style="background:none;border:none;color:rgba(255,255,255,.75);font-size:12px;text-decoration:underline;cursor:pointer;padding:0 2px;">Paste it here →</button>
+  </div>
 </div>
 
 <!-- ═══ SETUP SCREEN — credentials ═══ -->
@@ -442,7 +490,7 @@
 <div id="pin-gate">
   <div class="gate-logo">⚕</div>
   <div>
-    <div class="gate-title">Fazal Din's Pharma Plus</div>
+    <div class="gate-title" id="gate-title-text">Pharma POS</div>
     <div class="gate-sub">POS Terminal</div>
   </div>
   <div class="gate-input-wrap">
@@ -450,6 +498,9 @@
     <div class="gate-submit" id="gate-submit">→</div>
   </div>
   <div class="gate-status" id="gate-status">Enter PIN</div>
+  <div id="gate-default-hint" style="display:none;font-size:11px;color:rgba(255,255,255,.45);margin-top:6px;text-align:center;">
+    Default password: <span style="font-weight:700;color:rgba(255,255,255,.7);">12345678</span> — change it in Settings
+  </div>
 </div>
 
 <div id="appRoot">
@@ -494,7 +545,10 @@
 <!-- System Banners -->
 <div id="storageWarningBanner"></div>
 <div id="backupReminderBanner" onclick="openDataHub()"></div>
-<div id="demoInventoryBanner" onclick="openDataHub()">⚠️ Demo inventory active (3 sample items). Click here to import your real CSV via Data Hub.</div>
+<div id="demoInventoryBanner">
+  <span onclick="openDataHub()" style="cursor:pointer;">⚠️ Demo inventory active (3 sample items). Click to import your CSV.</span>
+  <button onclick="clearDemoStock()" style="margin-left:12px;padding:2px 10px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:5px;color:#fff;font-size:11px;font-weight:700;cursor:pointer;">✕ Clear Demo Stock</button>
+</div>
 <!-- Persistent stale-device warning — updated every 60 s by _startStaleBannerPoller() in synchub.js -->
 <div id="appStaleBanner" class="app-stale-banner" style="display:none;"></div>
 
@@ -889,10 +943,30 @@
             </div>
             <div class="sett-stack-divider"></div>
             <div class="sett-stack-body">
-              <div class="sett-row"><span class="sett-lbl">Business Name</span><input type="text" class="sett-inp" id="settingBusinessName" placeholder="e.g. Fazal Din's Pharma Plus" autocomplete="off" maxlength="60"></div>
+              <div class="sett-row"><span class="sett-lbl">Business Name</span><input type="text" class="sett-inp" id="settingBusinessName" placeholder="e.g. City Medical Store" autocomplete="off" maxlength="60"></div>
               <div class="sett-row"><span class="sett-lbl">Branch Name</span><input type="text" class="sett-inp" id="settingBranchName" placeholder="e.g. Bahria Town" autocomplete="off" maxlength="50"></div>
               <div class="sett-row"><span class="sett-lbl">Counter ID</span><input type="text" class="sett-inp" id="settingCounterId" placeholder="e.g. C-01" autocomplete="off" maxlength="20"></div>
               <div class="sett-row"><span class="sett-lbl">Operator</span><input type="text" class="sett-inp" id="settingOperatorName" placeholder="e.g. Salman" autocomplete="off" maxlength="40"></div>
+              <div class="sett-row">
+                <span class="sett-lbl">Timezone</span>
+                <select class="sett-inp" id="settingTimezone" style="max-width:280px;">
+                  <option value="Asia/Karachi">Asia/Karachi (PKT, UTC+5)</option>
+                </select>
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Date/Time Format</span>
+                <select class="sett-inp" id="settingLocale" style="max-width:280px;">
+                  <option value="en-US">English — US (12h, M/D/Y)</option>
+                  <option value="en-GB">English — UK (24h, D/M/Y)</option>
+                  <option value="en-PK" selected>English — Pakistan (12h, D/M/Y)</option>
+                  <option value="en-AU">English — Australia (12h, D/M/Y)</option>
+                  <option value="ar-AE">Arabic — UAE</option>
+                  <option value="ur-PK">Urdu — Pakistan</option>
+                  <option value="fr-FR">French — France</option>
+                  <option value="de-DE">German — Germany</option>
+                  <option value="sw-KE">Swahili — Kenya</option>
+                </select>
+              </div>
               <button class="sett-save" onclick="saveBranchIdentity()">Save Identity Settings</button>
             </div>
           </div>
@@ -1124,16 +1198,45 @@
             <div class="sett-stack-divider"></div>
             <div class="sett-stack-body">
               <div class="sett-sec" id="securitySectionTitle" style="margin-top:0;">Security — Change Admin Password</div>
+              <!-- Default password notice — shown by JS when no custom password is set yet -->
+              <div id="defaultPasswordBanner" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:9px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);font-size:12px;color:#92400e;">
+                ⚠️ You are using the <strong>default password (12345678)</strong>. Please change it now to secure your system.
+              </div>
               <input type="password" class="sett-inp sett-inp-pw" id="currentAdminPasswordInput" placeholder="Current admin password" autocomplete="off" style="display:none;">
               <input type="password" class="sett-inp sett-inp-pw" id="oldPassInput" placeholder="Current password" autocomplete="off" style="display:none;">
               <input type="password" class="sett-inp sett-inp-pw" id="newPassInput" placeholder="New password (8 digits)" autocomplete="off">
               <input type="password" class="sett-inp sett-inp-pw" id="confirmNewPassInput" placeholder="Confirm new password" autocomplete="off">
               <button class="sett-save sett-save-pur" onclick="processPasswordModification()" id="updatePassBtn">Update Password</button>
+
+              <!-- Recovery Code -->
+              <div style="margin-top:16px;padding:12px 14px;background:rgba(13,148,136,.07);border:1px solid rgba(13,148,136,.2);border-radius:9px;">
+                <div style="font-size:12px;font-weight:700;color:#0d9488;margin-bottom:4px;">🔑 Recovery Code</div>
+                <div style="font-size:11px;color:var(--g500);line-height:1.6;margin-bottom:10px;">
+                  A recovery code lets you regain access if you forget your password and don't have email recovery set up.
+                  A new code is generated automatically each time you change your password.
+                  You can also generate one manually here.
+                </div>
+                <button class="sett-save" style="background:#0d9488;color:#fff;" onclick="requestAdminAccess('REGENERATE_RECOVERY_CODE')">
+                  🔑 Generate New Recovery Code
+                </button>
+              </div>
+
+              <!-- Factory Reset — danger zone -->
+              <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(239,68,68,.2);">
+                <div class="sett-sec" style="color:#dc2626;margin-top:0;">⚠️ Danger Zone</div>
+                <p style="font-size:12px;color:var(--g500);margin:0 0 10px;line-height:1.6;">
+                  Factory Reset wipes all data, settings, and cloud credentials from <strong>this device only</strong>.
+                  Your Supabase cloud data is not affected. The app returns to first-launch state.
+                </p>
+                <button class="sett-save" style="background:#dc2626;color:#fff;"
+                    onclick="requestAdminAccess('FACTORY_RESET')">
+                  🗑️ Factory Reset This Device
+                </button>
+              </div>
             </div>
           </div>
 
           <!-- 9 · Device Manager -->
-          <div class="sett-stack" data-stack-id="device-manager" draggable="true" id="deviceManagerSection">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-devices">📱</div>
@@ -1204,6 +1307,17 @@
             </div>
             <div class="sett-stack-divider"></div>
             <div class="sett-stack-body">
+              <!-- Status row using conn-dot pattern (2A Card 3) -->
+              <div id="dbxConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
+                <span id="dbxConnDot" class="conn-dot grey"></span>
+                <div class="conn-info">
+                  <div class="conn-label">Dropbox Backup</div>
+                  <div id="dbxConnSub" class="conn-sub">Not connected — save your App Key and authorise below.</div>
+                </div>
+                <div class="conn-actions">
+                  <div style="font-size:11px;color:var(--g500);">Last upload: <span id="dbxLastUpload">—</span></div>
+                </div>
+              </div>
               <!-- Step 1: App Key -->
               <div style="font-size:10px;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;">Step 1 — Your Dropbox App Key</div>
               <div style="font-size:9px;color:#94a3b8;margin-bottom:8px;line-height:1.5;">
@@ -1217,16 +1331,9 @@
               <button class="sett-save" onclick="dropboxSaveAppKey()">Save App Key</button>
               <!-- Step 2: Connect -->
               <div style="font-size:10px;font-weight:700;color:#64748b;margin:12px 0 6px;text-transform:uppercase;letter-spacing:.5px;">Step 2 — Authorise</div>
-              <div class="sett-row" style="align-items:center;">
-                <span class="sett-lbl">Status</span>
-                <span id="dbxStatusBadge" class="dbx-status-badge dbx-off">⚪ Not connected</span>
-              </div>
-              <div style="font-size:9px;color:#94a3b8;margin-top:2px;margin-bottom:8px;">
-                Last upload: <span id="dbxLastUpload">—</span>
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button id="dbxConnectBtn" class="sett-save" style="background:#0ea5e9;" onclick="dropboxConnect()">🔗 Connect Dropbox</button>
-                <button id="dbxDisconnectBtn" class="sett-save" style="background:#ef4444;display:none;" onclick="dropboxDisconnect()">Disconnect</button>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <button id="dbxConnectBtn" class="conn-btn primary" onclick="dropboxConnect()">🔗 Connect Dropbox</button>
+                <button id="dbxDisconnectBtn" class="conn-btn danger" style="display:none;" onclick="dropboxDisconnect()">Disconnect</button>
               </div>
               <!-- Step 3: Auto-backup toggle -->
               <div style="font-size:10px;font-weight:700;color:#64748b;margin:14px 0 6px;text-transform:uppercase;letter-spacing:.5px;">Step 3 — Auto-Backup</div>
@@ -1239,8 +1346,8 @@
               </div>
               <!-- Manual actions -->
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-                <button id="dbxBackupBtn" class="sett-save" style="background:#16a34a;" onclick="dropboxUploadBackup(false)" disabled>📤 Backup Now</button>
-                <button id="dbxRestoreBtn" class="sett-save" style="background:#7c3aed;" onclick="openDropboxRestoreModal()" disabled>📥 Restore from Dropbox</button>
+                <button id="dbxBackupBtn" class="conn-btn primary" onclick="dropboxUploadBackup(false)" disabled>📤 Backup Now</button>
+                <button id="dbxRestoreBtn" class="conn-btn outline" onclick="openDropboxRestoreModal()" disabled>📥 Restore</button>
               </div>
             </div>
           </div>
@@ -1526,8 +1633,8 @@
 <div id="thermalReceiptPrintWrapper">
   <div class="receipt-header">
     <h2 id="printBranchName">PHARMA POS</h2>
-    <p id="printReceiptAddress">Community Pharmacy</p>
-    <p id="printReceiptPhone">Lahore, Pakistan</p>
+    <p id="printReceiptAddress"></p>
+    <p id="printReceiptPhone"></p>
   </div>
   <div class="receipt-divider"></div>
   <table class="receipt-meta-table">
