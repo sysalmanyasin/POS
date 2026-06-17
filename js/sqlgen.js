@@ -314,6 +314,31 @@ begin
 end;
 $$;
 
+-- ════════════════════════════════════════════════════════════════
+-- EXPLICIT TABLE GRANTS
+-- RLS policies control WHICH rows are visible/writable, but they
+-- have no effect if the underlying table-level privilege for an
+-- operation (especially DELETE) was never granted.  Supabase's
+-- default project privileges vary by provisioning date, so we
+-- grant everything explicitly here rather than relying on defaults.
+-- Without this, DELETE silently no-ops on some projects even when
+-- RLS allows it (e.g. Global Purge never actually removes devices).
+-- ════════════════════════════════════════════════════════════════
+grant select, insert, update, delete on table pharma_sync         to anon;
+grant select, insert, update, delete on table devices             to anon;
+grant select, insert, update, delete on table invoices            to anon;
+grant select, insert, update, delete on table invoice_items       to anon;
+grant select, insert, update, delete on table inventory           to anon;
+grant select, insert, update, delete on table inventory_movements to anon;
+grant select, insert, update, delete on table settings            to anon;
+grant select, insert, update, delete on table sync_log            to anon;
+grant select, insert, update, delete on table sync_conflicts      to anon;
+
+-- sequence grants for bigserial columns (sync_log.id, sync_conflicts.conflict_id)
+-- Using ALL SEQUENCES rather than named sequences avoids Supabase naming
+-- convention differences (bigserial vs identity columns) across project versions.
+grant usage, select on all sequences in schema public to anon;
+
 grant execute on function deduct_inventory_atomic(text,integer,text,text,integer,text) to anon;
 `;
 }

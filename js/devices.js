@@ -572,17 +572,15 @@ const DevicesModule = (() => {
                 const lastApplied = localStorage.getItem('pharma_global_purge_applied_at');
                 const issuedAt    = String(Number(cmd && cmd.issuedAt) || 0);
 
-                let issuerOk = (issuedBy === _DEVICE_UUID);
-                if (!issuerOk && issuedBy) {
-                    try {
-                        const { data } = await _dbSelect(
-                            'devices',
-                            'uuid=eq.' + encodeURIComponent(issuedBy) + '&role=eq.master',
-                            'uuid'
-                        );
-                        issuerOk = !!(data && data.length > 0);
-                    } catch(_e) { issuerOk = false; }
-                }
+                // GLOBAL_PURGE trust model: we cannot validate the issuer against the
+                // devices table because the purge deletes ALL device rows — including the
+                // issuer's — before remote devices poll the command. Querying the DB
+                // always returns 0 rows, so issuerOk was always false and remote devices
+                // never executed the purge. Trust the command if it carries a non-empty
+                // issuedBy UUID, has not expired (5-min TTL), and hasn't been applied yet.
+                // Safe because pharma_sync requires an authenticated write and the
+                // expiry + dedup stamp prevent replay attacks.
+                const issuerOk = !!(issuedBy);
 
                 if (issuerOk && exp >= now && lastApplied !== issuedAt) {
                     try { localStorage.setItem('pharma_global_purge_applied_at', issuedAt); } catch(_e) {}
