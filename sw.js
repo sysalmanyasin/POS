@@ -1,5 +1,5 @@
 // ============================================================
-// Pharma POS — Service Worker  (Ultimate Edition)
+// Pharma POS — Service Worker  v27  (Ultimate Edition)
 //
 // Cache strategies by resource type:
 //   Navigation   → Network-First (3s) → Cache → Offline page
@@ -15,10 +15,9 @@
 //   • Safe SW swap     → only activates on SKIP_WAITING message
 // ============================================================
 
-// Automated placeholders for GitHub Actions 'sed' injection
-const SW_VERSION   = '{{VERSION}}';
-const SHELL_CACHE  = 'pharmapos-cache-{{VERSION}}';
-const IMAGE_CACHE  = 'pharmapos-cache-{{VERSION}}-images';
+const SW_VERSION   = 'v27';
+const SHELL_CACHE  = 'pharmapos-cache-v27';
+const IMAGE_CACHE  = 'pharmapos-cache-v27-images';
 
 // Keep at most this many entries per cache bucket
 const MAX_IMAGE_ENTRIES = 60;
@@ -192,7 +191,6 @@ self.addEventListener('install', (event) => {
         );
         console.log(`[SW ${SW_VERSION}] Precache complete.`);
     })());
-    // Safe swap: only activate when app explicitly sends SKIP_WAITING
 });
 
 // ============================================================
@@ -373,4 +371,3 @@ self.addEventListener('fetch', (event) => {
         }
     })());
 });
-
