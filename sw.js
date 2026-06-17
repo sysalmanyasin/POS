@@ -16,8 +16,8 @@
 // ============================================================
 
 const SW_VERSION   = 'v25';
-const SHELL_CACHE  = `pharmapos-shell-${SW_VERSION}`;
-const IMAGE_CACHE  = `pharmapos-images-${SW_VERSION}`;
+const SHELL_CACHE  = 'pharmapos-cache-v25';
+const IMAGE_CACHE  = 'pharmapos-cache-v25-images';
 
 // Keep at most this many entries per cache bucket
 const MAX_IMAGE_ENTRIES = 60;
@@ -74,14 +74,14 @@ const ICON_ASSETS = [
 
 // ── External hosts that must NEVER be intercepted ────────────
 const BYPASS_HOSTS = [
-    'supabase.co',          // Supabase REST / realtime / auth
-    'emailjs.com',          // EmailJS SDK & API
-    'jsdelivr.net',         // CDN (EmailJS browser bundle)
-    'cdnjs.cloudflare.com', // Any additional CDN assets
-    'dropboxapi.com',       // Dropbox API (upload/download)
+    'supabase.co',           // Supabase REST / realtime / auth
+    'emailjs.com',           // EmailJS SDK & API
+    'jsdelivr.net',          // CDN (EmailJS browser bundle)
+    'cdnjs.cloudflare.com',  // Any additional CDN assets
+    'dropboxapi.com',        // Dropbox API (upload/download)
     'content.dropboxapi.com',// Dropbox file content
-    'notify.dropbox.com',   // Dropbox push notifications
-    'dropbox.com'           // Dropbox OAuth & web
+    'notify.dropbox.com',    // Dropbox push notifications
+    'dropbox.com'            // Dropbox OAuth & web
 ];
 
 function _shouldBypass(url) {
@@ -192,7 +192,6 @@ self.addEventListener('install', (event) => {
         console.log(`[SW ${SW_VERSION}] Precache complete.`);
     })());
     // Safe swap: only activate when app explicitly sends SKIP_WAITING
-    // (after checking no active cart / sync in progress)
 });
 
 // ============================================================
@@ -206,7 +205,6 @@ self.addEventListener('message', (event) => {
             self.skipWaiting();
             break;
         case 'CACHE_STATUS':
-            // App can ask SW for cache inventory (debug)
             (async () => {
                 const keys = await caches.keys();
                 const sizes = await Promise.all(
@@ -216,7 +214,6 @@ self.addEventListener('message', (event) => {
             })();
             break;
         case 'FORCE_RECACHE':
-            // Wipe shell cache and re-fetch everything (triggered from Settings)
             (async () => {
                 await caches.delete(SHELL_CACHE);
                 const cache = await caches.open(SHELL_CACHE);
@@ -251,7 +248,6 @@ self.addEventListener('activate', (event) => {
                 })
         );
         await self.clients.claim();
-        // Tell any open tabs there is fresh content in the new SW
         _broadcast({ type: 'SW_ACTIVATED', version: SW_VERSION });
         console.log(`[SW ${SW_VERSION}] Active and controlling all clients.`);
     })());
@@ -263,7 +259,6 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('sync', (event) => {
     if (event.tag === 'pharma-sync-queue') {
         console.log(`[SW ${SW_VERSION}] Background sync triggered — notifying app.`);
-        // Tell the app to run its sync flush (forceSyncNow or drain queue)
         event.waitUntil(
             self.clients.matchAll({ type: 'window', includeUncontrolled: true })
                 .then(clients => {
@@ -293,7 +288,6 @@ self.addEventListener('periodicsync', (event) => {
 // 6. FETCH — per-resource cache strategies
 // ============================================================
 self.addEventListener('fetch', (event) => {
-    // Non-GET always goes straight to network
     if (event.request.method !== 'GET') return;
 
     const url = new URL(event.request.url);
@@ -301,7 +295,7 @@ self.addEventListener('fetch', (event) => {
     // External APIs: total bypass — do not intercept
     if (_shouldBypass(url)) return;
 
-    // ── A. Navigation requests: Network-First with offline fallback ──
+    // ── A. Navigation: Network-First with offline fallback ──
     if (event.request.mode === 'navigate') {
         event.respondWith((async () => {
             try {
@@ -316,7 +310,6 @@ self.addEventListener('fetch', (event) => {
                 }
                 throw new Error(`HTTP ${networkRes.status}`);
             } catch (_) {
-                // Network unavailable or timed out — try cache then offline page
                 const cached = await caches.match('/index.html');
                 if (cached) return cached;
                 return OFFLINE_RESPONSE.clone();
@@ -325,13 +318,13 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // ── B. Images / icons: Cache-First, add to image cache if new ───
+    // ── B. Images / icons: Cache-First, separate bucket ───
     if (_isImageRequest(event.request)) {
         event.respondWith((async () => {
-            const imageCache  = await caches.open(IMAGE_CACHE);
-            const shellCache  = await caches.open(SHELL_CACHE);
-            const cached      = await imageCache.match(event.request, { ignoreSearch: true })
-                             || await shellCache.match(event.request, { ignoreSearch: true });
+            const imageCache = await caches.open(IMAGE_CACHE);
+            const shellCache = await caches.open(SHELL_CACHE);
+            const cached     = await imageCache.match(event.request, { ignoreSearch: true })
+                            || await shellCache.match(event.request, { ignoreSearch: true });
             if (cached) return cached;
             try {
                 const res = await fetch(event.request);
@@ -352,24 +345,19 @@ self.addEventListener('fetch', (event) => {
         event.respondWith((async () => {
             const cache  = await caches.open(SHELL_CACHE);
             const cached = await cache.match(event.request, { ignoreSearch: true });
-
-            // Revalidate in the background regardless of whether we have a cache hit
             const revalidate = fetch(event.request)
                 .then(networkRes => {
                     if (!networkRes.ok) return networkRes;
-                    // Check if content actually changed before storing
                     cache.put(event.request, networkRes.clone()).catch(() => {});
                     return networkRes;
                 })
                 .catch(() => null);
-
-            // Serve stale instantly, fresh arrives in background for next load
             return cached || await revalidate || new Response('', { status: 503 });
         })());
         return;
     }
 
-    // ── D. Everything else: Network-First with short cache fallback ──
+    // ── D. Everything else: Network-First with cache fallback ──
     event.respondWith((async () => {
         try {
             const res = await fetch(event.request);
