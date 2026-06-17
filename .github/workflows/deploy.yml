@@ -1,95 +1,40 @@
-# ============================================================
-# DuaPharmaPos — Auto Deploy Workflow
-# Triggers on every push to main branch.
-# 1. Replaces all ?v=XX cache strings with a build timestamp
-# 2. Deploys to GitHub Pages automatically
-# ============================================================
-
 name: Deploy DuaPharmaPos
 
 on:
   push:
     branches:
-      - main          # runs every time you push to main
-  workflow_dispatch:  # also allows manual trigger from GitHub UI
+      - main
 
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Only one deploy runs at a time — if you push twice quickly,
-# the second waits for the first to finish.
+# Allow one concurrent deployment
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
-  deploy:
-    name: Build & Deploy to GitHub Pages
-    runs-on: ubuntu-latest
+  build-and-deploy:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-
+    runs-on: ubuntu-latest
     steps:
-
-      # ── Step 1: Download your repo code ─────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── Step 2: Generate a build version from date+time ─────
-      # Format: YYYYMMDDHHMI — e.g. 202506111430
-      # This becomes the new ?v= number on every file.
-      - name: Generate build version
-        id: version
-        run: |
-          BUILD_VER=$(date -u +"%Y%m%d%H%M")
-          echo "BUILD_VER=$BUILD_VER" >> $GITHUB_ENV
-          echo "✅ Build version: $BUILD_VER"
-
-      # ── Step 3: Replace all ?v=XX with the new build version ─
-      # Covers: all JS files and CSS files in index.html
-      - name: Bump cache-busting version strings
-        run: |
-          echo "Before:"
-          grep -o '?v=[^"]*' index.html || true
-
-          # Replace ?v=ANY_NUMBER with ?v=BUILD_VER
-          sed -i "s/?v=[0-9]*/?v=$BUILD_VER/g" index.html
-
-          echo "After:"
-          grep -o '?v=[^"]*' index.html || true
-          echo "✅ All version strings updated to $BUILD_VER"
-
-      # ── Step 4: Update Service Worker cache name ────────────
-      # Forces all browsers to download a fresh SW on next visit.
-      # Your sw.js has: const CACHE_NAME = 'pharmapos-cache-v19.4';
-      - name: Bump Service Worker cache version
-        run: |
-          sed -i "s/pharmapos-cache-v[0-9.]*/pharmapos-cache-v$BUILD_VER/" sw.js
-          echo "✅ SW cache name updated"
-          grep "CACHE_NAME" sw.js
-
-      # ── Step 5: Package files for GitHub Pages ──────────────
       - name: Setup GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v4
 
       - name: Upload site files
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'   # uploads everything in the root folder
+          # Upload the entire repository root
+          path: '.'
 
-      # ── Step 6: Deploy to GitHub Pages ──────────────────────
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
-      # ── Step 7: Print success summary ───────────────────────
-      - name: Deployment summary
-        run: |
-          echo "============================================"
-          echo "✅ DuaPharmaPos deployed successfully!"
-          echo "🌐 URL     : https://duapharma.com"
-          echo "🔖 Version : $BUILD_VER"
-          echo "============================================"
