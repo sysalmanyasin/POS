@@ -87,100 +87,6 @@
 <!-- EmailJS (Task 3) -->
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 
-<!-- ── PIN GATE STYLES ── -->
-<style>
-  #pin-gate {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: linear-gradient(135deg, #08455A 0%, #0B5F7A 60%, #1A83A8 100%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 28px;
-    padding: 24px;
-    text-align: center;
-  }
-  #pin-gate.hidden { display: none; }
-
-  .gate-logo {
-    width: 84px; height: 84px;
-    background: rgba(255,255,255,0.15);
-    border: 1px solid rgba(255,255,255,0.3);
-    border-radius: 20px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 42px;
-    backdrop-filter: blur(4px);
-    box-shadow: inset 0 2px 4px rgba(255,255,255,0.1);
-  }
-  .gate-title { color: #fff; font-size: 17px; font-weight: 700; letter-spacing: 0.3px; }
-  .gate-sub { color: rgba(255,255,255,0.65); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; margin-top: -16px; }
-
-  #pin-dots { display: flex; gap: 14px; }
-  .pin-dot {
-    width: 16px; height: 16px; border-radius: 50%;
-    border: 2px solid rgba(255,255,255,0.5);
-    background: transparent;
-    transition: background 0.15s, transform 0.15s;
-  }
-  .pin-dot.filled { background: #fff; transform: scale(1.1); }
-  .pin-dot.error { border-color: #E74C3C; background: #E74C3C; }
-
-  #pin-gate.shake .gate-input-wrap { animation: pingate-shake 0.4s; }
-  @keyframes pingate-shake {
-    0%, 100% { transform: translateX(0); }
-    20%, 60% { transform: translateX(-8px); }
-    40%, 80% { transform: translateX(8px); }
-  }
-
-  .gate-input-wrap {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-  }
-  .gate-input {
-    width: 200px;
-    padding: 14px 16px;
-    border-radius: 12px;
-    border: 1px solid rgba(255,255,255,0.3);
-    background: rgba(255,255,255,0.08);
-    color: #fff;
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: 3px;
-    text-align: center;
-    text-transform: uppercase;
-    outline: none;
-  }
-  .gate-input::placeholder {
-    color: rgba(255,255,255,0.4);
-    letter-spacing: 1px;
-    text-transform: none;
-    font-weight: 500;
-  }
-  .gate-input.error { border-color: #E74C3C; }
-
-  .gate-submit {
-    width: 48px; height: 48px;
-    border-radius: 12px;
-    border: 1px solid rgba(255,255,255,0.25);
-    background: rgba(255,255,255,0.12);
-    color: #fff;
-    font-size: 20px;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    transition: background 0.15s, transform 0.1s;
-  }
-  .gate-submit:active { background: rgba(255,255,255,0.25); transform: scale(0.95); }
-
-  .gate-status {
-    min-height: 18px;
-    color: rgba(255,255,255,0.75);
-    font-size: 13px; font-weight: 600;
-  }
-  .gate-status.error-text { color: #ffd2cc; }
-
   /* ═══ CONNECTION BADGE (header) ═══ */
   .pharma-conn-badge {
     display: none;
@@ -356,7 +262,6 @@
 
 <body>
 
-<!-- ── PIN GATE SPLASH ── -->
 
 <!-- ═══ WELCOME SCREEN — mode selection ═══ -->
 <div id="welcome-screen" style="display:none;">
@@ -488,21 +393,6 @@
   </div>
 </div>
 
-<div id="pin-gate">
-  <div class="gate-logo">⚕</div>
-  <div>
-    <div class="gate-title" id="gate-title-text">Pharma POS</div>
-    <div class="gate-sub">POS Terminal</div>
-  </div>
-  <div class="gate-input-wrap">
-    <input type="password" id="gate-input" class="gate-input" placeholder="Enter PIN" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20">
-    <div class="gate-submit" id="gate-submit">→</div>
-  </div>
-  <div class="gate-status" id="gate-status">Enter PIN</div>
-  <div id="gate-default-hint" style="display:none;font-size:11px;color:rgba(255,255,255,.45);margin-top:6px;text-align:center;">
-    Default password: <span style="font-weight:700;color:rgba(255,255,255,.7);">12345678</span> — change it in Settings
-  </div>
-</div>
 
 <div id="appRoot">
 
@@ -924,6 +814,7 @@
           <div class="sett-view-title">⚙️ System Settings</div>
           <div class="sett-hdr-actions">
             <button class="sett-save-all-btn" onclick="saveAllSettings()" title="Save all settings">💾 Save All Settings</button>
+            <button class="sett-save-all-btn" onclick="openCredentialShareModal('export')" title="Show credentials QR code" style="background:#16a34a;color:#fff;border:none;">📲 Cred QR</button>
             <button class="sett-back-btn" onclick="switchTab('billingView',document.getElementById('tab-billing'))">← Back to Billing</button>
           </div>
         </div>
@@ -1194,6 +1085,10 @@
                 <div class="sett-stack-title">Security</div>
                 <div class="sett-stack-desc">Admin password, access controls and PIN policies</div>
               </div>
+              <button onclick="event.stopPropagation();openCredentialShareModal('export')" title="Show credentials QR code for quick sharing"
+                style="margin-right:6px;padding:5px 10px;background:#16a34a;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;flex-shrink:0;">
+                📲 Cred QR
+              </button>
               <div class="sett-stack-chevron">▾</div>
             </div>
             <div class="sett-stack-divider"></div>
@@ -1238,6 +1133,7 @@
           </div>
 
           <!-- 9 · Device Manager -->
+          <div class="sett-stack" data-stack-id="device-manager" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-devices">📱</div>
@@ -1269,6 +1165,8 @@
               <button class="sett-save" style="margin-top:8px;background:#7c3aed;color:#fff;font-size:11px;" onclick="openMasterReclaimModal()">👑 Master Reclaim</button>
             </div>
           </div>
+
+          </div><!-- /device-manager -->
 
           <!-- 10 · Live Receipt Preview -->
           <div class="sett-stack" data-stack-id="live-receipt-preview" draggable="true">
@@ -1461,6 +1359,38 @@
               <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;">
                 Create a free account at <strong>emailjs.com</strong>. Used to send password-reset
                 OTPs from Settings → Security.
+              </div>
+            </div>
+          </div>
+
+
+          <!-- 14 · Credential Share -->
+          <div class="sett-stack" data-stack-id="credential-share" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#f0fdf4;color:#16a34a;">🔗</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Credential Share</div>
+                <div class="sett-stack-desc">Share or import all app credentials via URL, QR code, or WhatsApp</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <p style="font-size:11px;color:var(--g500);margin:0 0 12px;line-height:1.6;">
+                Export all your API credentials (Supabase, EmailJS, Dropbox) as a shareable link or QR code.
+                Import on another device by scanning or pasting the link.
+              </p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <button class="conn-btn primary" onclick="openCredentialShareModal('export')" style="background:#16a34a;border-color:#16a34a;">
+                  📤 Share Credentials
+                </button>
+                <button class="conn-btn outline" onclick="openCredentialShareModal('import')">
+                  📥 Import Credentials
+                </button>
+              </div>
+              <div style="font-size:10px;color:var(--g400);line-height:1.5;">
+                ⚠️ Credentials include sensitive API keys. Only share via secure channels.
               </div>
             </div>
           </div>
@@ -2751,110 +2681,83 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('online', _registerBgSync);
 }
 </script>
-<!-- ── PIN GATE LOGIC ── -->
-<script>
-  (function() {
-    // SHA-256 hash of the staff PIN (entered text is uppercased before hashing).
-    // To change the PIN, compute a new hash:
-    // crypto.subtle.digest('SHA-256', new TextEncoder().encode('YOURPIN'))
-    // then format the result as hex, and replace the value below.
-    const PIN_HASH = "092136c8fb3cb70d654532dde489d7605d1c9e6ca54374bfe2fcc3d28b98bdbe"; // PIN: SALMAN
 
-    const UNLOCK_KEY = 'pos_unlocked'; // unique per-app key
-    const MAX_ATTEMPTS = 3;
-    const COOLDOWN_SECONDS = 30;
-
-    const gate = document.getElementById('pin-gate');
-    const input = document.getElementById('gate-input');
-    const submit = document.getElementById('gate-submit');
-    const status = document.getElementById('gate-status');
-
-    let attempts = 0;
-    let cooldownTimer = null;
-
-    // Already unlocked on this device
-    if (localStorage.getItem(UNLOCK_KEY) === 'true') {
-      gate.classList.add('hidden');
-      return;
-    }
-
-    async function sha256(text) {
-      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-
-    function setInputEnabled(enabled) {
-      input.disabled = !enabled;
-      submit.style.pointerEvents = enabled ? 'auto' : 'none';
-      submit.style.opacity = enabled ? '1' : '0.4';
-      input.style.opacity = enabled ? '1' : '0.4';
-    }
-
-    function startCooldown() {
-      let remaining = COOLDOWN_SECONDS;
-      setInputEnabled(false);
-      status.classList.add('error-text');
-      status.textContent = `Too many attempts. Try again in ${remaining}s`;
-
-      cooldownTimer = setInterval(() => {
-        remaining--;
-        if (remaining <= 0) {
-          clearInterval(cooldownTimer);
-          cooldownTimer = null;
-          attempts = 0;
-          status.classList.remove('error-text');
-          status.textContent = 'Enter PIN';
-          input.value = '';
-          input.classList.remove('error');
-          setInputEnabled(true);
-          input.focus();
-        } else {
-          status.textContent = `Too many attempts. Try again in ${remaining}s`;
-        }
-      }, 1000);
-    }
-
-    async function checkPin() {
-      const value = input.value.trim().toUpperCase();
-      if (!value) return;
-
-      const hash = await sha256(value);
-      if (hash === PIN_HASH) {
-        localStorage.setItem(UNLOCK_KEY, 'true');
-        gate.classList.add('hidden');
-      } else {
-        attempts++;
-        input.classList.add('error');
-        gate.classList.add('shake');
-        setTimeout(() => gate.classList.remove('shake'), 400);
-
-        if (attempts >= MAX_ATTEMPTS) {
-          input.value = '';
-          startCooldown();
-        } else {
-          status.classList.add('error-text');
-          status.textContent = `Incorrect PIN (${MAX_ATTEMPTS - attempts} attempt${MAX_ATTEMPTS - attempts === 1 ? '' : 's'} left)`;
-          setTimeout(() => {
-            input.value = '';
-            input.classList.remove('error');
-            status.classList.remove('error-text');
-            status.textContent = 'Enter PIN';
-          }, 600);
-        }
-      }
-    }
-
-    submit.addEventListener('click', checkPin);
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') checkPin();
-    });
-    input.addEventListener('input', () => {
-      input.classList.remove('error');
-    });
-
-    // Focus the field on load (mobile keyboards may need a tap first)
-    setTimeout(() => input.focus(), 100);
-  })();
-</script>
+<!-- ═══ CREDENTIAL SHARE MODAL ═══════════════════════════════════════════ -->
+<div id="credShareModal" class="modal-overlay" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);align-items:center;justify-content:center;padding:16px;">
+  <div style="background:var(--surface,#fff);border-radius:18px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.4);">
+    <div style="padding:20px 22px 14px;border-bottom:1px solid var(--g100,#f1f5f9);display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-size:16px;font-weight:800;color:var(--g900,#0f172a);" id="credShareModalTitle">📤 Share Credentials</div>
+        <div style="font-size:11px;color:var(--g500);" id="credShareModalSub">Export all API credentials</div>
+      </div>
+      <button onclick="closeCredentialShareModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--g400);line-height:1;padding:4px;">✕</button>
+    </div>
+    <!-- Export panel -->
+    <div id="credShareExportPanel" style="padding:18px 22px;">
+      <div id="credShareQrBox" style="display:flex;justify-content:center;margin-bottom:14px;min-height:160px;align-items:center;">
+        <div style="font-size:12px;color:var(--g400);">Generating QR code…</div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <div style="font-size:10px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Share Link</div>
+        <div style="display:flex;gap:6px;">
+          <input id="credShareUrlInput" type="text" readonly style="flex:1;padding:8px 10px;border:1px solid var(--g200,#e2e8f0);border-radius:8px;font-size:10px;background:var(--g50,#f8fafc);color:var(--g700);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" value="">
+          <button onclick="copyCredShareUrl()" style="padding:8px 12px;background:#0ea5e9;color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;">📋 Copy</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+        <button onclick="shareCredWhatsApp()" style="flex:1;min-width:120px;padding:9px;background:#25D366;color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;">
+          💬 WhatsApp
+        </button>
+        <button onclick="shareCredSMS()" style="flex:1;min-width:120px;padding:9px;background:#5856d6;color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;">
+          💬 SMS
+        </button>
+        <button onclick="downloadCredTxt()" style="flex:1;min-width:120px;padding:9px;background:#f1f5f9;color:#475569;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;">
+          📄 .txt File
+        </button>
+      </div>
+      <div style="border-top:1px solid var(--g100);padding-top:12px;">
+        <div style="font-size:10px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Included Credentials</div>
+        <div id="credShareSummary" style="font-size:11px;color:var(--g600);line-height:1.8;"></div>
+      </div>
+    </div>
+    <!-- Import panel -->
+    <div id="credShareImportPanel" style="padding:18px 22px;display:none;">
+      <div style="font-size:12px;color:var(--g500);margin-bottom:14px;line-height:1.6;">
+        Import credentials from another device. Choose one method:
+      </div>
+      <!-- Paste URL -->
+      <div style="margin-bottom:14px;">
+        <div style="font-size:10px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">📎 Paste Share Link</div>
+        <div style="display:flex;gap:6px;">
+          <input id="credImportUrlInput" type="text" placeholder="Paste the share URL here…" style="flex:1;padding:8px 10px;border:1px solid var(--g200);border-radius:8px;font-size:11px;background:#fff;color:var(--g800);">
+          <button onclick="importCredFromUrl()" style="padding:8px 12px;background:#16a34a;color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;">Import</button>
+        </div>
+      </div>
+      <!-- Upload text file -->
+      <div style="margin-bottom:14px;">
+        <div style="font-size:10px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">📄 Upload .txt File</div>
+        <label style="display:block;padding:10px 14px;border:2px dashed var(--g300,#d1d5db);border-radius:10px;text-align:center;cursor:pointer;font-size:12px;color:var(--g500);">
+          <input type="file" id="credImportFileInput" accept=".txt" style="display:none;" onchange="importCredFromFile(this)">
+          Click to choose a .txt credential file
+        </label>
+      </div>
+      <!-- Camera QR scan -->
+      <div style="margin-bottom:14px;">
+        <div style="font-size:10px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">📷 Scan QR Code</div>
+        <button onclick="startCredQrScan()" style="width:100%;padding:9px;background:#7c3aed;color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;">
+          📷 Open Camera to Scan
+        </button>
+        <video id="credQrVideo" style="display:none;width:100%;border-radius:10px;margin-top:8px;max-height:200px;object-fit:cover;" playsinline autoplay muted></video>
+        <canvas id="credQrCanvas" style="display:none;"></canvas>
+        <button id="credQrStopBtn" onclick="stopCredQrScan()" style="display:none;width:100%;padding:7px;background:#ef4444;color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;margin-top:6px;">
+          ✕ Stop Scan
+        </button>
+      </div>
+      <div id="credImportStatus" style="min-height:20px;font-size:12px;font-weight:600;text-align:center;"></div>
+    </div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="js/credentialShare.js"></script>
 </body>
 </html>
