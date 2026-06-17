@@ -1,8 +1,8 @@
 // ============================================================
-// Pharma POS — Service Worker  v27  (Ultimate Edition)
+// Pharma POS — Service Worker  v28  (Ultimate Edition)
 //
 // Cache strategies by resource type:
-//   Navigation   → Network-First (3s) → Cache → Offline page
+//   Navigation   → Network-First (4s) → Cache → Offline page
 //   JS / CSS     → Cache-First → background revalidate
 //   Images       → Cache-First (long-lived, no revalidation)
 //   External API → Network-Only bypass (Supabase, Dropbox, EmailJS)
@@ -15,9 +15,9 @@
 //   • Safe SW swap     → only activates on SKIP_WAITING message
 // ============================================================
 
-const SW_VERSION   = 'v27.1';
-const SHELL_CACHE  = 'pharmapos-cache-v27.1';
-const IMAGE_CACHE  = 'pharmapos-cache-v27.1-images';
+const SW_VERSION   = 'v28';
+const SHELL_CACHE  = 'pharmapos-cache-v28';
+const IMAGE_CACHE  = 'pharmapos-cache-v28-images';
 
 // Keep at most this many entries per cache bucket
 const MAX_IMAGE_ENTRIES = 60;
@@ -41,11 +41,12 @@ const SHELL_ASSETS = [
     '/index.html',
     '/manifest.json',
 
-    // Core JS modules (alphabetical)
+    // Core JS modules (Exactly 16 files verified from production)
     '/js/auditLog.js',
     '/js/auth.js',
     '/js/billing.js',
     '/js/config.js',
+    '/js/credentialshare.js', // <-- Newly added credential module
     '/js/devices.js',
     '/js/dropbox.js',
     '/js/history.js',
