@@ -8,7 +8,7 @@
 //   • Role is auto-assigned: if no master exists in the table → master,
 //     otherwise → client.  The manual role-picker modal is removed.
 //   • Registration collects device name AND counter ID (both required).
-//   • Max 6 active devices enforced on registration.
+//   • No device limit — this is a BYOS app using your own Supabase project.
 //   • Master re-claim is a separate flow (triggered from Settings),
 //     protected by the admin PIN via requestAdminAccess().
 //   • Heartbeat PATCHes only last_seen_at (and today_bills / active_staff)
@@ -31,7 +31,6 @@ const DevicesModule = (() => {
     // ── Constants ─────────────────────────────────────────────────────────
     const HEARTBEAT_MS   = 60_000;
     const COMMAND_POLL_MS = 15_000;
-    const MAX_DEVICES    = 6;   // 1 master + 5 clients
 
     // Legacy KV keys still used for cross-device commands
     const COMMANDS_KEY   = 'pharma_commands';
@@ -360,14 +359,6 @@ const DevicesModule = (() => {
             }
 
             // ── ONLINE REGISTRATION (cloud flow) ───────────────────────────
-            // Enforce max device limit
-            const count = await _activeDeviceCount();
-            if (count >= MAX_DEVICES) {
-                if (errEl) errEl.textContent = `❌ Maximum ${MAX_DEVICES} devices allowed. Ask the master to remove a device first.`;
-                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '✅ Register Device'; }
-                return;
-            }
-
             // Auto-assign role
             const hasMaster = await _masterExists();
             const role = hasMaster ? 'client' : 'master';
@@ -961,7 +952,7 @@ const DevicesModule = (() => {
                     <div>
                         <div style="font-size:15px;font-weight:800;">📱 Device Manager</div>
                         <div style="font-size:10px;color:var(--g500);margin-top:3px;line-height:1.4;">
-                            All devices registered to this network.<br>Max ${MAX_DEVICES} devices (1 master + ${MAX_DEVICES - 1} clients).
+                            All devices registered to this network. No device limit — it's your own Supabase project.
                         </div>
                     </div>
                     <button onclick="document.getElementById('devicesDashboard').remove()"
@@ -1078,7 +1069,7 @@ const DevicesModule = (() => {
             };
 
             let html = `<div style="font-size:11px;font-weight:800;color:var(--g700);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px;">
-                🖥 Active Devices (${devices.length} / ${MAX_DEVICES})
+                🖥 Active Devices (${devices.length} registered)
             </div>`;
             html += devices.map(renderCard).join('');
             html += `<div style="text-align:center;margin-top:16px;">

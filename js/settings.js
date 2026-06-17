@@ -924,7 +924,12 @@ async function executePurgeOld(keepDays) {
         // Cloud / Supabase badge
         const cloudBadge = document.getElementById('dhSupabaseBadge');
         if (cloudBadge) {
-            cloudBadge.textContent = navigator.onLine ? '☁️ Cloud OK' : '⚠️ Offline';
+            const supaConfigured = (typeof _isSupabaseConfigured === 'function') && _isSupabaseConfigured();
+            if (!supaConfigured) {
+                cloudBadge.textContent = '⚙️ Not configured';
+            } else {
+                cloudBadge.textContent = navigator.onLine ? '☁️ Cloud OK' : '⚠️ Offline';
+            }
         }
 
         // Last-sync badges (hero strip + storage panel)
@@ -2494,4 +2499,265 @@ function _populateTimezoneDropdown() {
             el.appendChild(opt);
         });
     }
+}
+
+// =========================================================================
+// SETTINGS CARDS — Cloud Sync (Supabase) & Email Recovery (EmailJS)
+// Always visible in BYOS model regardless of connection status.
+// =========================================================================
+
+function _settSupaStatus(msg, color) {
+    const el = document.getElementById('settSupaStatus');
+    if (el) { el.textContent = msg; el.style.color = color || '#64748b'; }
+}
+
+function _settSupaSetRow(configured) {
+    const dot = document.getElementById('settSupaConnDot');
+    const sub = document.getElementById('settSupaConnSub');
+    const row = document.getElementById('settSupaConnRow');
+    if (dot) dot.className = 'conn-dot ' + (configured ? 'green' : 'grey');
+    if (sub) sub.textContent = configured
+        ? '✅ Configured — credentials saved. Test the connection to verify.'
+        : 'Not configured — enter your project URL and anon key below.';
+    if (row) row.className = 'conn-row ' + (configured ? 'conn-ok' : 'conn-offline');
+}
+
+function loadCloudSyncCard() {
+    const url = localStorage.getItem('pharma_supa_url') || '';
+    const key = localStorage.getItem('pharma_supa_key') || '';
+    const urlEl = document.getElementById('settSupaUrl');
+    const keyEl = document.getElementById('settSupaKey');
+    if (urlEl) urlEl.value = url;
+    if (keyEl) keyEl.value = key;
+    _settSupaSetRow(!!(url && key));
+    _settSupaStatus('');
+}
+
+async function settingsTestSupabase() {
+    const url = (document.getElementById('settSupaUrl')?.value || '').trim().replace(/\/$/, '');
+    const key = (document.getElementById('settSupaKey')?.value || '').trim();
+    if (!url || !key) {
+        _settSupaStatus('⚠️ Please enter both URL and Anon Key.', '#b45309');
+        return;
+    }
+    if (!url.includes('supabase.co') && !url.includes('localhost')) {
+        _settSupaStatus('⚠️ URL should look like: https://xxxx.supabase.co', '#b45309');
+        return;
+    }
+    _settSupaStatus('🔄 Testing connection…', '#0369a1');
+    try {
+        const r = await fetch(url + '/rest/v1/pharma_sync?select=key&limit=1', {
+            headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+        });
+        if (r.ok || r.status === 406) {
+            _settSupaStatus('✅ Connection successful! Click Save to store these credentials.', '#065f46');
+        } else if (r.status === 401) {
+            _settSupaStatus('❌ Invalid Anon Key — check Project Settings → API in Supabase.', '#dc2626');
+        } else if (r.status === 404) {
+            _settSupaStatus('⚠️ Schema not found — run the schema SQL in Supabase → SQL Editor first.', '#b45309');
+        } else {
+            _settSupaStatus('❌ Error ' + r.status + ' — check your URL and key.', '#dc2626');
+        }
+    } catch(e) {
+        _settSupaStatus('❌ Network error: ' + (e.message || 'Cannot reach Supabase.'), '#dc2626');
+    }
+}
+
+function settingsSaveSupabase() {
+    const url = (document.getElementById('settSupaUrl')?.value || '').trim().replace(/\/$/, '');
+    const key = (document.getElementById('settSupaKey')?.value || '').trim();
+    if (!url || !key) {
+        _settSupaStatus('⚠️ Both URL and Anon Key are required.', '#b45309');
+        return;
+    }
+    localStorage.setItem('pharma_supa_url', url);
+    localStorage.setItem('pharma_supa_key', key);
+    _settSupaSetRow(true);
+    _settSupaStatus('✅ Saved! Reload the app to activate cloud sync.', '#065f46');
+    if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('connecting');
+    if (typeof showToast === 'function') showToast('☁️ Supabase credentials saved. Reload to activate sync.');
+}
+
+function settingsDisconnectSupabase() {
+    if (!confirm('Remove Supabase credentials? Cloud sync will be disabled until you re-enter them.')) return;
+    localStorage.removeItem('pharma_supa_url');
+    localStorage.removeItem('pharma_supa_key');
+    localStorage.removeItem('_supabase_sync_on');
+    const urlEl = document.getElementById('settSupaUrl');
+    const keyEl = document.getElementById('settSupaKey');
+    if (urlEl) urlEl.value = '';
+    if (keyEl) keyEl.value = '';
+    _settSupaSetRow(false);
+    _settSupaStatus('Disconnected. Cloud sync is now disabled.', '#64748b');
+    if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('offline');
+    if (typeof showToast === 'function') showToast('☁️ Supabase disconnected.');
+}
+
+function _settEjsStatus(msg, color) {
+    const el = document.getElementById('settEjsStatus');
+    if (el) { el.textContent = msg; el.style.color = color || '#64748b'; }
+}
+
+function _settEjsSetRow(configured) {
+    const dot = document.getElementById('settEjsConnDot');
+    const sub = document.getElementById('settEjsConnSub');
+    const row = document.getElementById('settEjsConnRow');
+    if (dot) dot.className = 'conn-dot ' + (configured ? 'green' : 'grey');
+    if (sub) sub.textContent = configured
+        ? '✅ Configured — credentials saved.'
+        : 'Not configured — fill in your EmailJS credentials below.';
+    if (row) row.className = 'conn-row ' + (configured ? 'conn-ok' : 'conn-offline');
+}
+
+function loadEmailRecoveryCard() {
+    const sid   = localStorage.getItem('pharma_emailjs_service_id')  || '';
+    const tid   = localStorage.getItem('pharma_emailjs_template_id') || '';
+    const pk    = localStorage.getItem('pharma_emailjs_public_key')  || '';
+    const email = localStorage.getItem('pharma_emailjs_reset_email') || '';
+    const eService  = document.getElementById('settEjsService');
+    const eTemplate = document.getElementById('settEjsTemplate');
+    const ePubkey   = document.getElementById('settEjsPubkey');
+    const eEmail    = document.getElementById('settEjsEmail');
+    if (eService)  eService.value  = sid;
+    if (eTemplate) eTemplate.value = tid;
+    if (ePubkey)   ePubkey.value   = pk;
+    if (eEmail)    eEmail.value    = email;
+    _settEjsSetRow(!!(sid && tid && pk && email));
+    _settEjsStatus('');
+}
+
+async function settingsTestEmailJS() {
+    const sid   = (document.getElementById('settEjsService')?.value  || '').trim();
+    const tid   = (document.getElementById('settEjsTemplate')?.value || '').trim();
+    const pk    = (document.getElementById('settEjsPubkey')?.value   || '').trim();
+    const email = (document.getElementById('settEjsEmail')?.value    || '').trim();
+    if (!sid || !tid || !pk || !email) {
+        _settEjsStatus('⚠️ Fill in all four fields to send a test email.', '#b45309');
+        return;
+    }
+    _settEjsStatus('🔄 Sending test email…', '#0369a1');
+    try {
+        if (typeof emailjs !== 'undefined') {
+            emailjs.init({ publicKey: pk });
+            await emailjs.send(sid, tid, { to_email: email, reset_link: 'https://test.example.com', device_name: 'Settings Test' });
+            _settEjsStatus('✅ Test email sent to ' + email + '! Click Save to store credentials.', '#065f46');
+        } else {
+            _settEjsStatus('❌ EmailJS library not loaded.', '#dc2626');
+        }
+    } catch(e) {
+        _settEjsStatus('❌ EmailJS error: ' + (e.text || e.message || JSON.stringify(e)), '#dc2626');
+    }
+}
+
+function settingsSaveEmailJS() {
+    const sid   = (document.getElementById('settEjsService')?.value  || '').trim();
+    const tid   = (document.getElementById('settEjsTemplate')?.value || '').trim();
+    const pk    = (document.getElementById('settEjsPubkey')?.value   || '').trim();
+    const email = (document.getElementById('settEjsEmail')?.value    || '').trim();
+    if (!sid || !tid || !pk || !email) {
+        _settEjsStatus('⚠️ All four fields are required.', '#b45309');
+        return;
+    }
+    localStorage.setItem('pharma_emailjs_service_id',  sid);
+    localStorage.setItem('pharma_emailjs_template_id', tid);
+    localStorage.setItem('pharma_emailjs_public_key',  pk);
+    localStorage.setItem('pharma_emailjs_reset_email', email);
+    if (typeof emailjs !== 'undefined') emailjs.init({ publicKey: pk });
+    _settEjsSetRow(true);
+    _settEjsStatus('✅ Saved!', '#065f46');
+    if (typeof showToast === 'function') showToast('📧 EmailJS credentials saved.');
+}
+
+function settingsDisconnectEmailJS() {
+    if (!confirm('Remove EmailJS credentials? Email-based password recovery will be disabled.')) return;
+    localStorage.removeItem('pharma_emailjs_service_id');
+    localStorage.removeItem('pharma_emailjs_template_id');
+    localStorage.removeItem('pharma_emailjs_public_key');
+    localStorage.removeItem('pharma_emailjs_reset_email');
+    const fields = ['settEjsService', 'settEjsTemplate', 'settEjsPubkey', 'settEjsEmail'];
+    fields.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    _settEjsSetRow(false);
+    _settEjsStatus('Disconnected.', '#64748b');
+    if (typeof showToast === 'function') showToast('📧 EmailJS disconnected.');
+}
+
+// Populate both cloud cards whenever the settings tab is opened.
+// Hook into the existing DOMContentLoaded, plus expose for manual calls.
+function loadCloudServiceCards() {
+    loadCloudSyncCard();
+    loadEmailRecoveryCard();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(loadCloudServiceCards, 0);
+});
+
+// =========================================================================
+// REFRESH APP CACHE
+// Tells the service worker to wipe its shell cache and re-download every
+// JS/CSS/HTML file fresh from the server — no app close needed.
+// Shows progress in whichever status element is currently visible
+// (Sync Hub card → shRecacheStatus; Settings card → settRecacheStatus).
+// =========================================================================
+function refreshAppCache() {
+    const statusEls = [
+        document.getElementById('shRecacheStatus'),
+        document.getElementById('settRecacheStatus')
+    ].filter(Boolean);
+
+    function _setStatus(msg, color) {
+        statusEls.forEach(function(el) {
+            el.textContent = msg;
+            el.style.color = color || '#7c3aed';
+        });
+    }
+
+    const btns = [document.getElementById('shRecacheBtn')].filter(Boolean);
+
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+        _setStatus('⚠️ No active service worker — reload the app first.', '#b45309');
+        return;
+    }
+
+    btns.forEach(function(b) { b.disabled = true; });
+    _setStatus('⟳ Wiping cache and re-fetching all files…', '#7c3aed');
+
+    let _done = false;
+
+    function _finish() {
+        if (_done) return;
+        _done = true;
+        clearTimeout(_safetyTimer);
+        navigator.serviceWorker.removeEventListener('message', _onSwMessage);
+        btns.forEach(function(b) { b.disabled = false; });
+    }
+
+    function _onSuccess() {
+        _finish();
+        _setStatus('✅ Done — reload the app to use fresh files.', '#065f46');
+        if (typeof showToast === 'function')
+            showToast('🔄 App cache refreshed. Reload to apply updated files.');
+    }
+
+    // One-shot listener for direct SW → page message
+    function _onSwMessage(event) {
+        if (event.data && event.data.type === 'RECACHE_DONE') _onSuccess();
+    }
+    navigator.serviceWorker.addEventListener('message', _onSwMessage);
+
+    // Also listen on BroadcastChannel (covers cross-tab and some browsers)
+    try {
+        const ch = new BroadcastChannel('pharmapos-sw');
+        ch.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'RECACHE_DONE') { ch.close(); _onSuccess(); }
+        });
+    } catch (_) {}
+
+    // Safety timeout — unblock UI if SW never replies (e.g. no network)
+    const _safetyTimer = setTimeout(function() {
+        _finish();
+        _setStatus('⚠️ No response — check your connection and try again.', '#b45309');
+    }, 30000);
+
+    navigator.serviceWorker.controller.postMessage({ type: 'FORCE_RECACHE' });
 }

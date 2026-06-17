@@ -1096,6 +1096,19 @@ function updateSupabaseSyncUI(state) {
     const el  = document.getElementById('supabase-sync-badge');
     const lbl = document.getElementById('supabaseSyncLabel');
     if (!el) return;
+
+    // If Supabase is not configured, always show "Not set up" regardless of
+    // what state is passed — prevents false "Synced" badge when credentials
+    // are absent (BYOS model: the badge must reflect actual configuration).
+    if (typeof _isSupabaseConfigured === 'function' && !_isSupabaseConfigured()) {
+        el.className = 'offline';
+        if (lbl) lbl.textContent = 'Not set up';
+        el.style.cursor = 'default';
+        el.onclick = null;
+        el.title = 'Supabase not configured — set up your credentials in Settings';
+        return;
+    }
+
     el.className = state;
     const qDepth = (typeof StorageModule !== 'undefined' && StorageModule._syncQueueDepth) ? StorageModule._syncQueueDepth() : 0;
     const qLabel = qDepth > 0 ? ' (' + qDepth + ' pending)' : '';

@@ -1221,6 +1221,22 @@ async function renderSyncHubView() {
           </button>
         </div>
 
+        <!-- Refresh App Cache -->
+        <div style="background:#faf5ff;border:1px solid #d8b4fe;border-radius:10px;padding:14px 16px;">
+          <div style="font-size:11px;font-weight:800;color:#7c3aed;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">🔄 Refresh App Cache</div>
+          <div class="sh-card-hint" style="font-size:11px;margin-bottom:10px;line-height:1.5;">
+            Wipes the service worker's file cache and re-downloads every JS, CSS and HTML file fresh from the server — in the background without closing the app.
+            Use after deploying a new version if the app still shows old content.
+          </div>
+          <button class="sh-btn" id="shRecacheBtn"
+                  onclick="refreshAppCache()"
+                  style="width:100%;justify-content:center;background:#7c3aed;color:#fff;"
+                  title="Wipe cached app files and re-fetch from server.">
+            🔄 Refresh App Cache
+          </button>
+          <div id="shRecacheStatus" style="font-size:11px;color:#7c3aed;margin-top:8px;min-height:16px;"></div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -1540,6 +1556,18 @@ async function renderSyncStatusTable() {
     const wrap = document.getElementById('shSyncStatusTableWrap');
     const tsEl = document.getElementById('shStatusTs');
     if (!wrap) return;
+
+    // If Supabase is not configured, show a clear "not configured" state
+    // instead of timestamps and badges that imply sync is active.
+    if (typeof _isSupabaseConfigured === 'function' && !_isSupabaseConfigured()) {
+        wrap.innerHTML = `<div style="padding:20px 16px;text-align:center;color:#64748b;font-size:13px;background:#fafafa;border:1px dashed #cbd5e1;border-radius:8px;">
+            <div style="font-size:22px;margin-bottom:8px;">☁️</div>
+            <strong style="color:#1e293b;">Supabase not configured</strong><br>
+            <span style="font-size:12px;">Enter your Supabase Project URL and API key in <strong>Settings → Cloud Sync</strong> to enable cloud sync.</span>
+        </div>`;
+        if (tsEl) tsEl.textContent = '';
+        return;
+    }
 
     // ── Gather push metrics ───────────────────────────────────────────────
     const pendingMovs = await _countUnsyncedMovements().catch(() => 0);
@@ -1930,6 +1958,17 @@ async function forceSyncNow() {
         if (typeof showToast === 'function') showToast('⚠️ Sync already in progress — please wait.', true);
         return;
     }
+
+    // Guard: Supabase must be configured before any sync attempt.
+    // In the BYOS model the user supplies their own credentials — without them
+    // there is no cloud to sync to, so we must bail out immediately instead of
+    // running through all the steps and falsely reporting success.
+    if (typeof _isSupabaseConfigured === 'function' && !_isSupabaseConfigured()) {
+        if (typeof showToast === 'function')
+            showToast('⚠️ Supabase is not configured. Please set up your database credentials in Settings → Cloud Sync first.', true);
+        return;
+    }
+
     _forceSyncRunning = true;
 
     // ── UI: lock button, reveal progress bar ──────────────────────────────
@@ -2476,6 +2515,17 @@ async function populateSyncHubNetworkGrid() {
     const grid          = document.getElementById('syncDeviceMatrix');
     const activeCountEl = document.getElementById('shActiveCount');
     if (!grid) return;
+
+    // Guard: show a clear message instead of a spinner that will never resolve.
+    if (typeof _isSupabaseConfigured === 'function' && !_isSupabaseConfigured()) {
+        grid.innerHTML = `<div style="padding:20px 16px;text-align:center;color:#64748b;font-size:13px;background:#fafafa;border:1px dashed #cbd5e1;border-radius:8px;">
+            <div style="font-size:22px;margin-bottom:8px;">📡</div>
+            <strong style="color:#1e293b;">No cloud connection</strong><br>
+            <span style="font-size:12px;">Configure your Supabase credentials in <strong>Settings → Cloud Sync</strong> to see the device network.</span>
+        </div>`;
+        if (activeCountEl) activeCountEl.textContent = '0';
+        return;
+    }
 
     grid.innerHTML = '<div class="sh-loading">⟳ Fetching device registry from Supabase…</div>';
 
