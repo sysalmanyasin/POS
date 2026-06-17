@@ -785,19 +785,35 @@ END $$;
       }
     } catch(e) { console.warn('[FactoryReset] StorageModule clear error:', e); }
 
-    // 2. Delete IDB databases entirely for a clean slate
-    try { indexedDB.deleteDatabase('PharmaDataDB'); }      catch(e) {}
-    try { indexedDB.deleteDatabase('PharmaInventoryDB'); } catch(e) {}
+    // 2. Delete ALL IndexedDB databases for a complete clean slate
+    const idbDatabases = ['PharmaDataDB', 'PharmaInventoryDB'];
+    await Promise.allSettled(idbDatabases.map(name => new Promise(resolve => {
+      const req = indexedDB.deleteDatabase(name);
+      req.onsuccess = resolve;
+      req.onerror   = resolve;
+      req.onblocked = resolve;
+    })));
 
-    // 3. Clear all pharma_* and sys_* localStorage keys
-    const keysToRemove = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && (k.startsWith('pharma_') || k.startsWith('sys_'))) keysToRemove.push(k);
-    }
-    keysToRemove.forEach(k => localStorage.removeItem(k));
+    // 3. Clear ALL localStorage (complete wipe including PIN gate, all app keys)
+    try { localStorage.clear(); } catch(e) {}
 
-    // 4. Reload → welcome screen
+    // 4. Unregister service worker so stale cache is cleared
+    try {
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.allSettled(regs.map(r => r.unregister()));
+      }
+    } catch(e) {}
+
+    // 5. Clear caches API
+    try {
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.allSettled(keys.map(k => caches.delete(k)));
+      }
+    } catch(e) {}
+
+    // 6. Reload → welcome screen
     if (typeof showToast === 'function') showToast('✅ Factory reset complete. Restarting…', 2000);
     setTimeout(() => location.reload(), 1400);
   };
