@@ -1952,6 +1952,14 @@
         </div>
         <span class="dh-card-chevron">›</span>
       </div>
+      <div class="dh-card dh-card-blue" onclick="closeDataHub(false);setTimeout(()=>requestAdminAccess('LOAD_BASE_CATALOG'),350);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#EFF6FF;">🗂️</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Load Base Catalog</div>
+          <div class="dh-card-desc">Load the bundled master product list (data/base-inventory.json, ~30k items)</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
       <div class="dh-card dh-card-green" onclick="exportFullBackup();closeDataHub(false);" style="cursor:pointer;">
         <div class="dh-card-icon" style="background:#F0FDF4;">💾</div>
         <div class="dh-card-body">
@@ -2423,7 +2431,7 @@
     // TOGGLE_OVERSTOCK, SAVE_ALL_SETTINGS, ADD_STAFF_MEMBER, etc. work correctly.
     // FIX: forward all three arguments (action, targetId, extraData) so that
     // extraData (e.g. {name, pin} for ADD_STAFF_MEMBER) is not silently dropped.
-    if (action !== 'PURGE_DATABASE' && action !== 'CSV_IMPORT' && action !== 'IDB_NUKE') {
+    if (action !== 'PURGE_DATABASE' && action !== 'CSV_IMPORT' && action !== 'IDB_NUKE' && action !== 'LOAD_BASE_CATALOG') {
       if (typeof _authJsRequestAdminAccess === 'function') {
         return _authJsRequestAdminAccess(action, targetId, extraData);
       }
@@ -2442,7 +2450,9 @@
           ? 'Authentication required to purge all pharmacy data.'
           : action === 'CSV_IMPORT'
             ? 'Authentication required to replace inventory from CSV.'
-            : 'Enter the admin passkey to proceed.');
+            : action === 'LOAD_BASE_CATALOG'
+              ? 'Authentication required to load the bundled base catalog.'
+              : 'Enter the admin passkey to proceed.');
     }
     var inputEl = document.getElementById('adminGateInput');
     var errEl   = document.getElementById('adminGateError');
@@ -2504,6 +2514,10 @@
     } else if (action === 'CSV_IMPORT') {
       var csvEl = document.getElementById('csvFile');
       if (csvEl) csvEl.click();
+    } else if (action === 'LOAD_BASE_CATALOG') {
+      if (typeof loadBaseInventoryData === 'function') {
+        loadBaseInventoryData().catch(function(e) { console.error('[LOAD_BASE_CATALOG]', e); });
+      }
     } else if (action === 'IDB_NUKE') {
       if (typeof _executeIDBNukeBroadcast === 'function') {
         _executeIDBNukeBroadcast().catch(function(e) { console.error('[IDB_NUKE]', e); });
