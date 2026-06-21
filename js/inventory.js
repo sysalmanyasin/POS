@@ -1822,6 +1822,90 @@ function deleteProductFromCatalogue(productCode) {
 
 })();
 // =========================================================================
+// BASE CATALOG LOADER — loads the bundled master product list shipped with
+// the app (data/base-inventory.json) on demand. This file is committed to
+// the repo so the full product catalog travels with the app/GitHub Pages
+// deploy, but it is never loaded automatically — only when the operator
+// explicitly triggers it from Data Hub → Load Base Catalog. Uses the same
+// merge/upsert semantics as CSV import: existing items are updated in
+// place, items not present in the base file are left untouched, and new
+// items are appended.
+// =========================================================================
+async function loadBaseInventoryData() {
+    showToast('⏳ Loading base product catalog…', false);
+    let data;
+    try {
+        const url = new URL('data/base-inventory.json', document.baseURI).toString();
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        data = await res.json();
+    } catch (e) {
+        showToast('❌ Could not load base catalog: ' + (e && e.message ? e.message : String(e)), true);
+        return;
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+        showToast('⚠️ Base catalog file was empty or invalid.', true);
+        return;
+    }
+
+    const imported = data.map(function(item) {
+        const code = String(item.code || '').toUpperCase().trim();
+        const existingItem = Array.isArray(window.masterInventoryDB)
+            ? window.masterInventoryDB.find(function(p) { return p.code === code; })
+            : null;
+        return {
+            code,
+            name: String(item.name || '').trim(),
+            unitPrice: parseFloat((Number(item.unitPrice) || 0).toFixed(2)),
+            stock: parseInt(item.stock, 10) || 0,
+            generic: String(item.generic || '').trim(),
+            company: String(item.company || '').trim(),
+            supplier: String(item.supplier || '').trim(),
+            packDetails: String(item.packDetails || '').trim(),
+            version: existingItem && typeof existingItem.version === 'number'
+                ? existingItem.version + 1 : 1
+        };
+    }).filter(function(item) { return item.code && item.name; });
+
+    if (imported.length === 0) {
+        showToast('⚠️ No valid products found in base catalog.', true);
+        return;
+    }
+
+    const _existingDB = Array.isArray(window.masterInventoryDB) ? window.masterInventoryDB : [];
+    const _importMap = new Map(imported.map(item => [item.code, item]));
+    const _mergedDB = _existingDB.map(existing => {
+        const incoming = _importMap.get(existing.code);
+        if (incoming) {
+            return Object.assign({}, existing, incoming,
+                { company:  incoming.company  || existing.company  || '',
+                  supplier: incoming.supplier || existing.supplier || '' });
+        }
+        return existing;
+    });
+    const _existingCodes = new Set(_existingDB.map(p => p.code));
+    imported.filter(item => !_existingCodes.has(item.code)).forEach(item => _mergedDB.push(item));
+    const _newCount = _mergedDB.length - _existingDB.length;
+    const _updCount = imported.length - _newCount;
+
+    window.masterInventoryDB = _mergedDB;
+    try {
+        saveInventoryToDB(window.masterInventoryDB);
+        try { localStorage.setItem('_pharma_inv_dirty', 'true'); } catch(_e) {}
+        const demoBanner = document.getElementById('demoInventoryBanner');
+        if (demoBanner) demoBanner.classList.remove('visible');
+        if (typeof _invReady !== 'undefined' && _invReady) renderInventoryView();
+        else if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
+        if (typeof updateHdrStats === 'function') updateHdrStats();
+        showToast('✅ Base catalog loaded: ' + _updCount + ' updated, ' + _newCount + ' new products.');
+        if (typeof _showPostCsvPushPopup === 'function') _showPostCsvPushPopup(_updCount + _newCount);
+    } catch(e) {
+        showToast('⚠️ Error saving base catalog: ' + (e && e.message ? e.message : String(e)), true);
+    }
+}
+window.loadBaseInventoryData = loadBaseInventoryData;
+// =========================================================================
 // POST-CSV IMPORT — Push Inventory to Cloud popup
 // =========================================================================
 function _showPostCsvPushPopup(itemCount) {
