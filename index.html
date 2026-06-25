@@ -461,14 +461,9 @@
   <button class="tab-btn" id="tab-settings" onclick="switchTab('settingsView',this)">
     ⚙️ Settings <span class="tab-k">F12</span>
   </button>
-  <button class="tab-btn" id="tabSyncHub" onclick="switchTab('syncHubView',this)">
-    ☁️ Cloud Sync Hub <kbd class="tab-k">F10</kbd>
-  </button>
-  <button class="tab-btn" id="tabReporting" onclick="switchTab('reportingView',this);renderReportingView();">
-    📈 Reports
-  </button>
-  <button class="tab-btn" id="tab-auditlog" onclick="switchTab('auditLogView',this);AuditLog.openAuditLogTab();">
-    🔍 Audit Log
+  <button class="tab-btn" id="tab-cloud" style="display:none;"
+    onclick="switchTab('cloudView',this);switchCloudTab(_activeCloudPanel||'synchub',document.getElementById('cst-'+(_activeCloudPanel||'synchub')));">
+    ☁️ Cloud <span class="tab-k">F10</span>
   </button>
   <div class="tab-sep"></div>
   <div id="editModeAlertBar">
@@ -1471,18 +1466,25 @@
            Content is fully injected by renderSyncHubView() in syncHub.js.
            The shell div must be present so _doSwitchTab can activate it.
       ════════════════════════════════════════════════════════════════════════ -->
-      <div id="syncHubView" class="view"></div>
+      <div id="cloudView" class="view cloud-container">
+        <!-- Cloud sub-tab bar -->
+        <div class="cloud-sub-tabs">
+          <button class="cst-btn cst-active" id="cst-synchub"
+            onclick="switchCloudTab('synchub',this)">☁️ Sync Hub</button>
+          <button class="cst-btn" id="cst-reports"
+            onclick="switchCloudTab('reports',this)">📈 Reports</button>
+          <button class="cst-btn" id="cst-audit"
+            onclick="switchCloudTab('audit',this)">🔍 Audit Log</button>
+        </div>
 
-      <!-- ═══ REPORTING VIEW ════════════════════════════════════════════════
-           Content injected by renderReportingView() in reporting.js.
-      ════════════════════════════════════════════════════════════════════════ -->
-      <div id="reportingView" class="view"></div>
+        <!-- Sync Hub panel (content injected by synchub.js) -->
+        <div id="syncHubView" class="cst-panel cst-panel-active"></div>
 
-      <!-- ═══ AUDIT LOG VIEW ════════════════════════════════════════════════
-           Full event audit trail — every sale, refund, edit, login, setting
-           change, and sync event. Rendered by auditLog.js.
-      ════════════════════════════════════════════════════════════════════════ -->
-      <div id="auditLogView" class="view">
+        <!-- Reports panel (content injected by reporting.js) -->
+        <div id="reportingView" class="cst-panel"></div>
+
+        <!-- Audit Log panel -->
+        <div id="auditLogView" class="cst-panel">
         <div style="padding:16px 20px 0;">
 
           <!-- Header -->
@@ -1569,7 +1571,8 @@
           </div>
 
         </div>
-      </div><!-- /auditLogView -->
+        </div><!-- /auditLogView -->
+      </div><!-- /cloudView -->
 
     </div><!-- /leftContent -->
   </div><!-- /leftPanel -->
@@ -1676,7 +1679,7 @@
   <div class="sb-hint"><kbd>F4</kbd> Hold</div>
   <div class="sb-hint"><kbd>F8</kbd> Inventory</div>
   <div class="sb-hint"><kbd>F9</kbd> Row Edit</div>
-  <div class="sb-hint"><kbd>F10</kbd> Sync Hub</div>
+  <div class="sb-hint" id="sb-cloud-hint" style="display:none;"><kbd>F10</kbd> ☁️ Cloud</div>
   <div class="sb-hint"><kbd>Ctrl+M</kbd> Manual</div>
   <div class="sb-sp"></div>
   <div id="f9StatusHint"></div>
@@ -1986,7 +1989,7 @@
       <div class="sc-key"><kbd>F4</kbd></div><div class="sc-desc">Hold current bill</div>
       <div class="sc-key"><kbd>F9</kbd></div><div class="sc-desc">F9 row-edit mode</div>
       <div class="sc-key"><kbd>Ctrl+S</kbd></div><div class="sc-desc">Save / finalize bill</div>
-      <div class="sc-key"><kbd>F10</kbd></div><div class="sc-desc">Open Cloud Sync Hub</div>
+      <div class="sc-key"><kbd>F10</kbd></div><div class="sc-desc">Open Cloud tab (Sync Hub, Reports, Audit — shown when sync is configured)</div>
       <div class="sc-key"><kbd>Esc</kbd></div><div class="sc-desc">New invoice / clear form</div>
     </div>
     <div class="sc-sec">Discounts</div>
