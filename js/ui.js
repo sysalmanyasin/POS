@@ -105,3 +105,9 @@ function _recordPinFailure(ctx) {
     return false;
 }
 function _clearPinFailures(ctx) { delete _pinAttempts[ctx]; _savePinState(ctx); }
+
+
+function toggleSettGroup(hdr) {
+  const grp = hdr.closest('.sett-grp');
+  grp.classList.toggle('grp-open');
+}
