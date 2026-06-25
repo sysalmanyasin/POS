@@ -2549,3 +2549,206 @@
 [data-theme="dark"] .dbx-file-name{color:#f1f5f9;}
 [data-theme="dark"] .sql-gen-footer{background:#0f172a;border-color:#334155;}
 [data-theme="dark"] .sql-gen-note{background:#0f172a;border-color:#334155;color:#94a3b8;}
+
+/* ================================================================
+   SETTINGS — COLLAPSIBLE SECTION GROUPS
+   Two top-level groups: System Settings + Cloud & Sync
+================================================================ */
+
+/* Group wrapper */
+.sett-section-group {
+  margin-bottom: 14px;
+}
+
+/* ── Section header card ── */
+.sett-section-hdr {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--g50, #f8fafc);
+  border: 1px solid var(--g200, #e2e8f0);
+  border-left: 4px solid var(--teal, #0d9488);
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 0;
+  transition: background .15s, box-shadow .15s;
+  position: relative;
+}
+.sett-section-hdr:hover {
+  background: rgba(13,148,136,.07);
+  box-shadow: 0 2px 8px rgba(13,148,136,.10);
+}
+.sett-section-hdr.expanded {
+  border-radius: 12px 12px 0 0;
+  margin-bottom: 0;
+  border-bottom-color: transparent;
+}
+
+/* Icon bubble */
+.sett-section-hdr-icon {
+  font-size: 18px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: rgba(13,148,136,.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Text */
+.sett-section-hdr-body { flex: 1; min-width: 0; }
+.sett-section-hdr-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--g800, #1e293b);
+  letter-spacing: .01em;
+}
+.sett-section-hdr-sub {
+  font-size: 10px;
+  color: var(--g500, #64748b);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Count badge */
+.sett-section-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--teal, #0d9488);
+  background: rgba(13,148,136,.10);
+  border-radius: 20px;
+  padding: 2px 9px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Chevron */
+.sett-section-chevron {
+  font-size: 13px;
+  color: var(--teal, #0d9488);
+  font-weight: 800;
+  flex-shrink: 0;
+  transition: transform .25s cubic-bezier(.4,0,.2,1);
+  margin-left: 2px;
+}
+.sett-section-hdr.expanded .sett-section-chevron {
+  transform: rotate(180deg);
+}
+
+/* ── Collapsible body ── */
+.sett-section-body {
+  display: none;
+  padding: 14px 0 4px;
+  animation: sett-grp-in .2s ease;
+}
+.sett-section-body.visible {
+  display: block;
+}
+@keyframes sett-grp-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Cloud & Sync section — blue accent ── */
+.sett-section-hdr-cloud {
+  border-left-color: #2563eb;
+}
+.sett-section-hdr-cloud:hover {
+  background: rgba(37,99,235,.05);
+  box-shadow: 0 2px 8px rgba(37,99,235,.10);
+}
+.sett-section-hdr-icon-cloud {
+  background: rgba(37,99,235,.10);
+}
+.sett-section-badge-cloud {
+  color: #2563eb;
+  background: rgba(37,99,235,.09);
+}
+.sett-section-chevron-cloud {
+  color: #2563eb;
+}
+
+/* ── Cloud info card ── */
+.sett-cloud-info-card {
+  background: linear-gradient(135deg, rgba(37,99,235,.05) 0%, rgba(13,148,136,.06) 100%);
+  border: 1px solid rgba(37,99,235,.18);
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+}
+.sett-cloud-info-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.sett-cloud-info-emoji {
+  font-size: 26px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.sett-cloud-info-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1d4ed8;
+  margin-bottom: 5px;
+}
+.sett-cloud-info-desc {
+  font-size: 11px;
+  color: var(--g600, #475569);
+  line-height: 1.65;
+}
+.sett-cloud-info-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(37,99,235,.12);
+}
+.sett-cloud-info-row {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--g700, #334155);
+  line-height: 1.55;
+  align-items: flex-start;
+}
+.sett-cloud-info-row span {
+  flex-shrink: 0;
+  width: 20px;
+}
+
+/* Dark mode adjustments */
+[data-theme="dark"] .sett-section-hdr {
+  background: rgba(255,255,255,.04);
+  border-color: rgba(255,255,255,.08);
+}
+[data-theme="dark"] .sett-section-hdr:hover {
+  background: rgba(13,148,136,.12);
+}
+[data-theme="dark"] .sett-cloud-info-card {
+  background: rgba(37,99,235,.07);
+  border-color: rgba(37,99,235,.2);
+}
+
+/* ── Inventory toolbar — Import & Base Catalog buttons ── */
+.inv-import-btn {
+  background: #2563eb !important;
+  color: #fff !important;
+  border: none !important;
+  font-weight: 700;
+}
+.inv-import-btn:hover { background: #1d4ed8 !important; }
+.inv-catalog-btn {
+  background: #16a34a !important;
+  color: #fff !important;
+  border: none !important;
+  font-weight: 700;
+}
+.inv-catalog-btn:hover { background: #15803d !important; }
