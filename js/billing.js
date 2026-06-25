@@ -1550,7 +1550,7 @@ function _doSwitchTab(tabId, btn) {
     }
     if (tabId === 'holdView')      renderHeldBillsTable();
     if (tabId === 'historyView')   _restoreHistoryView();
-    if (tabId === 'settingsView')  _loadSettingsForm();
+    if (tabId === 'settingsView')  (window._loadSettingsForm || _loadSettingsForm)();
     if (tabId === 'inventoryView') {
         if (typeof _invReady !== 'undefined' && _invReady) {
             if (typeof renderInventoryView === 'function') renderInventoryView();
