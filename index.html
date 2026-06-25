@@ -419,7 +419,6 @@
   </div>
   <div class="hdr-sp"></div>
   <div class="hdr-actions">
-    <button class="hdr-btn" onclick="openDataHub()" title="Data Hub (Ctrl+D)">📦 Data Hub</button>
     <div id="pharma-conn-badge" class="pharma-conn-badge" style="display:none;"><span class="pcb-dot"></span><span>—</span></div>
     <span id="supabase-sync-badge" class="connecting" title="Device Telemetry Hub (click)" onclick="if(typeof DevicesModule!=='undefined')DevicesModule.openDeviceTelemetryHub()" style="cursor:pointer;" role="button" tabindex="0" onkeydown="if(event.key==='Enter'&&typeof DevicesModule!=='undefined')DevicesModule.openDeviceTelemetryHub()"><span class="dot"></span><span id="supabaseSyncLabel">Sync</span></span>
     <button class="hdr-btn" onclick="toggleSettingsDrawer()" title="Settings (F12)">⚙️ Settings <span class="hdr-f12-hint">F12</span></button>
@@ -436,9 +435,9 @@
 
 <!-- System Banners -->
 <div id="storageWarningBanner"></div>
-<div id="backupReminderBanner" onclick="openDataHub()"></div>
+<div id="backupReminderBanner" onclick="exportFullBackup()"></div>
 <div id="demoInventoryBanner">
-  <span onclick="openDataHub()" style="cursor:pointer;">⚠️ Demo inventory active (3 sample items). Click to import your CSV.</span>
+  <span onclick="requestAdminAccess('CSV_IMPORT')" style="cursor:pointer;">⚠️ Demo inventory active (3 sample items). Click to import your CSV.</span>
   <button onclick="clearDemoStock()" style="margin-left:12px;padding:2px 10px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:5px;color:#fff;font-size:11px;font-weight:700;cursor:pointer;">✕ Clear Demo Stock</button>
 </div>
 <!-- Persistent stale-device warning — updated every 60 s by _startStaleBannerPoller() in synchub.js -->
@@ -735,33 +734,41 @@
       <!-- INVENTORY VIEW (F8) -->
       <div id="inventoryView" class="view">
         <div class="inv-view-header">
-          <div class="inv-view-title">📦 Inventory Stock</div>
-          <div class="inv-view-controls">
-            <!-- Billing-style live search -->
+          <!-- Row 1: search + filter controls -->
+          <div class="inv-header-row inv-header-search">
+            <div class="inv-view-title">📦 Inventory Stock</div>
             <div class="inv-search-wrap">
               <input type="text" id="invSearchInput" class="inv-search-inp"
                 placeholder="Search medicine (name, code, generic)…"
                 autocomplete="off" autocorrect="off" autocapitalize="off"
                 oninput="_invSearchInput()">
-              <!-- Selected product tag -->
               <span id="invSearchTag" class="inv-search-tag" style="display:none;">
                 <span class="inv-tag-text"></span>
                 <button class="inv-tag-x" onclick="clearInvProductSearch()" title="Clear">×</button>
               </span>
-              <!-- Live dropdown -->
               <div id="invSearchResults" class="inv-sr-panel" style="display:none;"></div>
             </div>
             <button class="inv-apply-btn" onclick="applyInvProductSearch()" title="Search in table">🔍 Search</button>
-            <!-- Group by dropdown -->
             <select id="invGroupBy" class="inv-refresh-btn" onchange="_invSetGroupBy(this.value)" title="Group inventory by attribute" style="cursor:pointer;">
               <option value="none">📋 No Grouping</option>
               <option value="company">🏭 By Company</option>
               <option value="supplier">🚚 By Supplier</option>
               <option value="generic">💊 By Generic</option>
             </select>
-            <button class="inv-refresh-btn" onclick="generateInventoryReport()" title="Generate / Refresh full report">📊 Report</button>
-            <button class="inv-refresh-btn" onclick="exportInventoryCSV()" title="Export inventory as CSV" style="margin-left:0;">📥 CSV</button>
             <button class="inv-add-btn" onclick="openAddProductModal()" title="Add New Product">+ Add</button>
+          </div>
+          <!-- Row 2: Quick Actions strip -->
+          <div class="inv-quick-actions">
+            <span class="iqa-label">Quick Actions</span>
+            <div class="iqa-group">
+              <button class="iqa-btn iqa-neutral" onclick="generateInventoryReport()" title="Generate / Refresh full inventory report">📊 Report</button>
+              <button class="iqa-btn iqa-neutral" onclick="exportInventoryCSV()" title="Export current inventory as CSV">📤 Export CSV</button>
+            </div>
+            <div class="iqa-sep"></div>
+            <div class="iqa-group">
+              <button class="iqa-btn iqa-import" onclick="requestAdminAccess('CSV_IMPORT')" title="Import products from a CSV file">📥 Import CSV</button>
+              <button class="iqa-btn iqa-catalog" onclick="requestAdminAccess('LOAD_BASE_CATALOG')" title="Load bundled base catalog (~30k items)">🗂️ Base Catalog</button>
+            </div>
           </div>
         </div>
         <div id="inventoryViewContent" class="inv-view-content">
@@ -1160,7 +1167,7 @@
               <div class="sett-grp-title">Cloud &amp; Connectivity</div>
               <div class="sett-grp-desc">Multi-device sync, cloud backup, email recovery and credential sharing</div>
             </div>
-            <div class="sett-grp-summary">
+            <div class="sett-grp-summary" id="cloudConnSummary">
               <span class="sg-pill">☁️ Cloud Sync</span>
               <span class="sg-pill">📱 Devices</span>
               <span class="sg-pill">📦 Dropbox</span>
@@ -1399,7 +1406,49 @@
               </div>
             </div>
           </div>
-              </div><!-- /col 1 -->
+              <div class="sett-stack" data-stack-id="sync-diagnostics" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#faf5ff;color:#7c3aed;">🔬</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Sync Diagnostics</div>
+                <div class="sett-stack-desc">Run connectivity, queue &amp; data integrity checks</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <p style="font-size:11px;color:var(--g500);margin:0 0 12px;line-height:1.6;">
+                Check Supabase reachability, inspect the pending sync queue, and run a local
+                data-integrity scan across all indexed records.
+              </p>
+              <button class="conn-btn primary" onclick="openSyncDashboard()" style="background:#7c3aed;border-color:#7c3aed;">
+                🔬 Open Sync Diagnostics
+              </button>
+            </div>
+          </div>
+              <div class="sett-stack" data-stack-id="generate-supabase-sql" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#eff6ff;color:#2563eb;">🗄️</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Generate Supabase SQL</div>
+                <div class="sett-stack-desc">Copy the complete schema SQL to set up your Supabase database</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <p style="font-size:11px;color:var(--g500);margin:0 0 12px;line-height:1.6;">
+                Generates the full Supabase schema SQL — copy it into the Supabase SQL Editor to
+                create all required tables, indexes, and policies in one click.
+              </p>
+              <button class="conn-btn primary" onclick="openSQLGeneratorModal()">
+                🗄️ Generate &amp; Copy SQL
+              </button>
+            </div>
+          </div>
+                            </div><!-- /col 1 -->
             </div><!-- /sett-stacks-container2 -->
           </div><!-- /sett-grp-body -->
         </div><!-- /cloudConnGrp -->
@@ -1628,7 +1677,6 @@
   <div class="sb-hint"><kbd>F8</kbd> Inventory</div>
   <div class="sb-hint"><kbd>F9</kbd> Row Edit</div>
   <div class="sb-hint"><kbd>F10</kbd> Sync Hub</div>
-  <div class="sb-hint"><kbd>Ctrl+D</kbd> Data Hub</div>
   <div class="sb-hint"><kbd>Ctrl+M</kbd> Manual</div>
   <div class="sb-sp"></div>
   <div id="f9StatusHint"></div>
@@ -1919,138 +1967,6 @@
   </div>
 </div>
 
-<!-- Data Hub Modal -->
-<div id="dataHubModal" class="modal-overlay">
-  <div class="dh-box">
-
-    <!-- 1. HERO HEADER -->
-    <div class="dh-hero">
-      <div class="dh-hero-top">
-        <div class="dh-hero-left">
-          <div class="dh-hero-icon-wrap">
-            <span class="dh-hero-icon">📦</span>
-          </div>
-          <div class="dh-hero-title-block">
-            <div class="dh-hero-title">Data Hub</div>
-            <div class="dh-hero-sub" id="dataHubSubtitle">Manage inventory, backups &amp; exports</div>
-          </div>
-        </div>
-        <button class="dh-close" onclick="closeDataHub(false)">✕</button>
-      </div>
-      <!-- Live Status Strip -->
-      <div class="dh-status-strip">
-        <span class="dh-status-pill" id="dhActiveDevicesBadge">🟢 — Active</span>
-        <span class="dh-status-pill" id="dhSupabaseBadge">☁️ Checking…</span>
-        <span class="dh-status-pill" id="dhLastSyncBadge">🕐 Last sync: —</span>
-        <button class="dh-push-sync-btn" id="dhPushSyncBtn" onclick="forceSyncNow()">⬆ Sync Now</button>
-      </div>
-      <!-- Hidden legacy status bar kept for JS compat -->
-      <div id="dataHubStatusBar" style="display:none;"></div>
-    </div>
-
-    <!-- 2. ACTION CARDS GRID -->
-    <div class="dh-grid">
-      <div class="dh-card dh-card-blue" onclick="closeDataHub(false);setTimeout(()=>requestAdminAccess('CSV_IMPORT'),350);" style="cursor:pointer;">
-        <div class="dh-card-icon" style="background:#EFF6FF;">📥</div>
-        <div class="dh-card-body">
-          <div class="dh-card-title">Import Inventory CSV</div>
-          <div class="dh-card-desc">Load products from .csv (Name, Code, Price, Stock, Generic, Company, Pack)</div>
-        </div>
-        <span class="dh-card-chevron">›</span>
-      </div>
-      <div class="dh-card dh-card-blue" onclick="closeDataHub(false);setTimeout(()=>requestAdminAccess('LOAD_BASE_CATALOG'),350);" style="cursor:pointer;">
-        <div class="dh-card-icon" style="background:#EFF6FF;">🗂️</div>
-        <div class="dh-card-body">
-          <div class="dh-card-title">Load Base Catalog</div>
-          <div class="dh-card-desc">Load the bundled master product list (data/base-inventory.json, ~30k items)</div>
-        </div>
-        <span class="dh-card-chevron">›</span>
-      </div>
-      <div class="dh-card dh-card-green" onclick="exportFullBackup();closeDataHub(false);" style="cursor:pointer;">
-        <div class="dh-card-icon" style="background:#F0FDF4;">💾</div>
-        <div class="dh-card-body">
-          <div class="dh-card-title">Export Full Backup</div>
-          <div class="dh-card-desc">Download all invoices, inventory &amp; settings as .json</div>
-        </div>
-        <span class="dh-card-chevron">›</span>
-      </div>
-      <div class="dh-card dh-card-amber" onclick="document.getElementById('restoreFileInputHeader').click();closeDataHub(false);" style="cursor:pointer;">
-        <div class="dh-card-icon" style="background:#FFFBEB;">🔄</div>
-        <div class="dh-card-body">
-          <div class="dh-card-title">Restore from Backup</div>
-          <div class="dh-card-desc">Load a previously exported .json backup</div>
-        </div>
-        <span class="dh-card-chevron">›</span>
-      </div>
-      <div class="dh-card dh-card-purple" onclick="openSyncDashboard();closeDataHub(false);" style="cursor:pointer;">
-        <div class="dh-card-icon" style="background:#FAF5FF;">🔬</div>
-        <div class="dh-card-body">
-          <div class="dh-card-title">Sync Diagnostics</div>
-          <div class="dh-card-desc">Run connectivity, queue &amp; data integrity checks</div>
-        </div>
-        <span class="dh-card-chevron">›</span>
-      </div>
-      <div class="dh-card dh-card-cyan" onclick="dropboxUploadBackup(false);closeDataHub(false);" style="cursor:pointer;">
-        <div class="dh-card-icon" style="background:#ECFEFF;">📦</div>
-        <div class="dh-card-body">
-          <div class="dh-card-title">Backup to Dropbox</div>
-          <div class="dh-card-desc">Upload full backup JSON to your Dropbox (requires App Key in Settings)</div>
-        </div>
-        <span class="dh-card-chevron">›</span>
-      </div>
-      <div class="dh-card dh-card-teal" onclick="openDropboxRestoreModal();closeDataHub(false);" style="cursor:pointer;">
-        <div class="dh-card-icon" style="background:#F0FDFA;">🔁</div>
-        <div class="dh-card-body">
-          <div class="dh-card-title">Restore from Dropbox</div>
-          <div class="dh-card-desc">Browse and restore a backup file from your Dropbox app folder</div>
-        </div>
-        <span class="dh-card-chevron">›</span>
-      </div>
-      <div class="dh-card dh-card-blue" onclick="openSQLGeneratorModal();closeDataHub(false);" style="cursor:pointer;">
-        <div class="dh-card-icon" style="background:#EFF6FF;">🗄️</div>
-        <div class="dh-card-body">
-          <div class="dh-card-title">Generate Supabase SQL</div>
-          <div class="dh-card-desc">Copy the complete schema SQL to set up your Supabase database</div>
-        </div>
-        <span class="dh-card-chevron">›</span>
-      </div>
-    </div>
-
-    <!-- 3. DEVICE SYNC STATUS PANEL -->
-    <div class="dh-device-panel">
-      <div class="dh-panel-heading">
-        <span>Network Devices</span>
-        <button class="dh-panel-refresh-btn" id="dhDeviceRefreshBtn" onclick="dhRefreshDevicePanel()" title="Refresh device list">↻</button>
-      </div>
-      <div id="dhDeviceList">
-        <div style="font-size:11px;color:var(--g400);padding:8px 0;">⟳ Loading devices…</div>
-      </div>
-    </div>
-
-    <!-- 4. INDEXEDDB & STORAGE PANEL -->
-    <div class="dh-storage-panel">
-      <div class="dh-panel-heading">
-        <span>Local Storage</span>
-      </div>
-      <div class="dh-storage-chips">
-        <span class="dh-chip dh-chip-ok" id="dhIDBStatus">🗄 IndexedDB: OK</span>
-        <span class="dh-chip" id="dhStorageLabel">💽 Used: — MB</span>
-        <span class="dh-chip" id="dhLastSyncStatus">🕐 Last sync: —</span>
-      </div>
-      <div class="dh-storage-track">
-        <div class="dh-storage-fill" id="dhStorageBar" style="width:0%;"></div>
-      </div>
-      <button class="dh-purge-btn" id="dhPurgeIDBBtn" onclick="openPurgeOldModal()" style="display:none;">🗑 Purge Old Data</button>
-    </div>
-
-    <!-- 5. FOOTER -->
-    <div class="dh-footer">
-      <div class="dh-fn" id="dataHubFooterNote">Regular backups protect against data loss.</div>
-      <button class="dh-skip" id="dataHubSkipBtn" onclick="closeDataHub(true)">Skip for now</button>
-    </div>
-
-  </div>
-</div>
 
 <!-- Keyboard Shortcuts -->
 <div id="shortcutsModal">
@@ -2079,7 +1995,6 @@
     </div>
     <div class="sc-sec">Data</div>
     <div class="sc-grid">
-      <div class="sc-key"><kbd>Ctrl+D</kbd></div><div class="sc-desc">Open Data Hub</div>
       <div class="sc-key"><kbd>Ctrl+B</kbd></div><div class="sc-desc">Export full backup</div>
     </div>
     <button class="sc-close" onclick="toggleShortcutsModal()">Close</button>
