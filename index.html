@@ -228,56 +228,6 @@
   .setup-skip-link { color:rgba(255,255,255,.4); font-size:12px; text-decoration:underline; cursor:pointer; background:none; border:none; }
   .setup-skip-link:hover { color:rgba(255,255,255,.7); }
 
-  /* ═══ SYNC & CONNECTIVITY SECTION ═══ */
-  .sett-sync-section {
-    margin: 18px 0 0;
-    border-radius: 14px;
-    overflow: hidden;
-    border: 1.5px solid #0d9488;
-    box-shadow: 0 2px 14px rgba(13,148,136,.10);
-  }
-  .sett-sync-hdr {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 15px 20px;
-    cursor: pointer;
-    background: linear-gradient(120deg, #0f2c3a 0%, #0d5a6b 60%, #0d9488 100%);
-    user-select: none;
-    transition: opacity .15s;
-  }
-  .sett-sync-hdr:hover { opacity: .92; }
-  .sett-sync-hdr:active { opacity: .82; }
-  .sett-sync-hdr-left { display:flex; align-items:center; gap:14px; }
-  .sett-sync-hdr-icon { font-size:26px; line-height:1; }
-  .sett-sync-hdr-title { color:#fff; font-size:15px; font-weight:800; letter-spacing:.2px; }
-  .sett-sync-hdr-sub { color:rgba(255,255,255,.6); font-size:11px; margin-top:3px; }
-  .sett-sync-hdr-right { display:flex; align-items:center; gap:10px; flex-shrink:0; }
-  .sett-sync-badge {
-    background: rgba(255,255,255,.14);
-    color: rgba(255,255,255,.85);
-    font-size: 10px; font-weight: 700;
-    padding: 3px 9px; border-radius: 20px;
-    border: 1px solid rgba(255,255,255,.2);
-    white-space: nowrap;
-  }
-  .sett-sync-chevron {
-    color: rgba(255,255,255,.7);
-    font-size: 18px;
-    transition: transform .28s ease;
-    display: inline-block;
-  }
-  .sett-sync-chevron.rotated { transform: rotate(-90deg); }
-  .sett-sync-body {
-    overflow: hidden;
-    max-height: 9999px;
-    transition: max-height .35s ease;
-    background: var(--bg, #fff);
-  }
-  .sett-sync-body.collapsed { max-height: 0; }
-  [data-theme="dark"] .sett-sync-section { border-color: #0d9488; }
-  [data-theme="dark"] .sett-sync-body { background: var(--bg); }
-
   /* ═══ SETTINGS CONNECTION CARD ═══ */
   #dbConnectionCard { margin:0 0 20px; }
   .conn-row {
@@ -859,6 +809,7 @@
           <div class="sett-view-title">⚙️ System Settings</div>
           <div class="sett-hdr-actions">
             <button class="sett-save-all-btn" onclick="saveAllSettings()" title="Save all settings">💾 Save All Settings</button>
+            <button class="sett-save-all-btn" onclick="openCredentialShareModal('export')" title="Show credentials QR code" style="background:#16a34a;color:#fff;border:none;">📲 Cred QR</button>
             <button class="sett-back-btn" onclick="switchTab('billingView',document.getElementById('tab-billing'))">← Back to Billing</button>
           </div>
         </div>
@@ -1129,6 +1080,10 @@
                 <div class="sett-stack-title">Security</div>
                 <div class="sett-stack-desc">Admin password, access controls and PIN policies</div>
               </div>
+              <button onclick="event.stopPropagation();openCredentialShareModal('export')" title="Show credentials QR code for quick sharing"
+                style="margin-right:6px;padding:5px 10px;background:#16a34a;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;flex-shrink:0;">
+                📲 Cred QR
+              </button>
               <div class="sett-stack-chevron">▾</div>
             </div>
             <div class="sett-stack-divider"></div>
@@ -1172,6 +1127,42 @@
             </div>
           </div>
 
+          <!-- 9 · Device Manager -->
+          <div class="sett-stack" data-stack-id="device-manager" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon icon-devices">📱</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Device Manager</div>
+                <div class="sett-stack-desc">Registered devices, online status, master/client roles</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <p style="font-size:10px;color:var(--g500);margin:0 0 10px;line-height:1.5;">
+                All devices registered to this workspace.
+                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;"></span>Online (&lt;2 min)
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>Recent (&lt;10 min)
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>Offline
+                </span>
+                — Double-click a card for full details.
+              </p>
+              <div id="settDeviceGrid" class="dev-card-grid">
+                <div style="font-size:11px;color:var(--g400);padding:10px 0;">Loading devices…</div>
+              </div>
+              <button class="sett-save" style="margin-top:10px;background:var(--g200);color:var(--g700);font-size:11px;" onclick="renderSettingsDeviceManager()">↺ Refresh Devices</button>
+              <button class="sett-save" style="margin-top:8px;background:#7c3aed;color:#fff;font-size:11px;" onclick="openMasterReclaimModal()">👑 Master Reclaim</button>
+            </div>
+          </div>
+
+          </div><!-- /device-manager -->
+
           <!-- 10 · Live Receipt Preview -->
           <div class="sett-stack" data-stack-id="live-receipt-preview" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
@@ -1197,278 +1188,210 @@
             </div>
           </div>
 
-          </div><!-- /sett-col 2 -->
-        </div><!-- /sett-stacks-container -->
-
-        <!-- ═══════════════════════════════════════════════════
-             SYNC & CONNECTIVITY — collapsible section
-        ════════════════════════════════════════════════════ -->
-        <div class="sett-sync-section" id="settSyncSection">
-
-          <!-- Section header / toggle -->
-          <div class="sett-sync-hdr" onclick="toggleSyncSection()">
-            <div class="sett-sync-hdr-left">
-              <span class="sett-sync-hdr-icon">🔗</span>
-              <div>
-                <div class="sett-sync-hdr-title">Sync &amp; Connectivity</div>
-                <div class="sett-sync-hdr-sub">Device management · Cloud backup · Credentials &amp; sharing</div>
+          <!-- 11 · Dropbox Backup -->
+          <div class="sett-stack" data-stack-id="dropbox-backup" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#e0f2fe;color:#0369a1;">📦</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Dropbox Backup</div>
+                <div class="sett-stack-desc">Auto-backup every 10 min to your own Dropbox — no account needed from us</div>
               </div>
+              <div class="sett-stack-chevron">▾</div>
             </div>
-            <div class="sett-sync-hdr-right">
-              <span class="sett-sync-badge">5 services</span>
-              <span class="sett-sync-chevron" id="settSyncChevron">▾</span>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <!-- Status row using conn-dot pattern (2A Card 3) -->
+              <div id="dbxConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
+                <span id="dbxConnDot" class="conn-dot grey"></span>
+                <div class="conn-info">
+                  <div class="conn-label">Dropbox Backup</div>
+                  <div id="dbxConnSub" class="conn-sub">Not connected — save your App Key and authorise below.</div>
+                </div>
+                <div class="conn-actions">
+                  <div style="font-size:11px;color:var(--g500);">Last upload: <span id="dbxLastUpload">—</span></div>
+                </div>
+              </div>
+              <!-- Step 1: App Key -->
+              <div style="font-size:10px;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;">Step 1 — Your Dropbox App Key</div>
+              <div style="font-size:9px;color:#94a3b8;margin-bottom:8px;line-height:1.5;">
+                Get your free key at <strong>dropbox.com/developers</strong> → Create App → Scoped access → App folder.<br>
+                Add <code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:9px;">https://pos.duapharma.com</code> as a Redirect URI.
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">App Key</span>
+                <input type="text" class="sett-inp" id="dbxAppKeyInput" placeholder="e.g. abc123xyz456" autocomplete="off" maxlength="80">
+              </div>
+              <button class="sett-save" onclick="dropboxSaveAppKey()">Save App Key</button>
+              <!-- Step 2: Connect -->
+              <div style="font-size:10px;font-weight:700;color:#64748b;margin:12px 0 6px;text-transform:uppercase;letter-spacing:.5px;">Step 2 — Authorise</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <button id="dbxConnectBtn" class="conn-btn primary" onclick="dropboxConnect()">🔗 Connect Dropbox</button>
+                <button id="dbxDisconnectBtn" class="conn-btn danger" style="display:none;" onclick="dropboxDisconnect()">Disconnect</button>
+              </div>
+              <!-- Step 3: Auto-backup toggle -->
+              <div style="font-size:10px;font-weight:700;color:#64748b;margin:14px 0 6px;text-transform:uppercase;letter-spacing:.5px;">Step 3 — Auto-Backup</div>
+              <div class="sett-row sett-row-sb">
+                <div>
+                  <span id="dbxAutoLabel" class="sett-lbl sett-lbl-auto">Auto-backup every 10 min</span>
+                  <div class="sett-hint">Full export uploaded silently in the background</div>
+                </div>
+                <button id="dbxAutoBtn" class="sett-toggle-btn sett-toggle-off" onclick="dropboxToggleAuto()" disabled>OFF</button>
+              </div>
+              <!-- Manual actions -->
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+                <button id="dbxBackupBtn" class="conn-btn primary" onclick="dropboxUploadBackup(false)" disabled>📤 Backup Now</button>
+                <button id="dbxRestoreBtn" class="conn-btn outline" onclick="openDropboxRestoreModal()" disabled>📥 Restore</button>
+              </div>
             </div>
           </div>
 
-          <!-- Collapsible body -->
-          <div class="sett-sync-body" id="settSyncBody">
-            <div class="sett-stacks-container" style="padding-top:4px;">
-
-              <!-- col 0: Device Manager + Dropbox Backup -->
-              <div class="sett-col" data-col="0">
-
-                <!-- 9 · Device Manager -->
-                <div class="sett-stack" data-stack-id="device-manager" draggable="true">
-                  <div class="sett-stack-header" onclick="toggleStack(this)">
-                    <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
-                    <div class="sett-stack-icon icon-devices">📱</div>
-                    <div class="sett-stack-meta">
-                      <div class="sett-stack-title">Device Manager</div>
-                      <div class="sett-stack-desc">Registered devices, online status, master/client roles</div>
-                    </div>
-                    <div class="sett-stack-chevron">▾</div>
-                  </div>
-                  <div class="sett-stack-divider"></div>
-                  <div class="sett-stack-body">
-                    <p style="font-size:10px;color:var(--g500);margin:0 0 10px;line-height:1.5;">
-                      All devices registered to this workspace.
-                      <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
-                        <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;"></span>Online (&lt;2 min)
-                      </span>
-                      <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
-                        <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>Recent (&lt;10 min)
-                      </span>
-                      <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
-                        <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>Offline
-                      </span>
-                      — Double-click a card for full details.
-                    </p>
-                    <div id="settDeviceGrid" class="dev-card-grid">
-                      <div style="font-size:11px;color:var(--g400);padding:10px 0;">Loading devices…</div>
-                    </div>
-                    <button class="sett-save" style="margin-top:10px;background:var(--g200);color:var(--g700);font-size:11px;" onclick="renderSettingsDeviceManager()">↺ Refresh Devices</button>
-                    <button class="sett-save" style="margin-top:8px;background:#7c3aed;color:#fff;font-size:11px;" onclick="openMasterReclaimModal()">👑 Master Reclaim</button>
-                  </div>
+          <!-- 12 · Cloud Sync (Supabase) — always visible in BYOS model -->
+          <div class="sett-stack" data-stack-id="cloud-sync-supabase" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#ecfdf5;color:#059669;">☁️</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Cloud Sync (Supabase)</div>
+                <div class="sett-stack-desc">Your own Supabase project — multi-device sync and cloud backup</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <!-- Status row -->
+              <div id="settSupaConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
+                <span id="settSupaConnDot" class="conn-dot grey"></span>
+                <div class="conn-info">
+                  <div class="conn-label">Supabase Connection</div>
+                  <div id="settSupaConnSub" class="conn-sub">Not configured — enter your project URL and anon key below.</div>
                 </div>
-
-                <!-- 11 · Dropbox Backup -->
-                <div class="sett-stack" data-stack-id="dropbox-backup" draggable="true">
-                  <div class="sett-stack-header" onclick="toggleStack(this)">
-                    <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
-                    <div class="sett-stack-icon" style="background:#e0f2fe;color:#0369a1;">📦</div>
-                    <div class="sett-stack-meta">
-                      <div class="sett-stack-title">Dropbox Backup</div>
-                      <div class="sett-stack-desc">Auto-backup every 10 min to your own Dropbox — no account needed from us</div>
-                    </div>
-                    <div class="sett-stack-chevron">▾</div>
-                  </div>
-                  <div class="sett-stack-divider"></div>
-                  <div class="sett-stack-body">
-                    <div id="dbxConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
-                      <span id="dbxConnDot" class="conn-dot grey"></span>
-                      <div class="conn-info">
-                        <div class="conn-label">Dropbox Backup</div>
-                        <div id="dbxConnSub" class="conn-sub">Not connected — save your App Key and authorise below.</div>
-                      </div>
-                      <div class="conn-actions">
-                        <div style="font-size:11px;color:var(--g500);">Last upload: <span id="dbxLastUpload">—</span></div>
-                      </div>
-                    </div>
-                    <div style="font-size:10px;font-weight:700;color:#64748b;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;">Step 1 — Your Dropbox App Key</div>
-                    <div style="font-size:9px;color:#94a3b8;margin-bottom:8px;line-height:1.5;">
-                      Get your free key at <strong>dropbox.com/developers</strong> → Create App → Scoped access → App folder.<br>
-                      Add <code style="background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:9px;">https://pos.duapharma.com</code> as a Redirect URI.
-                    </div>
-                    <div class="sett-row">
-                      <span class="sett-lbl">App Key</span>
-                      <input type="text" class="sett-inp" id="dbxAppKeyInput" placeholder="e.g. abc123xyz456" autocomplete="off" maxlength="80">
-                    </div>
-                    <button class="sett-save" onclick="dropboxSaveAppKey()">Save App Key</button>
-                    <div style="font-size:10px;font-weight:700;color:#64748b;margin:12px 0 6px;text-transform:uppercase;letter-spacing:.5px;">Step 2 — Authorise</div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                      <button id="dbxConnectBtn" class="conn-btn primary" onclick="dropboxConnect()">🔗 Connect Dropbox</button>
-                      <button id="dbxDisconnectBtn" class="conn-btn danger" style="display:none;" onclick="dropboxDisconnect()">Disconnect</button>
-                    </div>
-                    <div style="font-size:10px;font-weight:700;color:#64748b;margin:14px 0 6px;text-transform:uppercase;letter-spacing:.5px;">Step 3 — Auto-Backup</div>
-                    <div class="sett-row sett-row-sb">
-                      <div>
-                        <span id="dbxAutoLabel" class="sett-lbl sett-lbl-auto">Auto-backup every 10 min</span>
-                        <div class="sett-hint">Full export uploaded silently in the background</div>
-                      </div>
-                      <button id="dbxAutoBtn" class="sett-toggle-btn sett-toggle-off" onclick="dropboxToggleAuto()" disabled>OFF</button>
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-                      <button id="dbxBackupBtn" class="conn-btn primary" onclick="dropboxUploadBackup(false)" disabled>📤 Backup Now</button>
-                      <button id="dbxRestoreBtn" class="conn-btn outline" onclick="openDropboxRestoreModal()" disabled>📥 Restore</button>
-                    </div>
-                  </div>
+              </div>
+              <!-- Credentials -->
+              <div class="sett-row">
+                <span class="sett-lbl">Project URL</span>
+                <input type="text" class="sett-inp" id="settSupaUrl"
+                  placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Anon Key</span>
+                <input type="text" class="sett-inp" id="settSupaKey"
+                  placeholder="eyJ…" autocomplete="off" spellcheck="false">
+              </div>
+              <div id="settSupaStatus" style="font-size:12px;min-height:18px;margin:4px 0 8px;color:#64748b;"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="conn-btn primary" onclick="settingsTestSupabase()">🔌 Test Connection</button>
+                <button class="sett-save" style="margin:0;" onclick="settingsSaveSupabase()">Save</button>
+                <button class="conn-btn danger" onclick="settingsDisconnectSupabase()">Disconnect</button>
+              </div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;">
+                Get your URL and anon key from <strong>supabase.com</strong> → Project Settings → API.
+                Make sure you have run the schema SQL (available in the Cloud Sync Hub).
+              </div>
+              <div style="border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;">
+                <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">App Cache</div>
+                <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;line-height:1.5;">
+                  Force the service worker to re-download all app files fresh from the server.
+                  Use this if you deployed a new version and the app still shows old content.
                 </div>
+                <button class="conn-btn" onclick="refreshAppCache()"
+                  style="background:#7c3aed;color:#fff;border-color:#7c3aed;">
+                  🔄 Refresh App Cache
+                </button>
+                <div id="settRecacheStatus" style="font-size:11px;color:#7c3aed;margin-top:6px;min-height:14px;"></div>
+              </div>
+            </div>
+          </div>
 
-              </div><!-- /sett-col 0 -->
-
-              <!-- col 1: Cloud Sync + Email Recovery -->
-              <div class="sett-col" data-col="1">
-
-                <!-- 12 · Cloud Sync (Supabase) -->
-                <div class="sett-stack" data-stack-id="cloud-sync-supabase" draggable="true">
-                  <div class="sett-stack-header" onclick="toggleStack(this)">
-                    <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
-                    <div class="sett-stack-icon" style="background:#ecfdf5;color:#059669;">☁️</div>
-                    <div class="sett-stack-meta">
-                      <div class="sett-stack-title">Cloud Sync (Supabase)</div>
-                      <div class="sett-stack-desc">Your own Supabase project — multi-device sync and cloud backup</div>
-                    </div>
-                    <div class="sett-stack-chevron">▾</div>
-                  </div>
-                  <div class="sett-stack-divider"></div>
-                  <div class="sett-stack-body">
-                    <div id="settSupaConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
-                      <span id="settSupaConnDot" class="conn-dot grey"></span>
-                      <div class="conn-info">
-                        <div class="conn-label">Supabase Connection</div>
-                        <div id="settSupaConnSub" class="conn-sub">Not configured — enter your project URL and anon key below.</div>
-                      </div>
-                    </div>
-                    <div class="sett-row">
-                      <span class="sett-lbl">Project URL</span>
-                      <input type="text" class="sett-inp" id="settSupaUrl"
-                        placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" spellcheck="false">
-                    </div>
-                    <div class="sett-row">
-                      <span class="sett-lbl">Anon Key</span>
-                      <input type="text" class="sett-inp" id="settSupaKey"
-                        placeholder="eyJ…" autocomplete="off" spellcheck="false">
-                    </div>
-                    <div id="settSupaStatus" style="font-size:12px;min-height:18px;margin:4px 0 8px;color:#64748b;"></div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                      <button class="conn-btn primary" onclick="settingsTestSupabase()">🔌 Test Connection</button>
-                      <button class="sett-save" style="margin:0;" onclick="settingsSaveSupabase()">Save</button>
-                      <button class="conn-btn danger" onclick="settingsDisconnectSupabase()">Disconnect</button>
-                    </div>
-                    <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;">
-                      Get your URL and anon key from <strong>supabase.com</strong> → Project Settings → API.
-                      Make sure you have run the schema SQL (available in the Cloud Sync Hub).
-                    </div>
-                    <div style="border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;">
-                      <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">App Cache</div>
-                      <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;line-height:1.5;">
-                        Force the service worker to re-download all app files fresh from the server.
-                        Use this if you deployed a new version and the app still shows old content.
-                      </div>
-                      <button class="conn-btn" onclick="refreshAppCache()"
-                        style="background:#7c3aed;color:#fff;border-color:#7c3aed;">
-                        🔄 Refresh App Cache
-                      </button>
-                      <div id="settRecacheStatus" style="font-size:11px;color:#7c3aed;margin-top:6px;min-height:14px;"></div>
-                    </div>
-                  </div>
+          <!-- 13 · Email Recovery (EmailJS) — always visible in BYOS model -->
+          <div class="sett-stack" data-stack-id="email-recovery-emailjs" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#eff6ff;color:#2563eb;">📧</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Email Recovery (EmailJS)</div>
+                <div class="sett-stack-desc">Send password-reset emails from your own EmailJS account</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <!-- Status row -->
+              <div id="settEjsConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
+                <span id="settEjsConnDot" class="conn-dot grey"></span>
+                <div class="conn-info">
+                  <div class="conn-label">EmailJS</div>
+                  <div id="settEjsConnSub" class="conn-sub">Not configured — fill in your EmailJS credentials below.</div>
                 </div>
+              </div>
+              <!-- Credentials -->
+              <div class="sett-row">
+                <span class="sett-lbl">Service ID</span>
+                <input type="text" class="sett-inp" id="settEjsService"
+                  placeholder="e.g. service_xxxxxxx" autocomplete="off">
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Template ID</span>
+                <input type="text" class="sett-inp" id="settEjsTemplate"
+                  placeholder="e.g. template_xxxxxxx" autocomplete="off">
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Public Key</span>
+                <input type="text" class="sett-inp" id="settEjsPubkey"
+                  placeholder="e.g. XXXXXXXXXXXXXXXXXXXX" autocomplete="off">
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Recovery Email</span>
+                <input type="email" class="sett-inp" id="settEjsEmail"
+                  placeholder="e.g. admin@yourpharmacy.com" autocomplete="off">
+              </div>
+              <div id="settEjsStatus" style="font-size:12px;min-height:18px;margin:4px 0 8px;color:#64748b;"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="conn-btn primary" onclick="settingsTestEmailJS()">📨 Send Test Email</button>
+                <button class="sett-save" style="margin:0;" onclick="settingsSaveEmailJS()">Save</button>
+                <button class="conn-btn danger" onclick="settingsDisconnectEmailJS()">Disconnect</button>
+              </div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;">
+                Create a free account at <strong>emailjs.com</strong>. Used to send password-reset
+                OTPs from Settings → Security.
+              </div>
+            </div>
+          </div>
 
-                <!-- 13 · Email Recovery (EmailJS) -->
-                <div class="sett-stack" data-stack-id="email-recovery-emailjs" draggable="true">
-                  <div class="sett-stack-header" onclick="toggleStack(this)">
-                    <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
-                    <div class="sett-stack-icon" style="background:#eff6ff;color:#2563eb;">📧</div>
-                    <div class="sett-stack-meta">
-                      <div class="sett-stack-title">Email Recovery (EmailJS)</div>
-                      <div class="sett-stack-desc">Send password-reset emails from your own EmailJS account</div>
-                    </div>
-                    <div class="sett-stack-chevron">▾</div>
-                  </div>
-                  <div class="sett-stack-divider"></div>
-                  <div class="sett-stack-body">
-                    <div id="settEjsConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
-                      <span id="settEjsConnDot" class="conn-dot grey"></span>
-                      <div class="conn-info">
-                        <div class="conn-label">EmailJS</div>
-                        <div id="settEjsConnSub" class="conn-sub">Not configured — fill in your EmailJS credentials below.</div>
-                      </div>
-                    </div>
-                    <div class="sett-row">
-                      <span class="sett-lbl">Service ID</span>
-                      <input type="text" class="sett-inp" id="settEjsService"
-                        placeholder="e.g. service_xxxxxxx" autocomplete="off">
-                    </div>
-                    <div class="sett-row">
-                      <span class="sett-lbl">Template ID</span>
-                      <input type="text" class="sett-inp" id="settEjsTemplate"
-                        placeholder="e.g. template_xxxxxxx" autocomplete="off">
-                    </div>
-                    <div class="sett-row">
-                      <span class="sett-lbl">Public Key</span>
-                      <input type="text" class="sett-inp" id="settEjsPubkey"
-                        placeholder="e.g. XXXXXXXXXXXXXXXXXXXX" autocomplete="off">
-                    </div>
-                    <div class="sett-row">
-                      <span class="sett-lbl">Recovery Email</span>
-                      <input type="email" class="sett-inp" id="settEjsEmail"
-                        placeholder="e.g. admin@yourpharmacy.com" autocomplete="off">
-                    </div>
-                    <div id="settEjsStatus" style="font-size:12px;min-height:18px;margin:4px 0 8px;color:#64748b;"></div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                      <button class="conn-btn primary" onclick="settingsTestEmailJS()">📨 Send Test Email</button>
-                      <button class="sett-save" style="margin:0;" onclick="settingsSaveEmailJS()">Save</button>
-                      <button class="conn-btn danger" onclick="settingsDisconnectEmailJS()">Disconnect</button>
-                    </div>
-                    <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;">
-                      Create a free account at <strong>emailjs.com</strong>. Used to send password-reset
-                      OTPs from Settings → Security.
-                    </div>
-                  </div>
-                </div>
 
-              </div><!-- /sett-col 1 -->
+          <!-- 14 · Credential Share -->
+          <div class="sett-stack" data-stack-id="credential-share" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#f0fdf4;color:#16a34a;">🔗</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Credential Share</div>
+                <div class="sett-stack-desc">Share or import all app credentials via URL, QR code, or WhatsApp</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <p style="font-size:11px;color:var(--g500);margin:0 0 12px;line-height:1.6;">
+                Export all your API credentials (Supabase, EmailJS, Dropbox) as a shareable link or QR code.
+                Import on another device by scanning or pasting the link.
+              </p>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <button class="conn-btn primary" onclick="openCredentialShareModal('export')" style="background:#16a34a;border-color:#16a34a;">
+                  📤 Share Credentials
+                </button>
+                <button class="conn-btn outline" onclick="openCredentialShareModal('import')">
+                  📥 Import Credentials
+                </button>
+              </div>
+              <div style="font-size:10px;color:var(--g400);line-height:1.5;">
+                ⚠️ Credentials include sensitive API keys. Only share via secure channels.
+              </div>
+            </div>
+          </div>
 
-              <!-- col 2: Credential Share -->
-              <div class="sett-col" data-col="2">
-
-                <!-- 14 · Credential Share -->
-                <div class="sett-stack" data-stack-id="credential-share" draggable="true">
-                  <div class="sett-stack-header" onclick="toggleStack(this)">
-                    <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
-                    <div class="sett-stack-icon" style="background:#f0fdf4;color:#16a34a;">🔗</div>
-                    <div class="sett-stack-meta">
-                      <div class="sett-stack-title">Credential Share</div>
-                      <div class="sett-stack-desc">Share or import all app credentials via URL, QR code, or WhatsApp</div>
-                    </div>
-                    <div class="sett-stack-chevron">▾</div>
-                  </div>
-                  <div class="sett-stack-divider"></div>
-                  <div class="sett-stack-body">
-                    <p style="font-size:11px;color:var(--g500);margin:0 0 12px;line-height:1.6;">
-                      Export all your API credentials (Supabase, EmailJS, Dropbox) as a shareable link or QR code.
-                      Import on another device by scanning or pasting the link.
-                    </p>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                      <button class="conn-btn primary" onclick="openCredentialShareModal('export')" style="background:#16a34a;border-color:#16a34a;">
-                        📤 Share Credentials
-                      </button>
-                      <button class="conn-btn outline" onclick="openCredentialShareModal('import')">
-                        📥 Import Credentials
-                      </button>
-                    </div>
-                    <div style="font-size:10px;color:var(--g400);line-height:1.5;">
-                      ⚠️ Credentials include sensitive API keys. Only share via secure channels.
-                    </div>
-                  </div>
-                </div>
-
-              </div><!-- /sett-col 2 -->
-
-            </div><!-- /sett-stacks-container (sync) -->
-          </div><!-- /sett-sync-body -->
-
-        </div><!-- /sett-sync-section -->
+          </div><!-- /sett-col 2 -->
+        </div><!-- /sett-stacks-container -->
 
         <!-- Device Detail Drawer (Task 4) -->
         <div id="devDetailDrawer" class="dev-detail-drawer" role="dialog" aria-modal="true" aria-label="Device Details">
@@ -1934,8 +1857,7 @@
 
     <!-- 2. ACTION CARDS GRID -->
     <div class="dh-grid">
-      <input type="file" id="autoCsvEnginePicker" accept=".csv" style="display: none;" onchange="triggerEcosystemSync(this.files[0])">
-      <div class="dh-card dh-card-blue" onclick="document.getElementById('autoCsvEnginePicker').click()" style="cursor:pointer;">
+      <div class="dh-card dh-card-blue" onclick="closeDataHub(false);setTimeout(()=>requestAdminAccess('CSV_IMPORT'),350);" style="cursor:pointer;">
         <div class="dh-card-icon" style="background:#EFF6FF;">📥</div>
         <div class="dh-card-body">
           <div class="dh-card-title">Import Inventory CSV</div>
@@ -1967,8 +1889,50 @@
         </div>
         <span class="dh-card-chevron">›</span>
       </div>
+      <div class="dh-card dh-card-purple" onclick="openSyncDashboard();closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#FAF5FF;">🔬</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Sync Diagnostics</div>
+          <div class="dh-card-desc">Run connectivity, queue &amp; data integrity checks</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+      <div class="dh-card dh-card-cyan" onclick="dropboxUploadBackup(false);closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#ECFEFF;">📦</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Backup to Dropbox</div>
+          <div class="dh-card-desc">Upload full backup JSON to your Dropbox (requires App Key in Settings)</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+      <div class="dh-card dh-card-teal" onclick="openDropboxRestoreModal();closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#F0FDFA;">🔁</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Restore from Dropbox</div>
+          <div class="dh-card-desc">Browse and restore a backup file from your Dropbox app folder</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
+      <div class="dh-card dh-card-blue" onclick="openSQLGeneratorModal();closeDataHub(false);" style="cursor:pointer;">
+        <div class="dh-card-icon" style="background:#EFF6FF;">🗄️</div>
+        <div class="dh-card-body">
+          <div class="dh-card-title">Generate Supabase SQL</div>
+          <div class="dh-card-desc">Copy the complete schema SQL to set up your Supabase database</div>
+        </div>
+        <span class="dh-card-chevron">›</span>
+      </div>
     </div>
 
+    <!-- 3. DEVICE SYNC STATUS PANEL -->
+    <div class="dh-device-panel">
+      <div class="dh-panel-heading">
+        <span>Network Devices</span>
+        <button class="dh-panel-refresh-btn" id="dhDeviceRefreshBtn" onclick="dhRefreshDevicePanel()" title="Refresh device list">↻</button>
+      </div>
+      <div id="dhDeviceList">
+        <div style="font-size:11px;color:var(--g400);padding:8px 0;">⟳ Loading devices…</div>
+      </div>
+    </div>
 
     <!-- 4. INDEXEDDB & STORAGE PANEL -->
     <div class="dh-storage-panel">
@@ -2723,15 +2687,5 @@ if ('serviceWorker' in navigator) {
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="js/credentialShare.js"></script>
-<script src="js/github-sync.js"></script>
-<script>
-function toggleSyncSection() {
-  var body = document.getElementById('settSyncBody');
-  var chev = document.getElementById('settSyncChevron');
-  if (!body) return;
-  var collapsed = body.classList.toggle('collapsed');
-  chev.classList.toggle('rotated', collapsed);
-}
-</script>
 </body>
 </html>
