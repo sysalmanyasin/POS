@@ -970,40 +970,12 @@ async function executePurgeOld(keepDays) {
         window.dhRefreshDevicePanel();
     }
 
-    window.openDataHub = function(startupMode) {
-        _isStartupMode = !!startupMode;
-        const modal    = document.getElementById('dataHubModal');
-        const subtitle = document.getElementById('dataHubSubtitle');
-        const fn       = document.getElementById('dataHubFooterNote');
-        const skipBtn  = document.getElementById('dataHubSkipBtn');
-        if (_isStartupMode) {
-            subtitle.innerHTML = '<span class="dh-start-badge">⚡ STARTUP REMINDER</span>';
-            const tsStr = StorageModule.get('pharma_last_backup_time');
-            const diffMin = tsStr ? Math.floor((Date.now()-parseInt(tsStr))/60000) : Infinity;
-            fn.textContent = !tsStr ? '⚠️ No backup on record. Export one now.' : diffMin < 30 ? '✓ Backup is fresh (' + _formatBackupAge(parseInt(tsStr)) + '). All good!' : diffMin < 180 ? '⚠ Last backup was ' + _formatBackupAge(parseInt(tsStr)) + '. Consider exporting again.' : '🔴 Last backup was ' + _formatBackupAge(parseInt(tsStr)) + '. Please back up now!';
-            skipBtn.textContent = '✓ Continue to Billing';
-        } else {
-            subtitle.textContent = 'Manage inventory, backups & exports';
-            fn.textContent = 'Regular backups protect against data loss from browser clears or storage limits.';
-            skipBtn.textContent = 'Skip for now';
-        }
-        modal.style.display = 'flex';
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            modal.classList.add('visible');
-            if (typeof refreshDataHubInventoryStats === 'function') refreshDataHubInventoryStats();
-            if (typeof checkStorageUsage === 'function') checkStorageUsage();
-            _dhInitStatusStrip();
-        }));
-    };
-    window.closeDataHub = function(skipReminder) {
-        if (_isStartupMode && skipReminder) StorageModule.set('pharma_dh_reminder_date', new Date().toISOString().split('T')[0]);
-        const modal = document.getElementById('dataHubModal'); modal.classList.remove('visible');
-        setTimeout(() => { modal.style.display = 'none'; }, 300);
-    };
-    document.getElementById('dataHubModal').addEventListener('click', e => { if (e.target === document.getElementById('dataHubModal')) closeDataHub(false); });
-    window.triggerCSVLoad          = function() { closeDataHub(false); setTimeout(() => requestAdminAccess('CSV_IMPORT'), 350); };
-    window.triggerFullBackupExport = function() { closeDataHub(false); setTimeout(() => exportFullBackup(), 300); };
-    window.triggerRestoreBackup    = function() { closeDataHub(false); setTimeout(() => document.getElementById('restoreFileInputHeader').click(), 300); };
+    // Data Hub removed — stub functions prevent errors from any lingering references
+    window.openDataHub  = function() { console.info('[DataHub] removed — use Settings or Inventory tab'); };
+    window.closeDataHub = function() {};
+    window.triggerCSVLoad          = function() { requestAdminAccess('CSV_IMPORT'); };
+    window.triggerFullBackupExport = function() { exportFullBackup(); };
+    window.triggerRestoreBackup    = function() { document.getElementById('restoreFileInputHeader').click(); };
     document.getElementById('restoreFileInputHeader').addEventListener('change', function() { handleRestoreFileSelected(this); });
 
     // ── Wire CSV file input ──────────────────────────────────────────────
@@ -2760,4 +2732,42 @@ function refreshAppCache() {
     }, 30000);
 
     navigator.serviceWorker.controller.postMessage({ type: 'FORCE_RECACHE' });
+}
+
+/* ─── Collapsible Settings Section Groups ─────────────────────────────
+   Two groups: 'system' and 'cloud'.
+   State is persisted in localStorage so the user's preference survives
+   page refreshes. Both sections start collapsed (default).
+──────────────────────────────────────────────────────────────────── */
+function toggleSettSection(id) {
+    const body    = document.getElementById('sg-' + id + '-body');
+    const hdr     = document.getElementById('sg-' + id + '-hdr');
+    const chevron = document.getElementById('sg-' + id + '-chevron');
+    if (!body) return;
+
+    const opening = !body.classList.contains('visible');
+    body.classList.toggle('visible', opening);
+    hdr.classList.toggle('expanded', opening);
+
+    localStorage.setItem('sett_grp_' + id, opening ? '1' : '0');
+}
+
+function _initSettSections() {
+    ['system', 'cloud'].forEach(function(id) {
+        // Default: both collapsed (stored value '1' = expanded, anything else = collapsed)
+        const saved = localStorage.getItem('sett_grp_' + id);
+        if (saved === '1') {
+            toggleSettSection(id);   // open it silently
+        }
+        // else stays collapsed — no action needed
+    });
+}
+
+// Auto-init when settings tab is opened (hook into existing openSettingsTab or
+// call from switchTab. We patch the existing renderSettingsView if present.)
+const _origRenderSettingsView = (typeof renderSettingsView === 'function') ? renderSettingsView : null;
+function renderSettingsView() {
+    if (_origRenderSettingsView) _origRenderSettingsView();
+    // Delay one tick so DOM is ready
+    setTimeout(_initSettSections, 0);
 }
