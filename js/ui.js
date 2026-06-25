@@ -108,8 +108,24 @@ function _clearPinFailures(ctx) { delete _pinAttempts[ctx]; _savePinState(ctx); 
 
 
 function toggleSettGroup(hdr) {
-  const grp = hdr.closest('.sett-grp');
-  grp.classList.toggle('grp-open');
+  var grp = hdr.closest('.sett-grp');
+  var isOpen = grp.classList.toggle('grp-open');
+  if (grp.id) {
+    try { localStorage.setItem('pos_sett_grp_' + grp.id, isOpen ? '1' : '0'); } catch(e) {}
+  }
+}
+
+function _restoreSettGroups() {
+  document.querySelectorAll('.sett-grp[id]').forEach(function(grp) {
+    var saved = null;
+    try { saved = localStorage.getItem('pos_sett_grp_' + grp.id); } catch(e) {}
+    // Default is collapsed (closed). Only open if explicitly saved as '1'.
+    if (saved === '1') {
+      grp.classList.add('grp-open');
+    } else {
+      grp.classList.remove('grp-open');
+    }
+  });
 }
 
 
@@ -152,5 +168,6 @@ function updateCloudTabVisibility() {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+  _restoreSettGroups();
   setTimeout(updateCloudTabVisibility, 300);
 });
