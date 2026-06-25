@@ -465,12 +465,6 @@
   <button class="tab-btn" id="tabSyncHub" onclick="switchTab('syncHubView',this)">
     ☁️ Cloud Sync Hub <kbd class="tab-k">F10</kbd>
   </button>
-  <button class="tab-btn" id="tabReporting" onclick="switchTab('reportingView',this);renderReportingView();">
-    📈 Reports
-  </button>
-  <button class="tab-btn" id="tab-auditlog" onclick="switchTab('auditLogView',this);AuditLog.openAuditLogTab();">
-    🔍 Audit Log
-  </button>
   <div class="tab-sep"></div>
   <div id="editModeAlertBar">
     ⚠️ EDITING&nbsp;<strong id="editingInvoiceIdBadge"></strong>
@@ -1418,102 +1412,21 @@
       ════════════════════════════════════════════════════════════════════════ -->
       <div id="syncHubView" class="view"></div>
 
-      <!-- ═══ REPORTING VIEW ════════════════════════════════════════════════
-           Content injected by renderReportingView() in reporting.js.
-      ════════════════════════════════════════════════════════════════════════ -->
-      <div id="reportingView" class="view"></div>
+      <!-- REPORTING VIEW — removed from UI, stub kept for JS compatibility -->
+      <div id="reportingView" class="view" style="display:none!important;"></div>
 
-      <!-- ═══ AUDIT LOG VIEW ════════════════════════════════════════════════
-           Full event audit trail — every sale, refund, edit, login, setting
-           change, and sync event. Rendered by auditLog.js.
-      ════════════════════════════════════════════════════════════════════════ -->
-      <div id="auditLogView" class="view">
-        <div style="padding:16px 20px 0;">
-
-          <!-- Header -->
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
-            <div>
-              <h2 style="margin:0;font-size:17px;font-weight:800;color:var(--g800);">🔍 Audit Log</h2>
-              <p style="margin:2px 0 0;font-size:11px;color:var(--g500);">
-                Every significant action on this device — <span id="auditCount">0 events</span>
-              </p>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-              <button class="sh-btn sh-btn-teal" style="padding:6px 14px;font-size:12px;"
-                      onclick="AuditLog.openAuditLogTab()">↻ Refresh</button>
-              <button class="sh-btn" style="padding:6px 14px;font-size:12px;background:#e2e8f0;color:#475569;"
-                      onclick="AuditLog.exportAuditCSV()">⬇ Export CSV</button>
-            </div>
-          </div>
-
-          <!-- Filters row -->
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;
-                      padding:10px 14px;background:var(--g50,#f8fafc);border-radius:10px;
-                      border:1px solid var(--g100,#f1f5f9);">
-            <select id="auditCatFilter" onchange="AuditLog.applyFilters()"
-                    style="padding:5px 8px;border:1px solid var(--g200);border-radius:6px;font-size:12px;
-                           background:#fff;color:var(--g700);min-width:130px;">
-              <option value="all">All Actions</option>
-            </select>
-            <input id="auditSearchInp" type="search" placeholder="Search detail / staff…"
-                   oninput="AuditLog.onAuditSearch()"
-                   style="padding:5px 10px;border:1px solid var(--g200);border-radius:6px;font-size:12px;
-                          flex:1;min-width:140px;background:#fff;color:var(--g700);">
-            <label style="font-size:11px;color:var(--g500);white-space:nowrap;">From
-              <input id="auditStartDate" type="date" onchange="AuditLog.applyFilters()"
-                     style="margin-left:4px;padding:4px 7px;border:1px solid var(--g200);
-                            border-radius:6px;font-size:12px;">
-            </label>
-            <label style="font-size:11px;color:var(--g500);white-space:nowrap;">To
-              <input id="auditEndDate" type="date" onchange="AuditLog.applyFilters()"
-                     style="margin-left:4px;padding:4px 7px;border:1px solid var(--g200);
-                            border-radius:6px;font-size:12px;">
-            </label>
-          </div>
-
-          <!-- Table — overflow wrapper for mobile -->
-          <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--g100,#f1f5f9);border-radius:10px;">
-            <table style="width:100%;border-collapse:collapse;min-width:500px;" aria-label="Audit Log">
-              <thead>
-                <tr style="background:var(--g50,#f8fafc);border-bottom:2px solid var(--g100,#f1f5f9);">
-                  <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;
-                              color:var(--g500);white-space:nowrap;">Time</th>
-                  <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;
-                              color:var(--g500);">Action</th>
-                  <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;
-                              color:var(--g500);">Detail</th>
-                  <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;
-                              color:var(--g500);">Staff</th>
-                  <th style="padding:9px 12px;text-align:left;font-size:11px;font-weight:700;
-                              color:var(--g500);">Device</th>
-                </tr>
-              </thead>
-              <tbody id="auditLogBody">
-                <tr><td colspan="5"
-                        style="text-align:center;color:var(--g400);padding:32px;font-size:12px;">
-                  Loading audit log…
-                </td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <!-- Pagination -->
-          <div style="display:flex;align-items:center;justify-content:space-between;
-                      margin-top:10px;padding-bottom:16px;flex-wrap:wrap;gap:8px;">
-            <span id="auditPaginInfo" style="font-size:11px;color:var(--g500);">Page 1 of 1</span>
-            <div style="display:flex;gap:8px;">
-              <button id="auditPrevBtn" onclick="AuditLog.auditPrevPage()" disabled
-                      class="sh-btn" style="padding:5px 14px;font-size:12px;background:#e2e8f0;color:#475569;">
-                ← Prev
-              </button>
-              <button id="auditNextBtn" onclick="AuditLog.auditNextPage()" disabled
-                      class="sh-btn" style="padding:5px 14px;font-size:12px;background:#e2e8f0;color:#475569;">
-                Next →
-              </button>
-            </div>
-          </div>
-
-        </div>
+      <!-- AUDIT LOG VIEW — removed from UI, stub kept for JS compatibility -->
+      <div id="auditLogView" class="view" style="display:none!important;">
+        <!-- Stubs for JS that writes to these IDs -->
+        <span id="auditCount" style="display:none"></span>
+        <select id="auditCatFilter" style="display:none"></select>
+        <input id="auditSearchInp" type="search" style="display:none">
+        <input id="auditStartDate" type="date" style="display:none">
+        <input id="auditEndDate" type="date" style="display:none">
+        <tbody id="auditLogBody"></tbody>
+        <span id="auditPaginInfo" style="display:none"></span>
+        <button id="auditPrevBtn" style="display:none" disabled></button>
+        <button id="auditNextBtn" style="display:none" disabled></button>
       </div><!-- /auditLogView -->
 
     </div><!-- /leftContent -->
