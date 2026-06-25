@@ -115,6 +115,22 @@ function toggleSettGroup(hdr) {
   }
 }
 
+// Pin-protected toggle for Database & Services group.
+// Closing never needs a PIN; opening requires admin auth.
+function toggleDbServicesGrp(hdr) {
+  var grp = hdr.closest('.sett-grp');
+  if (grp.classList.contains('grp-open')) {
+    // Close — no PIN required
+    grp.classList.remove('grp-open');
+    try { localStorage.setItem('pos_sett_grp_dbServicesGrp', '0'); } catch(e) {}
+  } else {
+    // Open — require admin PIN
+    if (typeof requestAdminAccess === 'function') {
+      requestAdminAccess('VIEW_DB_SECTION');
+    }
+  }
+}
+
 function _restoreSettGroups() {
   document.querySelectorAll('.sett-grp[id]').forEach(function(grp) {
     var saved = null;
