@@ -1029,8 +1029,8 @@ async function renderSyncHubView() {
       </button>
       <button class="sh-btn sh-btn-stop" id="shOfflineModeBtn"
               onclick="toggleOfflineWorkMode()"
-              title="Stop all background sync so you can import and work fully offline.">
-        <span id="shOfflineModeIcon">▶</span> <span id="shOfflineModeLabel">Start Sync</span>
+              title="Stop all background sync so you can import and work fully offline. When done, click to push everything to cloud.">
+        <span id="shOfflineModeIcon">⏸</span> <span id="shOfflineModeLabel">Stop Sync</span>
       </button>
 
     </div>
@@ -1041,7 +1041,7 @@ async function renderSyncHubView() {
     <span class="sh-offline-banner-icon">✈️</span>
     <div class="sh-offline-banner-body">
       <div class="sh-offline-banner-title">Offline Work Mode — Sync Paused</div>
-      <div class="sh-offline-banner-sub">All background cloud sync is stopped. Import your CSV, bill customers normally — everything saves locally. When you're done, click <strong>Stop Sync</strong> to push all data to the cloud and resume.</div>
+      <div class="sh-offline-banner-sub">All background cloud sync is stopped. Import your CSV, bill customers normally — everything saves locally. When you're done, click <strong>Start Sync</strong> to push all data to the cloud.</div>
     </div>
     <span class="sh-offline-counter" id="shOfflineQueueCount">0 pending</span>
   </div>
@@ -3838,41 +3838,14 @@ function _updateOfflineModeUI() {
     const active = isOfflineWorkMode();
 
     if (btn) {
-        btn.className = 'sh-btn ' + (active ? 'sh-btn-stop' : 'sh-btn-stop');
+        btn.className = 'sh-btn ' + (active ? 'sh-btn-go' : 'sh-btn-stop');
         btn.title = active
-            ? 'Click to push all accumulated data to cloud and resume background sync.'
+            ? 'Push all accumulated data to cloud and resume background sync.'
             : 'Stop all background sync so you can import and work fully offline.';
     }
-    // When offline (active=true): sync is STOPPED → show "Stop Sync" (current state)
-    // When online (active=false): sync is running → show "Start Sync" (current state)
-    if (icon)  icon.textContent = active ? '⏹' : '▶';
-    if (label) label.textContent = active ? 'Stop Sync' : 'Start Sync';
+    if (icon)  icon.textContent = active ? '▶' : '⏸';
+    if (label) label.textContent = active ? 'Start Sync' : 'Stop Sync';
     if (banner) banner.classList.toggle('visible', active);
-
-    // Apply / remove dim overlay on the sync hub view
-    const syncView = document.getElementById('syncHubView');
-    if (syncView) {
-        let overlay = document.getElementById('shDimOverlay');
-        if (active) {
-            if (!overlay) {
-                overlay = document.createElement('div');
-                overlay.id = 'shDimOverlay';
-                overlay.style.cssText = [
-                    'position:absolute', 'inset:0', 'background:rgba(0,0,0,0.80)',
-                    'z-index:50', 'pointer-events:none',
-                    'transition:opacity .3s'
-                ].join(';');
-                syncView.style.position = 'relative';
-                syncView.appendChild(overlay);
-            }
-            overlay.style.display = 'block';
-            // Elevate the action button above the overlay so it stays clickable & visible
-            if (btn) { btn.style.position = 'relative'; btn.style.zIndex = '200'; }
-        } else {
-            if (overlay) overlay.style.display = 'none';
-            if (btn) { btn.style.position = ''; btn.style.zIndex = ''; }
-        }
-    }
 
     // Count pending items while in offline mode
     if (active && counter) {

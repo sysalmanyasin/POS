@@ -174,6 +174,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    setTimeout(() => {
+        const lastSkip = StorageModule.get('pharma_dh_reminder_date');
+        const today = new Date().toISOString().split('T')[0];
+        if (lastSkip === today) return;
+        const tsStr = StorageModule.get('pharma_last_backup_time');
+        const diffMin = tsStr ? Math.floor((Date.now() - parseInt(tsStr)) / 60000) : Infinity;
+        if (diffMin < 30) return;
+        openDataHub(true);
+    }, 1800);
+
     checkStorageUsage();
     updateHdrStats();
     _applyPrintMode();
@@ -246,6 +256,7 @@ window.addEventListener('keydown', function(e) {
         if (k === 's') { e.preventDefault(); promptAndSaveInvoice(); return; }
         if (k === 'i') { e.preventDefault(); document.getElementById('customerNameInput').focus(); return; }
         if (k === 'l') { e.preventDefault(); recallLastSaved(); return; }
+        if (k === 'd') { e.preventDefault(); openDataHub(); return; }
         if (k === 'b') { e.preventDefault(); exportFullBackup(); return; }
         if (k === 'm') { e.preventDefault(); openQuickAdd(); return; }
         if (k === '1') { e.preventDefault(); applyPresetDiscount(0); return; }
@@ -266,6 +277,7 @@ window.addEventListener('keydown', function(e) {
         if (document.getElementById('purgeConfirmModal').classList.contains('visible'))  { cancelPurgeConfirm(); return; }
         if (document.getElementById('receiptViewModal').classList.contains('visible'))   { closeReceiptModal(); return; }
         if (document.getElementById('quickAddModal').classList.contains('visible'))      { closeQuickAdd(); return; }
+        if (document.getElementById('dataHubModal').classList.contains('visible'))       { closeDataHub(false); return; }
         if (document.getElementById('billSavePinModal').style.display === 'flex')       { closeBillSavePinModal(); return; }
         if (document.getElementById('staffPinChangeModal').style.display === 'flex')    { closeStaffPinChangeModal(); return; }
         if (document.getElementById('ownerPinChangeModal').style.display === 'flex')    { _closeOwnerPinChangeModal(); return; }
@@ -1529,13 +1541,12 @@ function _doSwitchTab(tabId, btn) {
     btn.classList.add('active');
     const rp = document.getElementById('rightPanel');
     if (rp) {
-        // Always use flex so right panel's column layout works in
-        // both portrait (stacked) and landscape (side-by-side) modes.
-        rp.style.display = (tabId === 'billingView') ? 'flex' : 'none';
+        const isMobile = window.innerWidth <= 800;
+        rp.style.display = (tabId === 'billingView') ? (isMobile ? 'block' : 'flex') : 'none';
     }
     if (tabId === 'holdView')      renderHeldBillsTable();
     if (tabId === 'historyView')   _restoreHistoryView();
-    if (tabId === 'settingsView')  { _loadSettingsForm(); if (typeof _initSettSections === 'function') setTimeout(_initSettSections, 0); }
+    if (tabId === 'settingsView')  _loadSettingsForm();
     if (tabId === 'inventoryView') {
         if (typeof _invReady !== 'undefined' && _invReady) {
             if (typeof renderInventoryView === 'function') renderInventoryView();
