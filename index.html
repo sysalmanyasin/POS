@@ -815,16 +815,26 @@
           <div class="sett-view-title">⚙️ System Settings</div>
           <div class="sett-hdr-actions">
             <button class="sett-save-all-btn" onclick="saveAllSettings()" title="Save all settings">💾 Save All Settings</button>
-            <button class="sett-save-all-btn" onclick="openCredentialShareModal('export')" title="Show credentials QR code" style="background:#16a34a;color:#fff;border:none;">📲 Cred QR</button>
             <button class="sett-back-btn" onclick="switchTab('billingView',document.getElementById('tab-billing'))">← Back to Billing</button>
           </div>
         </div>
 
-        <!-- 3-column drag-to-reorder accordion stacks -->
-        <div class="sett-stacks-container" id="settStacksContainer">
-          <div class="sett-col" data-col="0">
-          <!-- 1 · Branch Identity -->
-          <div class="sett-stack" data-stack-id="branch-identity" draggable="true">
+
+        <!-- ── SECTION GROUP 1 · System Settings ───────────────────── -->
+        <div class="sett-grp grp-open" id="systemSettingsGrp">
+          <div class="sett-grp-hdr" onclick="toggleSettGroup(this)">
+            <div class="sett-grp-icon">⚙️</div>
+            <div class="sett-grp-meta">
+              <div class="sett-grp-title">System Settings</div>
+              <div class="sett-grp-desc">Branch identity, billing, receipts, printer, staff and security</div>
+            </div>
+            <div class="sett-grp-chevron">▾</div>
+          </div>
+          <div class="sett-grp-body">
+            <!-- 3-column drag-to-reorder accordion stacks -->
+            <div class="sett-stacks-container" id="settStacksContainer">
+              <div class="sett-col" data-col="0">
+              <div class="sett-stack" data-stack-id="branch-identity" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-branch">🏢</div>
@@ -863,9 +873,7 @@
               <button class="sett-save" onclick="saveBranchIdentity()">Save Identity Settings</button>
             </div>
           </div>
-
-          <!-- 2 · Receipt Customization -->
-          <div class="sett-stack" data-stack-id="receipt-customization" draggable="true">
+              <div class="sett-stack" data-stack-id="receipt-customization" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-receipt">🧾</div>
@@ -888,9 +896,7 @@
               <button class="sett-save" onclick="saveReceiptSettings()">Save Receipt Settings</button>
             </div>
           </div>
-
-          <!-- 3 · Thermal Printer Settings -->
-          <div class="sett-stack" data-stack-id="thermal-printer" draggable="true">
+              <div class="sett-stack" data-stack-id="thermal-printer" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-printer">🖨️</div>
@@ -964,11 +970,9 @@
               <button class="sett-save sett-save-teal sett-save-mt8" onclick="saveThermalSettings()">💾 Save Printer Settings</button>
             </div>
           </div>
-
-          </div><!-- /sett-col 0 -->
-          <div class="sett-col" data-col="1">
-          <!-- 4 · Data & Backup -->
-          <div class="sett-stack" data-stack-id="data-backup" draggable="true">
+              </div><!-- /sett-col 0 -->
+              <div class="sett-col" data-col="1">
+              <div class="sett-stack" data-stack-id="data-backup" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-backup">💾</div>
@@ -991,9 +995,7 @@
               <input type="file" id="restoreFileInput" accept=".json" onchange="handleRestoreFileSelected(this)">
             </div>
           </div>
-
-          <!-- 5 · Billing Settings -->
-          <div class="sett-stack" data-stack-id="billing-settings" draggable="true">
+              <div class="sett-stack" data-stack-id="billing-settings" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-billing">💳</div>
@@ -1023,9 +1025,7 @@
               <button class="sett-save" onclick="saveBillingSettings()">Save Billing Settings</button>
             </div>
           </div>
-
-          <!-- 6 · Appearance -->
-          <div class="sett-stack" data-stack-id="appearance" draggable="true">
+              <div class="sett-stack" data-stack-id="appearance" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-appear">🎨</div>
@@ -1043,11 +1043,9 @@
               </div>
             </div>
           </div>
-
-          </div><!-- /sett-col 1 -->
-          <div class="sett-col" data-col="2">
-          <!-- 7 · Staff Management -->
-          <div class="sett-stack" data-stack-id="staff-management" draggable="true">
+              </div><!-- /sett-col 1 -->
+              <div class="sett-col" data-col="2">
+              <div class="sett-stack" data-stack-id="staff-management" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-staff">👥</div>
@@ -1076,9 +1074,7 @@
               </div>
             </div>
           </div>
-
-          <!-- 8 · Security -->
-          <div class="sett-stack" data-stack-id="security" draggable="true">
+              <div class="sett-stack" data-stack-id="security" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-security">🔒</div>
@@ -1086,10 +1082,6 @@
                 <div class="sett-stack-title">Security</div>
                 <div class="sett-stack-desc">Admin password, access controls and PIN policies</div>
               </div>
-              <button onclick="event.stopPropagation();openCredentialShareModal('export')" title="Show credentials QR code for quick sharing"
-                style="margin-right:6px;padding:5px 10px;background:#16a34a;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;flex-shrink:0;">
-                📲 Cred QR
-              </button>
               <div class="sett-stack-chevron">▾</div>
             </div>
             <div class="sett-stack-divider"></div>
@@ -1132,44 +1124,7 @@
               </div>
             </div>
           </div>
-
-          <!-- 9 · Device Manager -->
-          <div class="sett-stack" data-stack-id="device-manager" draggable="true">
-            <div class="sett-stack-header" onclick="toggleStack(this)">
-              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
-              <div class="sett-stack-icon icon-devices">📱</div>
-              <div class="sett-stack-meta">
-                <div class="sett-stack-title">Device Manager</div>
-                <div class="sett-stack-desc">Registered devices, online status, master/client roles</div>
-              </div>
-              <div class="sett-stack-chevron">▾</div>
-            </div>
-            <div class="sett-stack-divider"></div>
-            <div class="sett-stack-body">
-              <p style="font-size:10px;color:var(--g500);margin:0 0 10px;line-height:1.5;">
-                All devices registered to this workspace.
-                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
-                  <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;"></span>Online (&lt;2 min)
-                </span>
-                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
-                  <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>Recent (&lt;10 min)
-                </span>
-                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
-                  <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>Offline
-                </span>
-                — Double-click a card for full details.
-              </p>
-              <div id="settDeviceGrid" class="dev-card-grid">
-                <div style="font-size:11px;color:var(--g400);padding:10px 0;">Loading devices…</div>
-              </div>
-              <button class="sett-save" style="margin-top:10px;background:var(--g200);color:var(--g700);font-size:11px;" onclick="renderSettingsDeviceManager()">↺ Refresh Devices</button>
-              <button class="sett-save" style="margin-top:8px;background:#7c3aed;color:#fff;font-size:11px;" onclick="openMasterReclaimModal()">👑 Master Reclaim</button>
-            </div>
-          </div>
-
-
-          <!-- 10 · Live Receipt Preview -->
-          <div class="sett-stack" data-stack-id="live-receipt-preview" draggable="true">
+              <div class="sett-stack" data-stack-id="live-receipt-preview" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon icon-preview">👁️</div>
@@ -1192,9 +1147,87 @@
               </div>
             </div>
           </div>
+              </div><!-- /sett-col 2 -->
+            </div><!-- /sett-stacks-container -->
+          </div><!-- /sett-grp-body -->
+        </div><!-- /systemSettingsGrp -->
 
-          <!-- 11 · Dropbox Backup -->
-          <div class="sett-stack" data-stack-id="dropbox-backup" draggable="true">
+        <!-- ── SECTION GROUP 2 · Cloud & Connectivity ───────────────── -->
+        <div class="sett-grp grp-open" id="cloudConnGrp">
+          <div class="sett-grp-hdr" onclick="toggleSettGroup(this)">
+            <div class="sett-grp-icon">☁️</div>
+            <div class="sett-grp-meta">
+              <div class="sett-grp-title">Cloud &amp; Connectivity</div>
+              <div class="sett-grp-desc">Multi-device sync, cloud backup, email recovery and credential sharing</div>
+            </div>
+            <div class="sett-grp-summary">
+              <span class="sg-pill">☁️ Cloud Sync</span>
+              <span class="sg-pill">📱 Devices</span>
+              <span class="sg-pill">📦 Dropbox</span>
+              <span class="sg-pill">📧 Email Recovery</span>
+              <span class="sg-pill">🔗 Credentials</span>
+            </div>
+            <div class="sett-grp-chevron">▾</div>
+          </div>
+          <div class="sett-grp-body">
+            <div class="sett-stacks-container sett-stacks-2col" id="settStacksContainer2">
+              <div class="sett-col" data-col="0">
+              <div class="sett-stack" data-stack-id="cloud-sync-supabase" draggable="true">
+            <div class="sett-stack-header" onclick="toggleStack(this)">
+              <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
+              <div class="sett-stack-icon" style="background:#ecfdf5;color:#059669;">☁️</div>
+              <div class="sett-stack-meta">
+                <div class="sett-stack-title">Cloud Sync (Supabase)</div>
+                <div class="sett-stack-desc">Your own Supabase project — multi-device sync and cloud backup</div>
+              </div>
+              <div class="sett-stack-chevron">▾</div>
+            </div>
+            <div class="sett-stack-divider"></div>
+            <div class="sett-stack-body">
+              <!-- Status row -->
+              <div id="settSupaConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
+                <span id="settSupaConnDot" class="conn-dot grey"></span>
+                <div class="conn-info">
+                  <div class="conn-label">Supabase Connection</div>
+                  <div id="settSupaConnSub" class="conn-sub">Not configured — enter your project URL and anon key below.</div>
+                </div>
+              </div>
+              <!-- Credentials -->
+              <div class="sett-row">
+                <span class="sett-lbl">Project URL</span>
+                <input type="text" class="sett-inp" id="settSupaUrl"
+                  placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="sett-row">
+                <span class="sett-lbl">Anon Key</span>
+                <input type="text" class="sett-inp" id="settSupaKey"
+                  placeholder="eyJ…" autocomplete="off" spellcheck="false">
+              </div>
+              <div id="settSupaStatus" style="font-size:12px;min-height:18px;margin:4px 0 8px;color:#64748b;"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="conn-btn primary" onclick="settingsTestSupabase()">🔌 Test Connection</button>
+                <button class="sett-save" style="margin:0;" onclick="settingsSaveSupabase()">Save</button>
+                <button class="conn-btn danger" onclick="settingsDisconnectSupabase()">Disconnect</button>
+              </div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;">
+                Get your URL and anon key from <strong>supabase.com</strong> → Project Settings → API.
+                Make sure you have run the schema SQL (available in the Cloud Sync Hub).
+              </div>
+              <div style="border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;">
+                <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">App Cache</div>
+                <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;line-height:1.5;">
+                  Force the service worker to re-download all app files fresh from the server.
+                  Use this if you deployed a new version and the app still shows old content.
+                </div>
+                <button class="conn-btn" onclick="refreshAppCache()"
+                  style="background:#7c3aed;color:#fff;border-color:#7c3aed;">
+                  🔄 Refresh App Cache
+                </button>
+                <div id="settRecacheStatus" style="font-size:11px;color:#7c3aed;margin-top:6px;min-height:14px;"></div>
+              </div>
+            </div>
+          </div>
+              <div class="sett-stack" data-stack-id="dropbox-backup" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon" style="background:#e0f2fe;color:#0369a1;">📦</div>
@@ -1250,66 +1283,41 @@
               </div>
             </div>
           </div>
-
-          <!-- 12 · Cloud Sync (Supabase) — always visible in BYOS model -->
-          <div class="sett-stack" data-stack-id="cloud-sync-supabase" draggable="true">
+              </div><!-- /col 0 -->
+              <div class="sett-col" data-col="1">
+              <div class="sett-stack" data-stack-id="device-manager" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
-              <div class="sett-stack-icon" style="background:#ecfdf5;color:#059669;">☁️</div>
+              <div class="sett-stack-icon icon-devices">📱</div>
               <div class="sett-stack-meta">
-                <div class="sett-stack-title">Cloud Sync (Supabase)</div>
-                <div class="sett-stack-desc">Your own Supabase project — multi-device sync and cloud backup</div>
+                <div class="sett-stack-title">Device Manager</div>
+                <div class="sett-stack-desc">Registered devices, online status, master/client roles</div>
               </div>
               <div class="sett-stack-chevron">▾</div>
             </div>
             <div class="sett-stack-divider"></div>
             <div class="sett-stack-body">
-              <!-- Status row -->
-              <div id="settSupaConnRow" class="conn-row conn-offline" style="margin-bottom:14px;">
-                <span id="settSupaConnDot" class="conn-dot grey"></span>
-                <div class="conn-info">
-                  <div class="conn-label">Supabase Connection</div>
-                  <div id="settSupaConnSub" class="conn-sub">Not configured — enter your project URL and anon key below.</div>
-                </div>
+              <p style="font-size:10px;color:var(--g500);margin:0 0 10px;line-height:1.5;">
+                All devices registered to this workspace.
+                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;"></span>Online (&lt;2 min)
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>Recent (&lt;10 min)
+                </span>
+                <span style="display:inline-flex;align-items:center;gap:3px;margin:0 4px;">
+                  <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;"></span>Offline
+                </span>
+                — Double-click a card for full details.
+              </p>
+              <div id="settDeviceGrid" class="dev-card-grid">
+                <div style="font-size:11px;color:var(--g400);padding:10px 0;">Loading devices…</div>
               </div>
-              <!-- Credentials -->
-              <div class="sett-row">
-                <span class="sett-lbl">Project URL</span>
-                <input type="text" class="sett-inp" id="settSupaUrl"
-                  placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" spellcheck="false">
-              </div>
-              <div class="sett-row">
-                <span class="sett-lbl">Anon Key</span>
-                <input type="text" class="sett-inp" id="settSupaKey"
-                  placeholder="eyJ…" autocomplete="off" spellcheck="false">
-              </div>
-              <div id="settSupaStatus" style="font-size:12px;min-height:18px;margin:4px 0 8px;color:#64748b;"></div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button class="conn-btn primary" onclick="settingsTestSupabase()">🔌 Test Connection</button>
-                <button class="sett-save" style="margin:0;" onclick="settingsSaveSupabase()">Save</button>
-                <button class="conn-btn danger" onclick="settingsDisconnectSupabase()">Disconnect</button>
-              </div>
-              <div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;">
-                Get your URL and anon key from <strong>supabase.com</strong> → Project Settings → API.
-                Make sure you have run the schema SQL (available in the Cloud Sync Hub).
-              </div>
-              <div style="border-top:1px solid #e2e8f0;margin-top:14px;padding-top:14px;">
-                <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">App Cache</div>
-                <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;line-height:1.5;">
-                  Force the service worker to re-download all app files fresh from the server.
-                  Use this if you deployed a new version and the app still shows old content.
-                </div>
-                <button class="conn-btn" onclick="refreshAppCache()"
-                  style="background:#7c3aed;color:#fff;border-color:#7c3aed;">
-                  🔄 Refresh App Cache
-                </button>
-                <div id="settRecacheStatus" style="font-size:11px;color:#7c3aed;margin-top:6px;min-height:14px;"></div>
-              </div>
+              <button class="sett-save" style="margin-top:10px;background:var(--g200);color:var(--g700);font-size:11px;" onclick="renderSettingsDeviceManager()">↺ Refresh Devices</button>
+              <button class="sett-save" style="margin-top:8px;background:#7c3aed;color:#fff;font-size:11px;" onclick="openMasterReclaimModal()">👑 Master Reclaim</button>
             </div>
           </div>
-
-          <!-- 13 · Email Recovery (EmailJS) — always visible in BYOS model -->
-          <div class="sett-stack" data-stack-id="email-recovery-emailjs" draggable="true">
+              <div class="sett-stack" data-stack-id="email-recovery-emailjs" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon" style="background:#eff6ff;color:#2563eb;">📧</div>
@@ -1362,10 +1370,7 @@
               </div>
             </div>
           </div>
-
-
-          <!-- 14 · Credential Share -->
-          <div class="sett-stack" data-stack-id="credential-share" draggable="true">
+              <div class="sett-stack" data-stack-id="credential-share" draggable="true">
             <div class="sett-stack-header" onclick="toggleStack(this)">
               <div class="sett-stack-drag" title="Drag to reorder">⠿</div>
               <div class="sett-stack-icon" style="background:#f0fdf4;color:#16a34a;">🔗</div>
@@ -1394,9 +1399,11 @@
               </div>
             </div>
           </div>
+              </div><!-- /col 1 -->
+            </div><!-- /sett-stacks-container2 -->
+          </div><!-- /sett-grp-body -->
+        </div><!-- /cloudConnGrp -->
 
-          </div><!-- /sett-col 2 -->
-        </div><!-- /sett-stacks-container -->
 
         <!-- Device Detail Drawer (Task 4) -->
         <div id="devDetailDrawer" class="dev-detail-drawer" role="dialog" aria-modal="true" aria-label="Device Details">
