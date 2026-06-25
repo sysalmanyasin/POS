@@ -15,9 +15,9 @@
 //   • Safe SW swap     → only activates on SKIP_WAITING message
 // ============================================================
 
-const SW_VERSION   = 'v29';
-const SHELL_CACHE  = 'pharmapos-cache-v30';
-const IMAGE_CACHE  = 'pharmapos-cache-v30-images';
+const SW_VERSION   = 'v30.1';
+const SHELL_CACHE  = 'pharmapos-cache-v30.1';
+const IMAGE_CACHE  = 'pharmapos-cache-v30.1-images';
 
 // Keep at most this many entries per cache bucket
 const MAX_IMAGE_ENTRIES = 60;
