@@ -16,8 +16,8 @@
 // ============================================================
 
 const SW_VERSION   = 'v29';
-const SHELL_CACHE  = 'pharmapos-cache-v29';
-const IMAGE_CACHE  = 'pharmapos-cache-v29-images';
+const SHELL_CACHE  = 'pharmapos-cache-v30';
+const IMAGE_CACHE  = 'pharmapos-cache-v30-images';
 
 // Keep at most this many entries per cache bucket
 const MAX_IMAGE_ENTRIES = 60;
