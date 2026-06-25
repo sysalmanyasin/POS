@@ -1000,7 +1000,8 @@ async function executePurgeOld(keepDays) {
         const modal = document.getElementById('dataHubModal'); modal.classList.remove('visible');
         setTimeout(() => { modal.style.display = 'none'; }, 300);
     };
-    document.getElementById('dataHubModal').addEventListener('click', e => { if (e.target === document.getElementById('dataHubModal')) closeDataHub(false); });
+    // dataHubModal was removed — guard so the IIFE doesn't crash and toggleStack still reaches window
+    (function() { var _dhm = document.getElementById('dataHubModal'); if (_dhm) _dhm.addEventListener('click', function(e) { if (e.target === _dhm) closeDataHub(false); }); })();
     window.triggerCSVLoad          = function() { closeDataHub(false); setTimeout(() => requestAdminAccess('CSV_IMPORT'), 350); };
     window.triggerFullBackupExport = function() { closeDataHub(false); setTimeout(() => exportFullBackup(), 300); };
     window.triggerRestoreBackup    = function() { closeDataHub(false); setTimeout(() => document.getElementById('restoreFileInputHeader').click(), 300); };

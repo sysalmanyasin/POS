@@ -294,7 +294,7 @@ END $$;
           'font-size:15px;font-weight:700;cursor:pointer;margin-top:4px;">',
           'Save &amp; Start →',
         '</button>',
-        '<button onclick="(function(){var e=document.getElementById('welcome-screen');if(e){e.style.opacity='0';setTimeout(function(){e.style.display='none';},300);}})()"',
+        '<button onclick="(function(){var e=document.getElementById(\'welcome-screen\');if(e){e.style.opacity=\'0\';setTimeout(function(){e.style.display=\'none\';},300);}})()"',
           ' style="padding:12px;background:transparent;color:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.2);',
           'border-radius:8px;font-size:13px;cursor:pointer;">',
           'Skip for now',
