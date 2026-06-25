@@ -592,6 +592,8 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
     max-height:42vh;
     overflow-y:auto;
     flex-shrink:0;
+    display:flex!important;
+    flex-direction:column;
     -webkit-overflow-scrolling:touch;
   }
 }
@@ -601,7 +603,7 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
    Phones rotated sideways: restore side-by-side layout but with
    a narrower right panel and a slimmer header.
 ================================================================ */
-@media (orientation:landscape) and (max-height:520px) {
+@media (orientation:landscape) and (max-height:620px) {
   /* Ultra-compact header */
   #appHeader{height:36px;padding:0 8px;}
   .hdr-brand{min-width:0;}
@@ -615,16 +617,86 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
   #tabStrip{height:26px;}
   .tab-btn{height:20px;font-size:10px;padding:0 8px;}
 
-  /* Restore side-by-side with narrowed right panel */
-  #appBody{flex-direction:row!important;}
-  #leftPanel{flex:1;min-height:0;overflow:hidden;}
+  /* ── Force side-by-side two-panel layout ── */
+  #appBody{
+    flex-direction:row!important;
+    overflow:hidden;
+  }
+  /* Left panel fills remaining width, scrollable content inside */
+  #leftPanel{
+    flex:1;
+    min-width:0;
+    min-height:0;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  /* Right panel: fixed width sidebar */
   #rightPanel{
-    width:260px!important;
+    width:240px!important;
+    min-width:240px;
+    min-height:0;
     max-height:none!important;
-    border-left:1px solid var(--g200)!important;
+    border-left:2px solid var(--g200)!important;
     border-top:none!important;
     overflow-y:auto;
+    overflow-x:hidden;
     flex-shrink:0;
+    display:flex!important;
+    flex-direction:column;
+  }
+
+  /* Left content and views must fill the panel height */
+  #leftContent{
+    flex:1;
+    min-height:0;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+  .view{
+    flex:1;
+    min-height:0;
+    overflow-y:auto;
+  }
+  #billingView.active{
+    flex:1;
+    min-height:0;
+    overflow:hidden;
+  }
+
+  /* Billing top-panel: more compact in landscape */
+  .top-panel{
+    padding:4px 8px;
+    gap:4px;
+  }
+  .tp-cust-bar{padding:2px 0;}
+  .tp-row1{gap:6px;}
+  .tp-datetime{min-width:110px;padding:2px 8px;}
+  .tp-date{font-size:10px;}
+  .tp-time{font-size:12px;}
+  #searchBox{height:30px;font-size:12px;}
+  .tp-add-btn{height:30px;padding:0 10px;font-size:10px;}
+
+  /* Product info card: compact */
+  #productInfoCard{padding:4px 8px;}
+  .pic-qty-row{margin-top:2px;}
+
+  /* Invoice panel fills space */
+  .inv-panel{flex:1;min-height:0;}
+
+  /* Right panel sections: compact */
+  .rp-section{padding:5px 8px;}
+  .rp-header{padding:4px 8px;}
+  #cartActionBar{padding:4px 8px;}
+  .act-row{gap:3px;margin-bottom:4px;}
+  .act-btn{height:28px;font-size:10px;}
+  .act-save{height:36px;font-size:12px;}
+  .disc-preset-btn{height:20px;font-size:9px;}
+
+  /* History / Settings views: allow internal scroll */
+  #historyView,#settingsView,#inventoryView,#holdView,#syncHubView{
+    overflow-y:auto;
   }
 
   /* Hide status bar to reclaim vertical space */
@@ -642,16 +714,11 @@ kbd{font-family:var(--font-mono);background:rgba(255,255,255,.15);
 /* ================================================================
    AUDIT LOG VIEW — ensure proper layout inside .view container
 ================================================================ */
-#auditLogView{
-  padding:0; /* inner div handles its own padding */
-}
-#auditLogView > div {
-  min-height:100%;
-}
-/* Make the audit table wrapper scroll safely on all screen sizes */
-#auditLogView .audit-table-scroll{
-  overflow-x:auto;
-  -webkit-overflow-scrolling:touch;
-  border:1px solid var(--g100);
-  border-radius:10px;
+/* (Audit Log removed from UI — view hidden, JS compatibility stubs kept) */
+
+/* ================================================================
+   SYNC HUB VIEW — position context for offline dim overlay
+================================================================ */
+#syncHubView {
+  position: relative; /* enables absolute-positioned dim overlay */
 }
