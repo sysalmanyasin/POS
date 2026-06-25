@@ -1,5 +1,5 @@
 // ============================================================
-// Pharma POS — Service Worker  v28  (Ultimate Edition)
+// Pharma POS — Service Worker  v29  (Ultimate Edition)
 //
 // Cache strategies by resource type:
 //   Navigation   → Network-First (4s) → Cache → Offline page
@@ -15,9 +15,9 @@
 //   • Safe SW swap     → only activates on SKIP_WAITING message
 // ============================================================
 
-const SW_VERSION   = 'v30.2';
-const SHELL_CACHE  = 'pharmapos-cache-v30.2';
-const IMAGE_CACHE  = 'pharmapos-cache-v30.2-images';
+const SW_VERSION   = 'v29';
+const SHELL_CACHE  = 'pharmapos-cache-v31';
+const IMAGE_CACHE  = 'pharmapos-cache-v31-images';
 
 // Keep at most this many entries per cache bucket
 const MAX_IMAGE_ENTRIES = 60;
