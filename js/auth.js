@@ -1096,7 +1096,8 @@ function requestAdminAccess(type, targetId = null, extraData = null) {
         'PURGE_ZERO_STOCK':     '⚠️ Authenticate to remove all zero-stock items from inventory.',
         'IDB_NUKE':             '💣 Authenticate to broadcast Force IDB Nuke to all active devices.',
         'FACTORY_RESET':        '⚠️ FACTORY RESET — Wipes ALL local data, settings, and credentials from this device. Cannot be undone.',
-        'REGENERATE_RECOVERY_CODE': '🔑 Generate a new recovery code — your old recovery code will stop working immediately.'
+        'REGENERATE_RECOVERY_CODE': '🔑 Generate a new recovery code — your old recovery code will stop working immediately.',
+        'VIEW_DB_SECTION':          '🔌 Authenticate to view database credentials and service settings.'
     };
     document.getElementById('authActionText').textContent = msgs[type] || 'Admin action required.';
     document.getElementById('authModal').classList.add('visible');
@@ -1234,6 +1235,13 @@ function executeProtectedAction() {
     }
     else if (type === 'REGENERATE_RECOVERY_CODE') {
         if (typeof window.regenerateRecoveryCode === 'function') window.regenerateRecoveryCode();
+    }
+    else if (type === 'VIEW_DB_SECTION') {
+        var dbGrp = document.getElementById('dbServicesGrp');
+        if (dbGrp) {
+            dbGrp.classList.add('grp-open');
+            try { localStorage.setItem('pos_sett_grp_dbServicesGrp', '1'); } catch(_) {}
+        }
     }
 }
 
