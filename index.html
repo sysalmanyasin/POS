@@ -811,7 +811,6 @@
 
       <!-- SETTINGS VIEW -->
 <div id="settingsView" class="view">
-      <div id="dbConnectionCard" class="sett-section"></div>
         <!-- Settings header -->
         <div class="sett-view-hdr">
           <div class="sett-view-title">⚙️ System Settings</div>
@@ -1448,6 +1447,20 @@
           </div><!-- /sett-grp-body -->
         </div><!-- /cloudConnGrp -->
 
+        <!-- ── SECTION GROUP 3 · Database & Services (pin-protected) ─── -->
+        <div class="sett-grp" id="dbServicesGrp">
+          <div class="sett-grp-hdr" onclick="toggleDbServicesGrp(this)">
+            <div class="sett-grp-icon">🔌</div>
+            <div class="sett-grp-meta">
+              <div class="sett-grp-title">Database &amp; Services</div>
+              <div class="sett-grp-desc">Supabase database connection, email recovery and integrations</div>
+            </div>
+            <div class="sett-grp-chevron">▾</div>
+          </div>
+          <div class="sett-grp-body">
+            <div id="dbConnectionCard" class="sett-section"></div>
+          </div>
+        </div><!-- /dbServicesGrp -->
 
         <!-- Device Detail Drawer (Task 4) -->
         <div id="devDetailDrawer" class="dev-detail-drawer" role="dialog" aria-modal="true" aria-label="Device Details">
