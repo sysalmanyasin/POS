@@ -2740,10 +2740,15 @@
 
 /* ── Cloud tab: sub-tabs and panels ─────────────────────────────────── */
 .cloud-container {
-    display: flex;
     flex-direction: column;
     height: 100%;
     overflow: hidden;
+}
+/* Only flex when the cloudView is the active tab — prevents it bleeding
+   into other views on mobile. .view{display:none} has equal specificity
+   to .cloud-container{display:flex} so the later rule was always winning. */
+.view.active.cloud-container {
+    display: flex;
 }
 .cloud-sub-tabs {
     display: flex;
