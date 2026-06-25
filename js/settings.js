@@ -2576,6 +2576,7 @@ function settingsSaveSupabase() {
     _settSupaStatus('✅ Saved! Reload the app to activate cloud sync.', '#065f46');
     if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('connecting');
     if (typeof showToast === 'function') showToast('☁️ Supabase credentials saved. Reload to activate sync.');
+    if (typeof updateCloudTabVisibility === 'function') updateCloudTabVisibility();
 }
 
 function settingsDisconnectSupabase() {
@@ -2591,6 +2592,7 @@ function settingsDisconnectSupabase() {
     _settSupaStatus('Disconnected. Cloud sync is now disabled.', '#64748b');
     if (typeof updateSupabaseSyncUI === 'function') updateSupabaseSyncUI('offline');
     if (typeof showToast === 'function') showToast('☁️ Supabase disconnected.');
+    if (typeof updateCloudTabVisibility === 'function') updateCloudTabVisibility();
 }
 
 function _settEjsStatus(msg, color) {

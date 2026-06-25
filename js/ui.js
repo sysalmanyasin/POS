@@ -111,3 +111,46 @@ function toggleSettGroup(hdr) {
   const grp = hdr.closest('.sett-grp');
   grp.classList.toggle('grp-open');
 }
+
+
+// ── Cloud tab: tracks which sub-panel is active ───────────────────────────
+var _activeCloudPanel = 'synchub';
+
+function switchCloudTab(panel, btn) {
+  _activeCloudPanel = panel;
+  // Deactivate all sub-tab buttons
+  document.querySelectorAll('.cst-btn').forEach(b => b.classList.remove('cst-active'));
+  // Hide all panels
+  document.querySelectorAll('.cst-panel').forEach(p => p.classList.remove('cst-panel-active'));
+  // Activate button
+  if (btn) btn.classList.add('cst-active');
+  // Show selected panel
+  var panelMap = { synchub: 'syncHubView', reports: 'reportingView', audit: 'auditLogView' };
+  var el = document.getElementById(panelMap[panel]);
+  if (el) el.classList.add('cst-panel-active');
+  // Init view content
+  if (panel === 'synchub' && typeof renderSyncHubView    === 'function') renderSyncHubView();
+  if (panel === 'reports' && typeof renderReportingView  === 'function') renderReportingView();
+  if (panel === 'audit'   && typeof AuditLog !== 'undefined'
+      && typeof AuditLog.openAuditLogTab === 'function') AuditLog.openAuditLogTab();
+}
+
+function updateCloudTabVisibility() {
+  var configured = (typeof _isSupabaseConfigured === 'function') && _isSupabaseConfigured();
+  var tabBtn  = document.getElementById('tab-cloud');
+  var sbHint  = document.getElementById('sb-cloud-hint');
+  if (tabBtn) tabBtn.style.display = configured ? '' : 'none';
+  if (sbHint) sbHint.style.display = configured ? '' : 'none';
+  // If currently on cloudView and just lost config → redirect to billing
+  if (!configured) {
+    var cloudView = document.getElementById('cloudView');
+    if (cloudView && cloudView.classList.contains('active')) {
+      var billingBtn = document.getElementById('tab-billing');
+      if (typeof switchTab === 'function' && billingBtn) switchTab('billingView', billingBtn);
+    }
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  setTimeout(updateCloudTabVisibility, 300);
+});

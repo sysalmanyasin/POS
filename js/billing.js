@@ -206,7 +206,11 @@ window.addEventListener('keydown', function(e) {
     if (e.key === 'F8')  { e.preventDefault(); switchTab('inventoryView', document.getElementById('tab-inventory')); return; }
     if (e.key === 'F10') {
         e.preventDefault();
-        switchTab('syncHubView', document.getElementById('tabSyncHub'));
+        const cloudBtn = document.getElementById('tab-cloud');
+        if (cloudBtn && cloudBtn.style.display !== 'none') {
+            switchTab('cloudView', cloudBtn);
+            switchCloudTab(_activeCloudPanel || 'synchub', document.getElementById('cst-' + (_activeCloudPanel || 'synchub')));
+        }
         return;
     }
     if (e.key === 'F12') { e.preventDefault(); toggleSettingsDrawer(); return; }
@@ -1555,7 +1559,7 @@ function _doSwitchTab(tabId, btn) {
             if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
         }
     }
-    if (tabId === 'syncHubView')   { if (typeof renderSyncHubView     === 'function') renderSyncHubView();  }
+    if (tabId === 'cloudView')     { switchCloudTab(_activeCloudPanel || 'synchub', document.getElementById('cst-' + (_activeCloudPanel || 'synchub'))); }
     if (tabId === 'billingView')  setTimeout(() => searchBox.focus(), 50);
 }
 function _restoreHistoryView() {
