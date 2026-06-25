@@ -1236,13 +1236,11 @@
 /* ── View header ─────────────────────────────────────────────────────────── */
 .inv-view-header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 12px 16px 10px;
+    flex-direction: column;
+    gap: 0;
+    padding: 0;
     border-bottom: 1px solid var(--g150);
     flex-shrink: 0;
-    flex-wrap: wrap;
 }
 .inv-view-title {
     font-size: 14px;
@@ -2673,3 +2671,69 @@
   border-color: var(--g300);
   color: var(--g700);
 }
+
+/* ── Inventory Quick Actions strip ──────────────────────────────── */
+.inv-header-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    flex-wrap: wrap;
+}
+.inv-header-search {
+    border-bottom: 1px solid var(--g150,#e2e8f0);
+}
+.inv-quick-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 16px;
+    background: var(--g50, #f8fafc);
+    flex-wrap: wrap;
+}
+.iqa-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--g400, #94a3b8);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    margin-right: 2px;
+    white-space: nowrap;
+}
+.iqa-group {
+    display: flex;
+    gap: 4px;
+}
+.iqa-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--g200, #e2e8f0);
+    margin: 0 4px;
+    flex-shrink: 0;
+}
+.iqa-btn {
+    height: 28px;
+    padding: 0 11px;
+    border-radius: 6px;
+    border: 1px solid var(--g250, #cbd5e1);
+    background: var(--white, #fff);
+    color: var(--g700, #334155);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .12s, border-color .12s;
+}
+.iqa-btn.iqa-neutral:hover { background: var(--g100,#f1f5f9); }
+.iqa-btn.iqa-import {
+    background: #eff6ff;
+    color: #2563eb;
+    border-color: #bfdbfe;
+}
+.iqa-btn.iqa-import:hover { background: #dbeafe; }
+.iqa-btn.iqa-catalog {
+    background: #f0fdf4;
+    color: #15803d;
+    border-color: #bbf7d0;
+}
+.iqa-btn.iqa-catalog:hover { background: #dcfce7; }
