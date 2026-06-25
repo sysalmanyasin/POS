@@ -2737,3 +2737,47 @@
     border-color: #bbf7d0;
 }
 .iqa-btn.iqa-catalog:hover { background: #dcfce7; }
+
+/* ── Cloud tab: sub-tabs and panels ─────────────────────────────────── */
+.cloud-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+.cloud-sub-tabs {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 2px solid var(--g150,#e2e8f0);
+    background: var(--white,#fff);
+    flex-shrink: 0;
+    padding: 0 12px;
+    gap: 0;
+}
+.cst-btn {
+    padding: 10px 20px;
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    background: transparent;
+    color: var(--g500,#64748b);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color .12s, border-color .12s;
+    white-space: nowrap;
+    line-height: 1;
+}
+.cst-btn:hover { color: var(--g800,#1e293b); }
+.cst-btn.cst-active {
+    color: var(--teal,#0f766e);
+    border-bottom-color: var(--teal,#0f766e);
+    font-weight: 700;
+}
+.cst-panel {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+.cst-panel.cst-panel-active { display: flex; flex-direction: column; }
