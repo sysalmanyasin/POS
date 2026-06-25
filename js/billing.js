@@ -1541,8 +1541,9 @@ function _doSwitchTab(tabId, btn) {
     btn.classList.add('active');
     const rp = document.getElementById('rightPanel');
     if (rp) {
-        const isMobile = window.innerWidth <= 800;
-        rp.style.display = (tabId === 'billingView') ? (isMobile ? 'block' : 'flex') : 'none';
+        // Always use flex so right panel's column layout works in
+        // both portrait (stacked) and landscape (side-by-side) modes.
+        rp.style.display = (tabId === 'billingView') ? 'flex' : 'none';
     }
     if (tabId === 'holdView')      renderHeldBillsTable();
     if (tabId === 'historyView')   _restoreHistoryView();
