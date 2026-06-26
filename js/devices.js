@@ -672,8 +672,6 @@ const DevicesModule = (() => {
                 return;
             }
         }
-
-        console.log('[DevicesModule] Executing command:', type);
         switch (type) {
             case 'PURGE': {
                 if (typeof StorageModule !== 'undefined') StorageModule.clearAllPrimaryStores();
@@ -773,7 +771,7 @@ const DevicesModule = (() => {
                     await new Promise(resolve => {
                         try {
                             const r = indexedDB.deleteDatabase(_dbName);
-                            r.onsuccess = () => { console.log('[IDB_NUKE] Deleted:', _dbName); resolve(); };
+                            r.onsuccess = () => { resolve(); };
                             r.onerror   = () => { console.warn('[IDB_NUKE] Failed:', _dbName); resolve(); };
                             r.onblocked = () => { console.warn('[IDB_NUKE] Blocked:', _dbName); setTimeout(resolve, 1000); };
                         } catch(_e) { resolve(); }

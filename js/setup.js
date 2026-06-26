@@ -727,7 +727,10 @@ END $$;
       'border-radius:10px','padding:12px 14px','font-size:13px',
       'font-weight:600','color:#6ee7b7','margin-bottom:14px','line-height:1.5'
     ].join(';');
-    banner.innerHTML = '🔗 Setup link detected — credentials for <strong>' + ref +
+    // FIX (XSS): ref may be the raw URL when the supabase regex doesn't match.
+    // Always escape before inserting into innerHTML.
+    const safeRef = ref.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    banner.innerHTML = '🔗 Setup link detected — credentials for <strong>' + safeRef +
       '.supabase.co</strong> pre-filled below.<br>' +
       '<span style="font-size:11px;opacity:.75;">Click <strong>Test Connection</strong> to verify, then Save &amp; Continue.</span>';
     card.insertBefore(banner, card.firstChild);

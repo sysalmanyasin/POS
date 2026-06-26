@@ -731,10 +731,18 @@ function _performRestore(payload) {
         syncInvoiceCounterFromLedger(savedInvoicesLedger);
         temporaryHeldBills  = Array.isArray(payload.heldBills)     && payload.heldBills.length     > 0 ? payload.heldBills     : Array.isArray(_idbHb)   && _idbHb.length   > 0 ? _idbHb   : [];
         activeCartItems = []; currentlyEditingInvoiceId = null;
-        saveInventoryToDB(masterInventoryDB); StorageModule.saveInvoices(savedInvoicesLedger); StorageModule.saveHeldBills(temporaryHeldBills); StorageModule.clearCart();
-        loadBranchIdentity(); _applyReceiptInfo(); _applyDarkMode();
-        updateStatsCounters(); renderHistoryCards(savedInvoicesLedger); renderInvoiceUI(); updateBackupReminderBanner(); updateHdrStats();
-        showToast('✅ Backup restored successfully.');
+        // FIX (fire-and-forget chain): saveInvoices and saveHeldBills are async IDB
+        // operations. clearCart() and UI updates must run only after both have committed
+        // so the app never renders stale data on a slow device or mid-write reload.
+        saveInventoryToDB(masterInventoryDB);
+        StorageModule.saveInvoices(savedInvoicesLedger, function() {
+            StorageModule.saveHeldBills(temporaryHeldBills, function() {
+                StorageModule.clearCart();
+                loadBranchIdentity(); _applyReceiptInfo(); _applyDarkMode();
+                updateStatsCounters(); renderHistoryCards(savedInvoicesLedger); renderInvoiceUI(); updateBackupReminderBanner(); updateHdrStats();
+                showToast('✅ Backup restored successfully.');
+            });
+        });
     } catch(err) { showToast('❌ Restore error: ' + err.message, true); }
 }
 

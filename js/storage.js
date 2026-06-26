@@ -153,12 +153,16 @@ const StorageModule = (() => {
      *                                 Enables the SSOT Write-Through Log pattern:
      *                                 callers update in-memory state ONLY after IDB confirms.
      */
-    function saveInvoices(ledger, onSuccess) {
+    // FIX (async error reporting): saveInvoices / _doIDBInvoiceWrite now accept an
+    // optional onError callback so callers can react to IDB write failures.
+    // The old try/catch in billing.js around saveInvoices() could never fire because
+    // saveInvoices() returns synchronously — the real writes are async IDB ops.
+    function saveInvoices(ledger, onSuccess, onError) {
         _queuedSupaSet(SUPA_KEYS.invoices, JSON.stringify(ledger));
-        if (_invoiceSaveLock) { _invoiceSavePending = { ledger, onSuccess }; return; }
-        _doIDBInvoiceWrite(ledger, onSuccess);
+        if (_invoiceSaveLock) { _invoiceSavePending = { ledger, onSuccess, onError }; return; }
+        _doIDBInvoiceWrite(ledger, onSuccess, onError);
     }
-    function _doIDBInvoiceWrite(ledger, onSuccess) {
+    function _doIDBInvoiceWrite(ledger, onSuccess, onError) {
         _invoiceSaveLock = true;
         _whenReady(idb => {
             if (!idb) {
@@ -185,8 +189,15 @@ const StorageModule = (() => {
                     // SSOT Write-Through: notify caller that IDB has committed
                     if (typeof onSuccess === 'function') { try { onSuccess(ledger); } catch(_e) {} }
                 };
-                tx.onerror = () => { _invoiceSaveLock = false; _flushPendingInvoiceSave(); };
-            } catch(e) { _invoiceSaveLock = false; _flushPendingInvoiceSave(); }
+                tx.onerror = (ev) => {
+                    _invoiceSaveLock = false; _flushPendingInvoiceSave();
+                    // FIX: surface IDB errors to the caller via onError callback
+                    if (typeof onError === 'function') { try { onError(ev); } catch(_e) {} }
+                };
+            } catch(e) {
+                _invoiceSaveLock = false; _flushPendingInvoiceSave();
+                if (typeof onError === 'function') { try { onError(e); } catch(_e) {} }
+            }
         });
     }
     function _writeInvoicesToLocalStorage(ledger) {
@@ -198,9 +209,9 @@ const StorageModule = (() => {
     }
     function _flushPendingInvoiceSave() {
         if (_invoiceSavePending !== null) {
-            const { ledger, onSuccess } = _invoiceSavePending;
+            const { ledger, onSuccess, onError } = _invoiceSavePending;
             _invoiceSavePending = null;
-            _doIDBInvoiceWrite(ledger, onSuccess);
+            _doIDBInvoiceWrite(ledger, onSuccess, onError);
         }
     }
 
@@ -505,7 +516,10 @@ const StorageModule = (() => {
     }
 
     // ── Held bills ────────────────────────────────────────────────────────────
-    function saveHeldBills(bills) {
+    // FIX (missing-await): saveHeldBills now accepts an optional onComplete callback.
+    // Callers that clear the cart or update UI after saving should pass those steps
+    // as onComplete so they run only after IDB has actually committed the write.
+    function saveHeldBills(bills, onComplete) {
         // FIX (split-brain): localStorage must only be written AFTER IDB confirms.
         // Previously localStorage was updated synchronously before the IDB transaction
         // completed.  If the page closed between those two writes IDB held stale data;
@@ -513,10 +527,11 @@ const StorageModule = (() => {
         // bill on the next boot.  Now localStorage is written inside tx.oncomplete so
         // both stores are always consistent.  The tx.onerror / catch branches still
         // write localStorage as a last-resort fallback so data is never lost on IDB failure.
+        const _done = () => { if (typeof onComplete === 'function') { try { onComplete(); } catch(_e) {} } };
         _whenReady(idb => {
             if (!idb) {
                 try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(e) {}
-                return;
+                _done(); return;
             }
             try {
                 const tx = idb.transaction(['heldBills'], 'readwrite');
@@ -524,12 +539,15 @@ const StorageModule = (() => {
                 st.clear().onsuccess = () => bills.forEach(b => { const copy = Object.assign({}, b); delete copy._hbIdx; st.put(copy); });
                 tx.oncomplete = () => {
                     try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(e) {}
+                    _done();
                 };
                 tx.onerror = () => {
                     try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(e) {}
+                    _done();
                 };
             } catch(e) {
                 try { localStorage.setItem('pharma_held_bills', JSON.stringify(bills)); } catch(_e) {}
+                _done();
             }
         });
         if (isSyncEnabled) { _supaSet(getSupaKey('heldBills'), JSON.stringify(bills)).catch(() => {}); }

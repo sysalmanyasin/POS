@@ -278,7 +278,6 @@ async function _processInvoiceItem(item, deviceUuid) {
     try { _syncedSet = new Set(JSON.parse(localStorage.getItem(_syncedKey) || '[]')); }
     catch(_) { _syncedSet = new Set(); }
     if (_syncedSet.has(invoice_number)) {
-        console.log('[SyncEngine] Idempotency: invoice', invoice_number, 'already processed — removing from queue.');
         await StorageModule.deleteFromSyncQueue(item.queueId);
         return;
     }
@@ -308,13 +307,9 @@ async function _processInvoiceItem(item, deviceUuid) {
                 // If processedItems is absent this is an old-format record; discard
                 // safely (cannot retry without risking double-deduction).
                 if (Array.isArray(item.processedItems)) {
-                    console.log('[SyncEngine] Invoice', invoice_number,
-                        'already on server with partial tracking —',
-                        item.processedItems.length, 'item(s) already processed. Retrying remaining.');
                     // Fall through — do NOT return; the line-item loop will skip
                     // items already in processedItems.
                 } else {
-                    console.log('[SyncEngine] Invoice', invoice_number, 'already exists on server — removing from queue.');
                     await StorageModule.deleteFromSyncQueue(item.queueId);
                     return;
                 }
@@ -384,7 +379,6 @@ async function _processInvoiceItem(item, deviceUuid) {
                     // Non-fatal: log but continue — inventory deduction still proceeds
                     console.warn('[SyncEngine] invoice_items upsert failed for', invoice_number, iiErr);
                 } else {
-                    console.log('[SyncEngine] invoice_items written:', itemRows.length, 'rows for', invoice_number);
                 }
             } catch (iiNetErr) {
                 console.warn('[SyncEngine] invoice_items network error for', invoice_number, iiNetErr);
@@ -400,7 +394,6 @@ async function _processInvoiceItem(item, deviceUuid) {
     // For edits: only update the invoice row + invoice_items, then clean up.
     const _isEditInvoice = !!(coreInvoiceFields.is_edit);
     if (_isEditInvoice) {
-        console.log('[SyncEngine] is_edit=true for', invoice_number, '— skipping RPC deductions (stock handled via movements).');
         try { await StorageModule.deleteFromSyncQueue(item.queueId); } catch(_e) {}
         await _writeSyncLogEntry({ invoices_pushed: 1, movements_pushed: 0, invoices_pulled: 0, movements_pulled: 0 });
         return;
@@ -429,7 +422,6 @@ async function _processInvoiceItem(item, deviceUuid) {
 
         // Skip items already deducted in a previous attempt (see processedItems above)
         if (_processedItems.has(product_code)) {
-            console.log('[SyncEngine] Skipping already-processed item', product_code, 'in', invoice_number);
             continue;
         }
 
@@ -594,8 +586,6 @@ async function _callDeductInventoryAtomic(productCode, quantity, deviceUuid, inv
 // deductions to arrive at the RPC without a movement classification, so refunds
 // retried after a conflict were recorded on the server as a generic SALE type.
 async function _handleOccConflict(productCode, quantity, deviceUuid, invoiceNumber, movementType) {
-    console.log('[SyncEngine] OCC conflict on', productCode, '— fetching fresh server state…');
-
     let serverRow;
     try {
         const { data, error } = await _dbSelect(
@@ -1950,7 +1940,6 @@ async function repairInvoiceItems() {
                 patched + ' remote invoices patched locally, ' +
                 skipped + ' skipped, ' + failed + ' errors.';
     if (typeof showToast === 'function') showToast(msg);
-    console.log('[repairInvoiceItems]', msg);
 }
 
 async function forceSyncNow() {
@@ -2992,7 +2981,7 @@ async function _gpExecuteNetworkPurge() {
     const log = (msg) => {
         const el = document.getElementById('gpProgress');
         if (el) { el.textContent += msg + '\n'; el.scrollTop = el.scrollHeight; }
-        try { console.log('[GlobalPurge]', msg); } catch (_e) {}
+        
     };
 
     // 1. Broadcast GLOBAL_PURGE command to all devices via cloud key (5-min window).
@@ -3417,7 +3406,7 @@ async function _cpExecute() {
     const log = (msg) => {
         const el = document.getElementById('cpProgress');
         if (el) { el.textContent += msg + '\n'; el.scrollTop = el.scrollHeight; }
-        try { console.log('[CloudPurge]', msg); } catch (_e) {}
+        
     };
 
 

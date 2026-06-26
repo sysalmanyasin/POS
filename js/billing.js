@@ -59,7 +59,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             throw new Error('No Supabase credentials configured — skipping cloud sync.');
         }
         await _supaProbe();
-        console.log('[Supabase] Cloud sync ready.');
         StorageModule.setSyncEnabled(true);
         StorageModule.set('_supabase_sync_on', 'true');
         updateSupabaseSyncUI('syncing');
@@ -831,12 +830,16 @@ function confirmHoldBill() {
     const tag = (document.getElementById('holdLabelInput').value || '').trim() || ('Bill #' + (temporaryHeldBills.length + 1));
     const bill = { tag, timestamp: _nowPKTTimeStr(), items: JSON.parse(JSON.stringify(activeCartItems)), discountPct: parseFloat(discountInput.value) || 0, customerName: document.getElementById('customerNameInput').value.trim(), customerPhone: document.getElementById('customerPhoneInput').value.trim() };
     temporaryHeldBills.push(bill);
-    StorageModule.saveHeldBills(temporaryHeldBills);
-    activeCartItems = []; selectedProductRef = null; discountInput.value = '0';
-    document.getElementById('customerNameInput').value = ''; document.getElementById('customerPhoneInput').value = ''; document.getElementById('cashReceivedInput').value = ''; document.getElementById('changeRow').style.display = 'none';
-    StorageModule.clearCart();
-    cancelHoldBill(); renderInvoiceUI(); updateStatsCounters();
-    showToast('📋 Bill held as "' + _escHtml(tag) + '"');
+    // FIX (missing-await): cart must only be cleared after IDB confirms the held-bill
+    // write. Previously the cart was wiped synchronously before the async IDB write
+    // completed, so a crash/refresh in that window could silently lose the held bill.
+    StorageModule.saveHeldBills(temporaryHeldBills, function() {
+        activeCartItems = []; selectedProductRef = null; discountInput.value = '0';
+        document.getElementById('customerNameInput').value = ''; document.getElementById('customerPhoneInput').value = ''; document.getElementById('cashReceivedInput').value = ''; document.getElementById('changeRow').style.display = 'none';
+        StorageModule.clearCart();
+        cancelHoldBill(); renderInvoiceUI(); updateStatsCounters();
+        showToast('📋 Bill held as "' + _escHtml(tag) + '"');
+    });
 }
 document.getElementById('holdLabelInput').addEventListener('keydown', e => { if (e.key === 'Enter') confirmHoldBill(); if (e.key === 'Escape') cancelHoldBill(); });
 document.getElementById('holdLabelModal').addEventListener('click', e => { if (e.target === document.getElementById('holdLabelModal')) cancelHoldBill(); });
@@ -855,12 +858,16 @@ function _doRecallHeld(index) {
     document.getElementById('customerNameInput').value  = bill.customerName  || '';
     document.getElementById('customerPhoneInput').value = bill.customerPhone || '';
     temporaryHeldBills.splice(index, 1);
-    StorageModule.saveHeldBills(temporaryHeldBills);
-    updateStatsCounters(); renderHeldBillsTable();
-    syncDiscountPresetButtons(parseFloat(discountInput.value) || 0);
-    switchTab('billingView', document.getElementById('tab-billing'));
-    renderInvoiceUI();
-    showToast('↩ Bill "' + _escHtml(bill.tag) + '" recalled.');
+    // FIX (missing-await): UI update and tab switch must run after IDB confirms.
+    // Doing them synchronously meant a refresh right after recall could restore
+    // the bill from IDB (still present) and lose the active cart items.
+    StorageModule.saveHeldBills(temporaryHeldBills, function() {
+        updateStatsCounters(); renderHeldBillsTable();
+        syncDiscountPresetButtons(parseFloat(discountInput.value) || 0);
+        switchTab('billingView', document.getElementById('tab-billing'));
+        renderInvoiceUI();
+        showToast('↩ Bill "' + _escHtml(bill.tag) + '" recalled.');
+    });
 }
 
 // =========================================================================
@@ -1121,13 +1128,17 @@ async function finalizeAndPrintBill() {
         _hasManual ? { isManual: true } : {}, isEdit ? { editedAt: nowStr } : {}
     );
     const _newLedger = savedInvoicesLedger.concat([_newInvoice]);
-    try {
-        StorageModule.saveInvoices(_newLedger, function(committedLedger) {
+    // FIX (async error): saveInvoices() returns synchronously, so a try/catch
+    // around it can never catch IDB write errors. Use the onError callback instead.
+    StorageModule.saveInvoices(
+        _newLedger,
+        function(committedLedger) {
             savedInvoicesLedger = committedLedger; // memory updated only on IDB success
-        });
-    } catch(e) {
-        showToast('⚠️ Storage full! Export a backup from Data Hub to free space.', true);
-    }
+        },
+        function(_err) {
+            showToast('⚠️ Storage full! Export a backup from Data Hub to free space.', true);
+        }
+    );
 
     // ── STEP 4: Assemble the atomic queue payload ─────────────────────────
     // FIX (RPC Payload Compiler): deduct_inventory_atomic JSONB parser demands

@@ -152,7 +152,6 @@ async function _loadLedgerCloud() {
                 })).concat(_localOnly);
 
                 if (_localOnly.length > 0) {
-                    console.log('[history] Preserved', _localOnly.length, 'unsynced local invoice(s).');
                 }
                 if (data.length >= 500 && typeof showToast === 'function') {
                     showToast('ℹ️ Showing latest 500 invoices. Use date filters or Reporting for older records.', false);
@@ -1055,10 +1054,12 @@ function renderHeldBillsTable() {
         const btn = document.createElement('button'); btn.className = 'hbc-recall'; btn.textContent = '↩ Recall'; btn.onclick = () => recallHeldBill(i);
         const discardBtn = document.createElement('button'); discardBtn.className = 'hbc-discard'; discardBtn.textContent = '✕'; discardBtn.title = 'Discard';
         discardBtn.onclick = () => {
-            showConfirmModal('Discard "' + bill.tag + '"? This cannot be undone.', () => {
+            showConfirmModal('Discard "' + _escHtml(bill.tag) + '"? This cannot be undone.', () => {
                 temporaryHeldBills.splice(i, 1);
-                StorageModule.saveHeldBills(temporaryHeldBills);
-                updateStatsCounters(); renderHeldBillsTable(); showToast('Held bill discarded.');
+                // FIX (missing-await): UI must update only after IDB confirms the discard.
+                StorageModule.saveHeldBills(temporaryHeldBills, function() {
+                    updateStatsCounters(); renderHeldBillsTable(); showToast('Held bill discarded.');
+                });
             }, null, 'Discard', true);
         };
         card.appendChild(ico); card.appendChild(info); card.appendChild(btn); card.appendChild(discardBtn);
