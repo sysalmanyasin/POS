@@ -1849,11 +1849,17 @@ async function loadBaseInventoryData() {
         return;
     }
 
+    // Loading the base catalog is a "start fresh" operation: purge whatever
+    // local inventory/movement data already exists first, so the base
+    // catalog becomes the sole source of truth rather than being merged
+    // on top of old/stale records.
+    try {
+        if (typeof _purgeLocalInventoryData === 'function') _purgeLocalInventoryData();
+    } catch (_e) {}
+    window.masterInventoryDB = [];
+
     const imported = data.map(function(item) {
         const code = String(item.code || '').toUpperCase().trim();
-        const existingItem = Array.isArray(window.masterInventoryDB)
-            ? window.masterInventoryDB.find(function(p) { return p.code === code; })
-            : null;
         return {
             code,
             name: String(item.name || '').trim(),
@@ -1863,8 +1869,7 @@ async function loadBaseInventoryData() {
             company: String(item.company || '').trim(),
             supplier: String(item.supplier || '').trim(),
             packDetails: String(item.packDetails || '').trim(),
-            version: existingItem && typeof existingItem.version === 'number'
-                ? existingItem.version + 1 : 1
+            version: 1
         };
     }).filter(function(item) { return item.code && item.name; });
 
@@ -1873,23 +1878,7 @@ async function loadBaseInventoryData() {
         return;
     }
 
-    const _existingDB = Array.isArray(window.masterInventoryDB) ? window.masterInventoryDB : [];
-    const _importMap = new Map(imported.map(item => [item.code, item]));
-    const _mergedDB = _existingDB.map(existing => {
-        const incoming = _importMap.get(existing.code);
-        if (incoming) {
-            return Object.assign({}, existing, incoming,
-                { company:  incoming.company  || existing.company  || '',
-                  supplier: incoming.supplier || existing.supplier || '' });
-        }
-        return existing;
-    });
-    const _existingCodes = new Set(_existingDB.map(p => p.code));
-    imported.filter(item => !_existingCodes.has(item.code)).forEach(item => _mergedDB.push(item));
-    const _newCount = _mergedDB.length - _existingDB.length;
-    const _updCount = imported.length - _newCount;
-
-    window.masterInventoryDB = _mergedDB;
+    window.masterInventoryDB = imported;
     try {
         saveInventoryToDB(window.masterInventoryDB);
         try { localStorage.setItem('_pharma_inv_dirty', 'true'); } catch(_e) {}
@@ -1898,8 +1887,8 @@ async function loadBaseInventoryData() {
         if (typeof _invReady !== 'undefined' && _invReady) renderInventoryView();
         else if (typeof showInventoryPlaceholder === 'function') showInventoryPlaceholder();
         if (typeof updateHdrStats === 'function') updateHdrStats();
-        showToast('✅ Base catalog loaded: ' + _updCount + ' updated, ' + _newCount + ' new products.');
-        if (typeof _showPostCsvPushPopup === 'function') _showPostCsvPushPopup(_updCount + _newCount);
+        showToast('✅ Base catalog loaded fresh: ' + imported.length + ' products (previous inventory purged).');
+        if (typeof _showPostCsvPushPopup === 'function') _showPostCsvPushPopup(imported.length);
     } catch(e) {
         showToast('⚠️ Error saving base catalog: ' + (e && e.message ? e.message : String(e)), true);
     }
@@ -2104,24 +2093,26 @@ async function _executePurgeInventory() {
     
     const enteredPassword = passwordInput.value.trim();
     
-    // Hash the entered password with SHA256
-    let hashedInput;
+    // Use the SAME verification logic as the rest of the app (auth.js _verifyPassword):
+    // salted hash ('FDPP_v1_' + password), localStorage fallback, and the
+    // zero-setup default of 12345678 when no password has ever been set.
+    // (Previously this duplicated a plain, unsalted SHA-256 check with no
+    // default-password fallback, which is why a correct 12345678 entry was
+    // rejected as "Invalid password" in offline mode.)
+    let isValid = false;
     try {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(enteredPassword);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        hashedInput = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        if (typeof _verifyPassword === 'function') {
+            isValid = await _verifyPassword(enteredPassword);
+        } else {
+            // Extremely defensive fallback in case auth.js failed to load
+            isValid = enteredPassword === '12345678';
+        }
     } catch (e) {
-        if (statusEl) { statusEl.textContent = '❌ Password hashing failed.'; statusEl.style.color = '#dc2626'; }
+        if (statusEl) { statusEl.textContent = '❌ Password verification failed.'; statusEl.style.color = '#dc2626'; }
         return;
     }
     
-    // Compare with stored hash in localStorage
-    // Primary key: 'sys_admin_pass_hash' (written by auth.js _persistPassword)
-    // Fallback: 'pharma_master_password_hash' (legacy key used by older builds)
-    const storedHash = StorageModule.get('sys_admin_pass_hash') || localStorage.getItem('pharma_master_password_hash');
-    if (!storedHash || hashedInput !== storedHash) {
+    if (!isValid) {
         if (statusEl) { statusEl.textContent = '❌ Invalid password.'; statusEl.style.color = '#dc2626'; }
         showToast('❌ Invalid master password. Purge cancelled.', true);
         return;
